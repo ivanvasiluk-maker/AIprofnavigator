@@ -1,0 +1,7 @@
+aiogram==3.4.1
+openai
+python-dotenv
+xhtml2pdf
+fastapi
+uvicorn
+playwright
