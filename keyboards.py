@@ -285,15 +285,23 @@ def question_options_keyboard(options: list[str]) -> ReplyKeyboardMarkup | None:
     if not cleaned:
         return None
 
+    # Keep explicit completion actions visible as the last dedicated row.
+    done_options = [item for item in cleaned if "готово" in item.lower()]
+    regular_options = [item for item in cleaned if item not in done_options]
+
     rows: list[list[KeyboardButton]] = []
     row: list[KeyboardButton] = []
-    for item in cleaned[:15]:
+    for item in regular_options[:14]:
         row.append(KeyboardButton(text=item))
         if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
+
+    if done_options:
+        rows.append([KeyboardButton(text=done_options[0])])
+
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
