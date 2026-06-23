@@ -103,6 +103,7 @@ _INTERVIEW_PSYCH_DONE = "✅ Психология: готово"
 _INTERVIEW_SOCIAL_DONE = "✅ Соцблок: готово"
 _INTERVIEW_ENERGY_DONE = "✅ Энергия: готово"
 _INTERVIEW_PRIORITIES_DONE = "✅ Приоритеты: готово"
+_INTERVIEW_INTEGRATION_DONE = "✅ Интеграция: готово"
 
 
 def _resume_debug_log(message: Message, step: str, **fields: object) -> None:
@@ -543,7 +544,7 @@ def format_follow_up_questions(analysis: dict, lang: str) -> str:
         options = row.get("options", [])
         numbered.append(f"{q_num}. {question_text}")
         if isinstance(options, list) and options:
-            numbered.append("   варианты: " + " | ".join(str(item) for item in options[:6]))
+            numbered.append("   варианты: " + " | ".join(str(item) for item in options[:10]))
     return _clip("\n".join(["=== Уточняющее интервью ===", "Ответьте коротко и по пунктам:", ""] + numbered + ["", t(lang, "questions_cta")]))
 
 
@@ -566,7 +567,7 @@ def _question_prompt(analysis: dict, index: int, lang: str) -> str:
     options = row.get("options", [])
     lines = [f"=== Вопрос {safe_index + 1}/{total} ===", f"№{q_num}. {text}"]
     if isinstance(options, list) and options:
-        lines.append("Варианты: " + " | ".join(str(item) for item in options[:6]))
+        lines.append("Варианты: " + " | ".join(str(item) for item in options[:10]))
         lines.append(t(lang, "question_answer_hint_with_options"))
     else:
         lines.append(t(lang, "question_answer_hint_no_options"))
@@ -838,6 +839,30 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
             "force_options_keyboard": True,
         },
         {
+            "question": "Уровень внутреннего ресурса сейчас:",
+            "options": [
+                "Высокий: есть силы и устойчивость",
+                "Средний: двигаюсь, но бывают просадки",
+                "Низкий: тяжело держать темп, нужен щадящий режим",
+            ],
+        },
+        {
+            "question": "Интеграция в стране (до 4): что уже есть у вас сейчас?",
+            "options": [
+                "Использую местный язык в быту",
+                "Есть местные знакомые/друзья",
+                "Есть профессиональные контакты",
+                "Участвую в сообществах",
+                "Понимаю, как устроен рынок труда",
+                "Живу в стране больше 12 месяцев",
+                _INTERVIEW_INTEGRATION_DONE,
+            ],
+            "multi_key": "integration",
+            "done_text": _INTERVIEW_INTEGRATION_DONE,
+            "max_select": 4,
+            "force_options_keyboard": True,
+        },
+        {
             "question": "Карьерные приоритеты (до 4): что для вас сейчас важнее всего?",
             "options": [
                 "Быстро выйти на доход",
@@ -994,7 +1019,8 @@ def _set_mvp_questions(
             opts = row.get("options", [])
             if not isinstance(opts, list):
                 opts = []
-            selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:6]})
+            max_options = 15 if row.get("force_options_keyboard") else 6
+            selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:max_options]})
             seen.add(q_key)
             if len(selected) >= regular_limit:
                 break
@@ -1011,10 +1037,11 @@ def _set_mvp_questions(
         opts = row.get("options", [])
         if not isinstance(opts, list):
             opts = []
+        max_options = 15 if row.get("force_options_keyboard") else 6
         normalized_row: dict[str, object] = {
             "id": idx,
             "question": str(row.get("question", "")).strip() or f"Вопрос {idx}",
-            "options": opts[:6],
+            "options": opts[:max_options],
         }
         if row.get("multi_key"):
             normalized_row["multi_key"] = str(row.get("multi_key"))
@@ -1546,10 +1573,12 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         selected_barriers=[],
         selected_fears=[],
         selected_social_state=[],
+        selected_integration_state=[],
         selected_energy_sources=[],
         selected_career_priorities=[],
         psych_selected=[],
         social_selected=[],
+        integration_selected=[],
         energy_selected=[],
         priorities_selected=[],
     )
@@ -1587,6 +1616,11 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         social_block = "\n".join(f"- {item}" for item in social_state[:5] if str(item).strip())
         if social_block:
             answers_text = (answers_text + "\n\nСоциальная поддержка и миграционный статус:\n" + social_block).strip()
+    integration_state = data.get("selected_integration_state") or []
+    if isinstance(integration_state, list) and integration_state:
+        integration_state_block = "\n".join(f"- {item}" for item in integration_state[:4] if str(item).strip())
+        if integration_state_block:
+            answers_text = (answers_text + "\n\nИнтеграция пользователя:\n" + integration_state_block).strip()
     energy_sources = data.get("selected_energy_sources") or []
     if isinstance(energy_sources, list) and energy_sources:
         energy_block = "\n".join(f"- {item}" for item in energy_sources[:5] if str(item).strip())
@@ -1885,6 +1919,8 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_fears"] = selected_values[:5]
                 if multi_key == "social":
                     update_payload["selected_social_state"] = selected_values[:5]
+                if multi_key == "integration":
+                    update_payload["selected_integration_state"] = selected_values[:4]
                 if multi_key == "energy":
                     update_payload["selected_energy_sources"] = selected_values[:5]
                 if multi_key == "priorities":
@@ -1919,6 +1955,8 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_fears"] = selected_values[:5]
                 if multi_key == "social":
                     update_payload["selected_social_state"] = selected_values[:5]
+                if multi_key == "integration":
+                    update_payload["selected_integration_state"] = selected_values[:4]
                 if multi_key == "energy":
                     update_payload["selected_energy_sources"] = selected_values[:5]
                 if multi_key == "priorities":

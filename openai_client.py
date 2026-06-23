@@ -1153,20 +1153,34 @@ class CareerOpenAIClient:
         self._inject_signal_roles(report, story_analysis, answers_text)
         self._ensure_strategy_mode(report)
         self._ensure_social_integration(report)
-        self._ensure_resource_level(report)
-        self._ensure_integration_level(report)
+        self._ensure_resource_level(report, answers_text)
+        self._ensure_integration_level(report, answers_text)
         self._ensure_competency_signals(report, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
 
         return report
 
-    def _ensure_resource_level(self, report: dict[str, Any]) -> None:
+    def _ensure_resource_level(self, report: dict[str, Any], answers_text: str = "") -> None:
         digital_human = report.get("digital_human")
         if not isinstance(digital_human, dict):
             return
         current = str(report.get("resource_level", "")).strip().lower()
         if current in {"high", "medium", "low"}:
             return
+
+        answers_low = str(answers_text or "").lower()
+        if any(token in answers_low for token in [
+            "уровень внутреннего ресурса", "внутреннего ресурса", "resource",
+        ]):
+            if any(token in answers_low for token in ["низкий", "тяжело держать темп", "выгора", "нет сил"]):
+                report["resource_level"] = "low"
+                return
+            if any(token in answers_low for token in ["средний", "бывают просадки", "иногда тяжело"]):
+                report["resource_level"] = "medium"
+                return
+            if any(token in answers_low for token in ["высокий", "есть силы", "устойчивость"]):
+                report["resource_level"] = "high"
+                return
 
         readiness = digital_human.get("career_readiness") if isinstance(digital_human.get("career_readiness"), dict) else {}
         urgency = str((readiness or {}).get("urgency", "")).lower()
@@ -1183,10 +1197,28 @@ class CareerOpenAIClient:
             return
         report["resource_level"] = "high"
 
-    def _ensure_integration_level(self, report: dict[str, Any]) -> None:
+    def _ensure_integration_level(self, report: dict[str, Any], answers_text: str = "") -> None:
         current = str(report.get("integration_level", "")).strip().lower()
         if current in {"high", "medium", "low"}:
             return
+
+        answers_low = str(answers_text or "").lower()
+        if "интеграция" in answers_low:
+            integration_score = 0
+            for token in [
+                "местный язык", "профессиональные контакты", "местные знакомые", "сообщества", "рынок труда", "больше 12 месяцев",
+            ]:
+                if token in answers_low:
+                    integration_score += 1
+            if integration_score >= 4:
+                report["integration_level"] = "high"
+                return
+            if integration_score >= 2:
+                report["integration_level"] = "medium"
+                return
+            if integration_score >= 1:
+                report["integration_level"] = "low"
+                return
 
         integration = report.get("social_integration") if isinstance(report.get("social_integration"), dict) else {}
         score = 0
