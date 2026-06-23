@@ -1695,6 +1695,10 @@ def _question_reply_markup(analysis: dict, index: int):
         return None
     if row.get("force_options_keyboard"):
         options = row.get("options", [])
+        done_text = str(row.get("done_text") or "✅ Готово")
+        # Ensure done_text is in options for multi-select questions
+        if done_text and done_text not in options:
+            options = list(options) + [done_text]
         return question_options_keyboard(options if isinstance(options, list) else [])
     q_text = str(row.get("question", "")).lower()
     if any(token in q_text for token in ["формат работы", "ближе", "50/50", "документ", "люд"]):
