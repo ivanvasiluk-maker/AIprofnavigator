@@ -1169,17 +1169,21 @@ class CareerOpenAIClient:
             return
 
         answers_low = str(answers_text or "").lower()
+        # Derive from explicit resource/psycho-emotional answers
         if any(token in answers_low for token in [
-            "уровень внутреннего ресурса", "внутреннего ресурса", "resource",
+            "уровень внутреннего ресурса", "внутреннего ресурса", "чувствуете", "чувствую"
         ]):
-            if any(token in answers_low for token in ["низкий", "тяжело держать темп", "выгора", "нет сил"]):
+            low_signals = ["тяжело держать темп", "слишком много неопределённост", "выгора", "нет сил", "слишком много неопределен"]
+            medium_signals = ["бывают просадки", "иногда тяжело", "двигаюсь, но", "просадки и сомнения"]
+            high_signals = ["есть силы и устойчивост", "уверенно, есть план", "чувствую себя уверенн"]
+            if any(token in answers_low for token in low_signals):
                 report["resource_level"] = "low"
                 return
-            if any(token in answers_low for token in ["средний", "бывают просадки", "иногда тяжело"]):
-                report["resource_level"] = "medium"
-                return
-            if any(token in answers_low for token in ["высокий", "есть силы", "устойчивость"]):
+            if any(token in answers_low for token in high_signals):
                 report["resource_level"] = "high"
+                return
+            if any(token in answers_low for token in medium_signals):
+                report["resource_level"] = "medium"
                 return
 
         readiness = digital_human.get("career_readiness") if isinstance(digital_human.get("career_readiness"), dict) else {}
@@ -1203,13 +1207,21 @@ class CareerOpenAIClient:
             return
 
         answers_low = str(answers_text or "").lower()
-        if "интеграция" in answers_low:
+        if "интеграция" in answers_low or "меньше 6 месяцев" in answers_low or "6–12 месяцев" in answers_low or "1–2 года" in answers_low or "больше 2 лет" in answers_low:
             integration_score = 0
             for token in [
                 "местный язык", "профессиональные контакты", "местные знакомые", "сообщества", "рынок труда", "больше 12 месяцев",
+                "больше 2 лет", "1–2 года", "понимаю, как устроен",
             ]:
                 if token in answers_low:
                     integration_score += 1
+            # Time-in-country boost
+            if "больше 2 лет" in answers_low:
+                integration_score += 2
+            elif "1–2 года" in answers_low or "6–12 месяцев" in answers_low:
+                integration_score += 1
+            elif "меньше 6 месяцев" in answers_low:
+                integration_score = max(0, integration_score - 1)
             if integration_score >= 4:
                 report["integration_level"] = "high"
                 return

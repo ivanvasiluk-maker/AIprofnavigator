@@ -839,11 +839,37 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
             "force_options_keyboard": True,
         },
         {
-            "question": "Уровень внутреннего ресурса сейчас:",
+            "question": "Как вы себя чувствуете в текущей ситуации?",
             "options": [
-                "Высокий: есть силы и устойчивость",
-                "Средний: двигаюсь, но бывают просадки",
-                "Низкий: тяжело держать темп, нужен щадящий режим",
+                "Чувствую себя уверенно, есть план",
+                "Двигаюсь, но бывают просадки и сомнения",
+                "Тяжело держать темп, нужен щадящий режим",
+                "Сложно начать — слишком много неопределённости",
+            ],
+        },
+        {
+            "question": "Что сейчас даётся вам сложнее всего в карьерной ситуации?",
+            "options": [],
+        },
+        {
+            "question": "Что помогает вам справляться со стрессом и неопределённостью?",
+            "options": [],
+        },
+        {
+            "question": "Есть ли люди, на поддержку которых вы можете рассчитывать в этот период?",
+            "options": [
+                "Да, семья или партнёр рядом",
+                "Да, есть друзья или коллеги",
+                "Почти нет — в основном справляюсь сам(а)",
+            ],
+        },
+        {
+            "question": "Сколько времени вы живёте в нынешней стране?",
+            "options": [
+                "Меньше 6 месяцев",
+                "6–12 месяцев",
+                "1–2 года",
+                "Больше 2 лет",
             ],
         },
         {
@@ -1621,6 +1647,12 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         integration_state_block = "\n".join(f"- {item}" for item in integration_state[:4] if str(item).strip())
         if integration_state_block:
             answers_text = (answers_text + "\n\nИнтеграция пользователя:\n" + integration_state_block).strip()
+    # Derive integration_level from time in country if mentioned in answers
+    answers_text_low = answers_text.lower()
+    if "больше 2 лет" in answers_text_low or "более 2 лет" in answers_text_low:
+        pass  # Will be caught by _ensure_integration_level
+    elif "меньше 6 месяцев" in answers_text_low or "менее 6 месяц" in answers_text_low:
+        pass  # Will be caught by _ensure_integration_level
     energy_sources = data.get("selected_energy_sources") or []
     if isinstance(energy_sources, list) and energy_sources:
         energy_block = "\n".join(f"- {item}" for item in energy_sources[:5] if str(item).strip())
