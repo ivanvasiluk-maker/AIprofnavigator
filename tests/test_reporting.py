@@ -11,6 +11,11 @@ class ReportingUtilsTests(unittest.TestCase):
                 "main_asset": "Документооборот и координация",
                 "main_risk": "Финансовое давление",
             },
+            "resource_level": "medium",
+            "integration_level": "low",
+            "energy_sources": ["Организация процессов", "Анализ"],
+            "career_priorities": ["Быстро выйти на доход", "Найти устойчивость и баланс"],
+            "competency_signals": ["Коммуникация", "Организация процессов"],
             "career_decision": {
                 "recommended_main_path": "Administrative Assistant",
                 "why_this_path": "Быстрый вход с текущими навыками",
@@ -22,6 +27,13 @@ class ReportingUtilsTests(unittest.TestCase):
         self.assertIn("Ваш Career GPS", summary)
         self.assertIn("Кто вы сейчас", summary)
         self.assertIn("Что не обнулилось", summary)
+        self.assertIn("Источники энергии", summary)
+        self.assertIn("Карьерные приоритеты", summary)
+        self.assertIn("STAR-компетенции", summary)
+        self.assertIn("Уровень ресурса", summary)
+        self.assertIn("medium (средний)", summary)
+        self.assertIn("Уровень интеграции", summary)
+        self.assertIn("low (низкий)", summary)
         self.assertIn("Рекомендуемый маршрут", summary)
         self.assertIn("Открыть 5 вакансий", summary)
 
@@ -40,6 +52,11 @@ class ReportingUtilsTests(unittest.TestCase):
                 "why_this_path": "Минимальный разрыв",
                 "avoid_for_now": "Долгая смена профессии",
             },
+            "resource_level": "high",
+            "integration_level": "medium",
+            "energy_sources": ["Организация процессов", "Работа с людьми"],
+            "career_priorities": ["Быстро выйти на доход", "Работать по специальности"],
+            "competency_signals": ["Лидерство", "Коммуникация"],
             "market_analysis": [
                 {
                     "profession": "Back-office Specialist",
@@ -64,6 +81,13 @@ class ReportingUtilsTests(unittest.TestCase):
         self.assertIn("Профиль ситуации", html)
         self.assertIn("Анализ возможностей", html)
         self.assertIn("План действий", html)
+        self.assertIn("Источники энергии", html)
+        self.assertIn("Карьерные приоритеты", html)
+        self.assertIn("STAR-компетенции", html)
+        self.assertIn("Уровень ресурса", html)
+        self.assertIn("high (высокий)", html)
+        self.assertIn("Уровень интеграции", html)
+        self.assertIn("medium (средний)", html)
 
     def test_offer_text_contains_zero_price(self) -> None:
         offer = build_offer_text()

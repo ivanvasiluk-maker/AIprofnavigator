@@ -1,0 +1,12 @@
+{
+  "users": {
+    "99999": {
+      "public_user_id": "20260623-0001",
+      "created_at": "2026-06-23T09:55:52.204021+00:00",
+      "first_source": "deploy_test"
+    }
+  },
+  "daily_counters": {
+    "20260623": 1
+  }
+}

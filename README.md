@@ -185,6 +185,70 @@ OPENAI_TRANSCRIBE_MODEL=whisper-1
 For deployment, set these variables in your hosting platform secrets manager.
 Do not store real keys in repository files.
 
+Behavior analytics to Google Sheets (anonymized):
+
+```bash
+GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/<deployment-id>/exec
+ANALYTICS_REGISTRY_PATH=reports/user_registry.json
+ANALYTICS_EVENTS_LOG_PATH=reports/behavior_events.jsonl
+```
+
+- `user_registry.json` stores mapping `telegram_user_id -> public_user_id` locally.
+- `public_user_id` format is `YYYYMMDD-XXXX` (example: `20260619-0007`).
+- Google Sheets receives only anonymized behavior events by `public_user_id`.
+
+### Google Sheets quick setup
+
+1. Create a Google Sheet, for example `NextYou Behavior`.
+2. In Google Sheets open `Extensions -> Apps Script`.
+3. Paste and deploy a simple webhook script:
+
+```javascript
+function doPost(e) {
+   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('events')
+      || SpreadsheetApp.getActiveSpreadsheet().insertSheet('events');
+   const row = JSON.parse(e.postData.contents || '{}');
+
+   if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+         'timestamp',
+         'public_user_id',
+         'event',
+         'state',
+         'action',
+         'user_mode',
+         'language',
+         'days_since_first_seen',
+         'meta_json'
+      ]);
+   }
+
+   sheet.appendRow([
+      row.timestamp || '',
+      row.public_user_id || '',
+      row.event || '',
+      row.state || '',
+      row.action || '',
+      row.user_mode || '',
+      row.language || '',
+      row.days_since_first_seen || 0,
+      JSON.stringify(row.meta || {})
+   ]);
+
+   return ContentService
+      .createTextOutput(JSON.stringify({ ok: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+}
+```
+
+4. Deploy as Web App and copy the URL to `GOOGLE_SHEETS_WEBHOOK_URL`.
+5. Restart bot and verify that events are appended to `events` sheet.
+
+Notes:
+- For behavior analysis per user, use `public_user_id` (stable, pseudonymous identifier).
+- `source_tag` from Telegram deep link `/start <tag>` is saved in local registry and can be sent in event meta.
+- If legal policy requires, do not push raw Telegram identifiers to external sheets.
+
 PDF font quality (Cyrillic):
 
 ```bash

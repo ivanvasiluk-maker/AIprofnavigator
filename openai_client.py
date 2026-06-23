@@ -366,6 +366,11 @@ FINAL_REPORT_SCHEMA = {
             "required": ["environment", "people", "communities", "opportunities", "contribution"],
             "additionalProperties": False,
         },
+        "resource_level": {"type": "string"},
+        "integration_level": {"type": "string"},
+        "energy_sources": {"type": "array", "items": {"type": "string"}},
+        "career_priorities": {"type": "array", "items": {"type": "string"}},
+        "competency_signals": {"type": "array", "items": {"type": "string"}},
         "closing_message": {"type": "string"},
     },
     "required": [
@@ -384,6 +389,11 @@ FINAL_REPORT_SCHEMA = {
         "career_barriers",
         "barrier_landscape",
         "social_integration",
+        "resource_level",
+        "integration_level",
+        "energy_sources",
+        "career_priorities",
+        "competency_signals",
         "closing_message",
     ],
     "additionalProperties": False,
@@ -817,6 +827,23 @@ FINAL_REPORT_FALLBACK = {
         "opportunities": ["Регулярно мониторить локальные программы, курсы и вакансии."],
         "contribution": ["Использовать волонтёрские/локальные проекты как мост к первым контактам."],
     },
+    "resource_level": "medium",
+    "integration_level": "medium",
+    "energy_sources": [
+        "Организация процессов",
+        "Работа с людьми",
+        "Анализ",
+    ],
+    "career_priorities": [
+        "Быстро выйти на доход",
+        "Сохранить профессиональный статус",
+        "Найти устойчивость и баланс",
+    ],
+    "competency_signals": [
+        "Коммуникация",
+        "Организация процессов",
+        "Решение проблем",
+    ],
     "closing_message": "У вас уже есть материал для перехода. Следующая задача не искать идеальный путь, а собрать первый работающий маршрут и проверить его на рынке за неделю.",
 }
 
@@ -1080,6 +1107,8 @@ class CareerOpenAIClient:
         selected_barriers: list[str] | None = None,
         selected_fears: list[str] | None = None,
         selected_psych_markers: list[str] | None = None,
+        selected_energy_sources: list[str] | None = None,
+        selected_career_priorities: list[str] | None = None,
         language: str = "ru",
     ) -> dict[str, Any]:
         language = "be" if language == "be" else "ru"
@@ -1090,6 +1119,8 @@ class CareerOpenAIClient:
             selected_barriers=json.dumps(selected_barriers or [], ensure_ascii=False),
             selected_fears=json.dumps(selected_fears or [], ensure_ascii=False),
             selected_psych_markers=json.dumps(selected_psych_markers or [], ensure_ascii=False),
+            selected_energy_sources=json.dumps(selected_energy_sources or [], ensure_ascii=False),
+            selected_career_priorities=json.dumps(selected_career_priorities or [], ensure_ascii=False),
             answers=answers,
             language=language,
         )
@@ -1122,9 +1153,87 @@ class CareerOpenAIClient:
         self._inject_signal_roles(report, story_analysis, answers_text)
         self._ensure_strategy_mode(report)
         self._ensure_social_integration(report)
+        self._ensure_resource_level(report)
+        self._ensure_integration_level(report)
+        self._ensure_competency_signals(report, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
 
         return report
+
+    def _ensure_resource_level(self, report: dict[str, Any]) -> None:
+        digital_human = report.get("digital_human")
+        if not isinstance(digital_human, dict):
+            return
+        current = str(report.get("resource_level", "")).strip().lower()
+        if current in {"high", "medium", "low"}:
+            return
+
+        readiness = digital_human.get("career_readiness") if isinstance(digital_human.get("career_readiness"), dict) else {}
+        urgency = str((readiness or {}).get("urgency", "")).lower()
+        support_needed = str((readiness or {}).get("support_needed", "")).lower()
+
+        if any(token in support_needed for token in ["high", "выс", "силь", "тяж"]):
+            report["resource_level"] = "low"
+            return
+        if any(token in urgency for token in ["high", "выс", "urgent", "сроч"]):
+            report["resource_level"] = "low"
+            return
+        if any(token in support_needed for token in ["medium", "сред", "умер"]):
+            report["resource_level"] = "medium"
+            return
+        report["resource_level"] = "high"
+
+    def _ensure_integration_level(self, report: dict[str, Any]) -> None:
+        current = str(report.get("integration_level", "")).strip().lower()
+        if current in {"high", "medium", "low"}:
+            return
+
+        integration = report.get("social_integration") if isinstance(report.get("social_integration"), dict) else {}
+        score = 0
+        for key in ("environment", "people", "communities", "opportunities", "contribution"):
+            value = integration.get(key)
+            if isinstance(value, list) and any(str(item).strip() for item in value):
+                score += 1
+
+        if score >= 4:
+            report["integration_level"] = "high"
+        elif score >= 2:
+            report["integration_level"] = "medium"
+        else:
+            report["integration_level"] = "low"
+
+    def _ensure_competency_signals(self, report: dict[str, Any], story_analysis: dict[str, Any], answers_text: str) -> None:
+        blob = " ".join(
+            [
+                str(story_analysis.get("current_identity", "")),
+                str(story_analysis.get("story_summary", "")),
+                " ".join(str(item) for item in story_analysis.get("experience_snapshot", []) if isinstance(item, str)),
+                " ".join(str(item) for item in story_analysis.get("skills", []) if isinstance(item, str)),
+                str(answers_text or ""),
+            ]
+        ).lower()
+
+        patterns = [
+            ("Лидерство", ["руковод", "lead", "team lead", "head of", "директор", "управлял команд"]),
+            ("Управление", ["управлен", "manager", "менеджер", "координа", "координиров", "организов"]),
+            ("Обучение", ["обучал", "настав", "ментор", "тренир", "передавал опыт"]),
+            ("Переговоры", ["переговор", "догов", "согласов", "коммуникац", "взаимодейств"]),
+            ("Коммуникация", ["коммуникац", "клиент", "общен", "контакт", "связ"]),
+            ("Организация процессов", ["организа", "процесс", "workflow", "операц", "дедлайн", "срок"]),
+            ("Аналитика", ["аналит", "excel", "таблиц", "данн", "отчет", "report"]),
+            ("Решение проблем", ["решил", "решала", "problem", "сложн", "кризис", "исправ"]),
+            ("Стратегическое мышление", ["стратег", "план", "roadmap", "развит", "долгосроч"]),
+        ]
+
+        existing = [str(item).strip() for item in report.get("competency_signals", []) if str(item).strip()] if isinstance(report.get("competency_signals"), list) else []
+        extracted = [label for label, markers in patterns if any(marker in blob for marker in markers)]
+        if not extracted and isinstance(existing, list) and existing:
+            report["competency_signals"] = list(dict.fromkeys(existing))[:6]
+            return
+        merged = list(dict.fromkeys([*existing, *extracted]))
+        if not merged:
+            merged = ["Коммуникация", "Организация процессов", "Решение проблем"]
+        report["competency_signals"] = merged[:6]
 
     def _deduplicate_directions(self, report: dict[str, Any]) -> None:
         market = report.get("market_analysis")

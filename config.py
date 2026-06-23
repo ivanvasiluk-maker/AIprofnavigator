@@ -16,6 +16,9 @@ class Settings:
         self.report_base_url = os.getenv("REPORT_BASE_URL", "http://localhost:8000/reports")
         self.report_pdf_engine = os.getenv("REPORT_PDF_ENGINE", "auto")
         self.report_pdf_font_path = os.getenv("REPORT_PDF_FONT_PATH", "").strip()
+        self.google_sheets_webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
+        self.analytics_registry_path = os.getenv("ANALYTICS_REGISTRY_PATH", "reports/user_registry.json").strip()
+        self.analytics_events_log_path = os.getenv("ANALYTICS_EVENTS_LOG_PATH", "reports/behavior_events.jsonl").strip()
 
     def validate(self) -> None:
         missing = []

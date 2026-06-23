@@ -22,8 +22,21 @@ from keyboards import (
 )
 from localization import t
 from states import CareerFlow
+from utils.analytics import ensure_public_user_id, log_behavior_event
 
 router = Router()
+
+
+def _extract_start_source(message_text: str) -> str:
+    raw = (message_text or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    source = parts[1].strip()
+    # Keep only compact source tags for analytics/deep links.
+    return source[:120]
 
 
 def _apply_mode_settings(mode_key: str, preferred_input: str = "text") -> dict:
@@ -74,7 +87,14 @@ def _apply_mode_settings(mode_key: str, preferred_input: str = "text") -> dict:
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    source_tag = _extract_start_source(message.text or "")
+    public_user_id = ensure_public_user_id(
+        message.from_user.id if message.from_user else message.chat.id,
+        source_tag=source_tag,
+    )
     await state.update_data(
+        public_user_id=public_user_id,
+        source_tag=source_tag,
         language=LANG_RU,
         lang=LANG_RU,
         interaction_profile={},
@@ -89,6 +109,13 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         pace="normal",
         detail_preference="balanced",
         preferred_input="unknown",
+    )
+    await log_behavior_event(
+        public_user_id=public_user_id,
+        event="session_started",
+        state_name="SELECTING_PACE",
+        language=LANG_RU,
+        meta={"source_tag": source_tag} if source_tag else {},
     )
     await state.set_state(CareerFlow.SELECTING_PACE)
     await message.answer(t(LANG_RU, "start_intro"))
@@ -142,6 +169,16 @@ async def choose_pace(message: Message, state: FSMContext) -> None:
         detail_preference=profile["detail_preference"],
         preferred_input=profile["preferred_input"],
     )
+    data = await state.get_data()
+    public_user_id = str(data.get("public_user_id") or ensure_public_user_id(message.from_user.id if message.from_user else message.chat.id))
+    await log_behavior_event(
+        public_user_id=public_user_id,
+        event="pace_selected",
+        state_name="WAITING_STORY",
+        action=choice,
+        user_mode=str(mode_settings["user_mode"]),
+        language=LANG_RU,
+    )
     await state.set_state(CareerFlow.waiting_for_story)
     await message.answer(t(LANG_RU, key))
     await message.answer(t(LANG_RU, "contract_anchor"), reply_markup=input_method_keyboard())
@@ -190,6 +227,16 @@ async def choose_voice_pace(message: Message, state: FSMContext) -> None:
         pace=profile["pace"],
         detail_preference=profile["detail_preference"],
         preferred_input="voice",
+    )
+    data = await state.get_data()
+    public_user_id = str(data.get("public_user_id") or ensure_public_user_id(message.from_user.id if message.from_user else message.chat.id))
+    await log_behavior_event(
+        public_user_id=public_user_id,
+        event="voice_pace_selected",
+        state_name="WAITING_STORY",
+        action=choice,
+        user_mode=str(mode_settings["user_mode"]),
+        language=LANG_RU,
     )
     await state.set_state(CareerFlow.waiting_for_story)
     await message.answer(t(LANG_RU, key))

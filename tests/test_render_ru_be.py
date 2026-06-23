@@ -4,7 +4,17 @@ from unittest.mock import AsyncMock, patch
 
 from reportlab.pdfgen import canvas
 
-from handlers.career import _decode_resume_bytes, _start_questions_module, format_final_report, format_follow_up_questions, format_story_snapshot
+from handlers.career import (
+    SEGMENT_ENTREPRENEUR,
+    SEGMENT_WORKER,
+    _decode_resume_bytes,
+    _detect_user_segment,
+    _set_mvp_questions,
+    _start_questions_module,
+    format_final_report,
+    format_follow_up_questions,
+    format_story_snapshot,
+)
 from handlers import voice as voice_handlers
 from keyboards import (
     INPUT_TEXT,
@@ -277,17 +287,75 @@ class CareerGpsRenderTests(unittest.TestCase):
                 "behavioral_risk": "не отправляет отклики",
                 "first_counter_action": "отправить 3 отклика",
             },
+            "resource_level": "medium",
+            "integration_level": "low",
+            "energy_sources": ["Организация процессов", "Работа с людьми"],
+            "career_priorities": ["Быстро выйти на доход", "Работать по специальности"],
+            "competency_signals": ["Коммуникация", "Организация процессов", "Решение проблем"],
             "closing_message": "Сконцентрируйтесь на первом работающем маршруте.",
         }
         chunks = format_final_report(report, "ru")
         self.assertEqual(len(chunks), 3)
         self.assertIn("Ваш профиль ситуации", chunks[0])
         self.assertIn("Что не обнулилось", chunks[0])
+        self.assertIn("Источники энергии", chunks[0])
+        self.assertIn("Карьерные приоритеты", chunks[0])
+        self.assertIn("STAR-компетенции", chunks[0])
+        self.assertIn("Уровень ресурса", chunks[0])
+        self.assertIn("medium (средний)", chunks[0])
+        self.assertIn("Уровень интеграции", chunks[0])
+        self.assertIn("low (низкий)", chunks[0])
         self.assertIn("Перевод вашего опыта на язык рынка Польши", chunks[0])
         self.assertIn("Карьерные мосты", chunks[0])
         self.assertIn("Почему вы застряли", chunks[0])
         self.assertIn("Решение по карте перехода", chunks[1])
         self.assertIn("Сегодня (до 15 минут)", chunks[2])
+
+    def test_detect_user_segment_for_worker_profile(self) -> None:
+        story = "Работал сварщиком на производстве, умею работать на станке и вести смену бригады."
+
+        segment = _detect_user_segment(story)
+
+        self.assertEqual(segment, SEGMENT_WORKER)
+
+    def test_detect_user_segment_for_entrepreneur_profile(self) -> None:
+        story = "Я предприниматель, развивал свой бизнес и управлял продажами как founder."
+
+        segment = _detect_user_segment(story)
+
+        self.assertEqual(segment, SEGMENT_ENTREPRENEUR)
+
+    def test_set_mvp_questions_includes_worker_specific_questions(self) -> None:
+        analysis = {"follow_up_questions": []}
+
+        result = _set_mvp_questions(
+            analysis,
+            limit=10,
+            mode="calm_steps",
+            story_text="",
+            user_segment=SEGMENT_WORKER,
+        )
+        questions = result.get("follow_up_questions", [])
+        texts = [str(row.get("question", "")) for row in questions if isinstance(row, dict)]
+
+        self.assertTrue(any("делать руками" in text.lower() for text in texts))
+        self.assertTrue(any("оборудован" in text.lower() or "техник" in text.lower() for text in texts))
+
+    def test_set_mvp_questions_includes_energy_and_priorities_blocks(self) -> None:
+        analysis = {"follow_up_questions": []}
+
+        result = _set_mvp_questions(
+            analysis,
+            limit=12,
+            mode="calm_steps",
+            story_text="",
+            user_segment=SEGMENT_WORKER,
+        )
+        questions = result.get("follow_up_questions", [])
+        texts = [str(row.get("question", "")).lower() for row in questions if isinstance(row, dict)]
+
+        self.assertTrue(any("источники энергии" in text for text in texts))
+        self.assertTrue(any("карьерные приоритеты" in text for text in texts))
 
 
 class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):

@@ -81,6 +81,7 @@ from keyboards import (
 from localization import t
 from openai_client import ai_client
 from states import CareerFlow
+from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.reporting import build_telegram_summary, generate_pdf_report
 from utils.reporting import generate_report_files
 
@@ -100,6 +101,8 @@ _BARRIER_OPTION_BY_LOWER = {item.strip().lower(): item for item in ALL_PSYCH_BAR
 _BARRIER_DONE_BY_LOWER = {item.strip().lower() for item in ALL_PSYCH_BARRIER_DONE}
 _INTERVIEW_PSYCH_DONE = "✅ Психология: готово"
 _INTERVIEW_SOCIAL_DONE = "✅ Соцблок: готово"
+_INTERVIEW_ENERGY_DONE = "✅ Энергия: готово"
+_INTERVIEW_PRIORITIES_DONE = "✅ Приоритеты: готово"
 
 
 def _resume_debug_log(message: Message, step: str, **fields: object) -> None:
@@ -132,6 +135,139 @@ def _schedule_reminder(bot, chat_id: int, language: str, delay_seconds: int = 17
 
 def _user_language(data: dict) -> str:
     return data.get("language") or data.get("lang", "ru")
+
+
+def _ensure_public_id(data: dict, message: Message) -> str:
+    existing = str(data.get("public_user_id") or "").strip()
+    if existing:
+        return existing
+    source_id = message.from_user.id if message.from_user else message.chat.id
+    return ensure_public_user_id(source_id)
+
+
+async def _track_event(
+    message: Message,
+    state: FSMContext,
+    event: str,
+    *,
+    action: str = "",
+    meta: dict | None = None,
+) -> None:
+    data = await state.get_data()
+    public_user_id = _ensure_public_id(data, message)
+    user_mode = str(data.get("user_mode") or "")
+    lang = _user_language(data)
+    state_name = (await state.get_state()) or ""
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    previous_state_name = str(data.get("state_name") or "")
+    previous_event_dt = None
+    previous_state_entered_dt = None
+    previous_event_raw = str(data.get("last_event_at") or "")
+    previous_state_entered_raw = str(data.get("state_entered_at") or "")
+
+    try:
+        previous_event_dt = datetime.fromisoformat(previous_event_raw) if previous_event_raw else None
+        if previous_event_dt and previous_event_dt.tzinfo is None:
+            previous_event_dt = previous_event_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        previous_event_dt = None
+
+    try:
+        previous_state_entered_dt = datetime.fromisoformat(previous_state_entered_raw) if previous_state_entered_raw else None
+        if previous_state_entered_dt and previous_state_entered_dt.tzinfo is None:
+            previous_state_entered_dt = previous_state_entered_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        previous_state_entered_dt = None
+
+    state_changed = previous_state_name != state_name and previous_state_name != ""
+    if state_changed or not previous_state_entered_dt:
+        state_entered_at_iso = now_iso
+        state_entered_dt = now
+    else:
+        state_entered_at_iso = previous_state_entered_dt.isoformat()
+        state_entered_dt = previous_state_entered_dt
+
+    event_meta = dict(meta or {})
+    if previous_event_dt is not None:
+        event_meta["seconds_from_prev_event"] = round(max(0.0, (now - previous_event_dt).total_seconds()), 2)
+    if state_entered_dt is not None:
+        event_meta["seconds_in_current_state"] = round(max(0.0, (now - state_entered_dt).total_seconds()), 2)
+    if state_changed and previous_state_entered_dt is not None:
+        event_meta["previous_state"] = previous_state_name
+        event_meta["previous_state_duration_seconds"] = round(max(0.0, (now - previous_state_entered_dt).total_seconds()), 2)
+
+    if not data.get("public_user_id"):
+        await state.update_data(public_user_id=public_user_id)
+    await log_behavior_event(
+        public_user_id=public_user_id,
+        event=event,
+        state_name=state_name,
+        action=action,
+        user_mode=user_mode,
+        language=lang,
+        meta=event_meta,
+    )
+    await state.update_data(
+        public_user_id=public_user_id,
+        state_name=state_name,
+        state_entered_at=state_entered_at_iso,
+        last_event_at=now_iso,
+    )
+
+
+def _build_system_offer_text(data: dict) -> str:
+    public_user_id = str(data.get("public_user_id") or "").strip()
+    snapshot = behavior_offer_snapshot(public_user_id) if public_user_id else {"insights": [], "top_actions": [], "stats": {}}
+    insights = list(snapshot.get("insights", []))
+    if not insights:
+        insights = [
+            "Вы стабильно проходите шаги по карте и возвращаетесь к действиям.",
+            "Выбираете прикладные действия, а не абстрактные советы.",
+        ]
+    top_actions = snapshot.get("top_actions", []) if isinstance(snapshot, dict) else []
+    praise_lines: list[str] = []
+    for action, count in top_actions[:2]:
+        praise_lines.append(f"- действие «{action}» у вас сработало {count} раз;")
+
+    stats = snapshot.get("stats", {}) if isinstance(snapshot, dict) else {}
+    if int(stats.get("today_step_opened", 0)) > 0:
+        praise_lines.append("- вы возвращались к первому шагу, то есть умеете запускать движение в реальности;")
+    if int(stats.get("report_generated", 0)) > 0:
+        praise_lines.append("- вы дошли до готовой карты, это редкий показатель дисциплины на старте;")
+    if not praise_lines:
+        praise_lines.append("- вы не теряете контакт с процессом и умеете делать короткие рабочие шаги;")
+
+    days_live = days_since_first_seen(public_user_id) if public_user_id else 0
+    day_prefix = ""
+    if days_live >= 3:
+        day_prefix = (
+            "Сегодня уже 3+ день теста. Это важная точка: обычно люди теряют темп именно сейчас, "
+            "поэтому оффер ниже про удержание темпа и рост результата.\n\n"
+        )
+
+    insights_block = "\n".join(f"- {item}" for item in insights[:3])
+    praise_block = "\n".join(praise_lines[:3])
+    return (
+        f"{day_prefix}Что уже видно по вашему поведению:\n"
+        f"{insights_block}\n\n"
+        "Что у вас уже получается хорошо:\n"
+        f"{praise_block}\n\n"
+        "Что это значит:\n"
+        "- вы уже умеете делать конкретные действия, не только читать советы;\n"
+        "- у вас есть ресурс на системный прогресс, если есть внешняя структура и обратная связь.\n\n"
+        "Бесплатная версия:\n"
+        "- 1-2 запуска в кризис;\n"
+        "- упражнения без глубокой обратной связи и без регулярной аналитики;\n"
+        "- помогает стартовать, но не гарантирует удержание ритма.\n\n"
+        "Платная версия NextYou:\n"
+        "- мы анализируем ваши действия каждую неделю и показываем, где вы застреваете;\n"
+        "- адаптивно перестраиваем карту под ваш реальный прогресс;\n"
+        "- выдаем новый стек навыков и новый рабочий фокус под текущий этап;\n"
+        "- держим дисциплину и доводим до результата через систему сопровождения.\n\n"
+        "Мы продаем не набор навыков, а систему, которая изучает именно вас и дает то, что нужно вам сейчас."
+    )
 
 
 def _classify_answer_length(text: str) -> str:
@@ -472,6 +608,256 @@ def _questions_calm() -> list[dict[str, object]]:
     ]
 
 
+def _questions_support() -> list[dict[str, object]]:
+    return [
+        {
+            "id": 1,
+            "question": "Что сейчас больше всего тревожит: деньги, работа, язык, страх отказов, усталость, дети, документы или одиночество?",
+            "options": ["деньги", "работа", "язык", "страх отказов", "усталость", "дети", "документы", "одиночество"],
+        },
+        {"id": 2, "question": "Какой минимальный доход нужен в месяц?", "options": []},
+        {
+            "id": 3,
+            "question": "Как быстро нужен доход?",
+            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Могу менять траекторию год"],
+        },
+        {"id": 4, "question": "Какие языки и уровень?", "options": []},
+        {"id": 5, "question": "Чего точно не хотите делать?", "options": []},
+        {"id": 6, "question": "Какие варианты работы вам кажутся хоть немного возможными?", "options": []},
+        {"id": 7, "question": "Сколько часов в неделю реально готовы уделять поиску или обучению?", "options": []},
+        {
+            "id": 8,
+            "question": "Как вы живёте и адаптируетесь в новой стране: кто рядом, какие барьеры, есть ли сообщество?",
+            "options": ["семья", "друзья", "профконтакты", "сообщество", "пока никто"],
+        },
+    ]
+
+
+SEGMENT_WORKER = "worker_production"
+SEGMENT_SERVICE = "service_care"
+SEGMENT_LOGISTICS = "logistics_transport"
+SEGMENT_OFFICE = "office_staff"
+SEGMENT_SPECIALIST = "specialist_expert"
+SEGMENT_LEADER = "leader"
+SEGMENT_ENTREPRENEUR = "entrepreneur"
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join((value or "").lower().replace("ё", "е").split())
+
+
+def _detect_user_segment(story_text: str, analysis: dict | None = None) -> str:
+    raw = [story_text]
+    if isinstance(analysis, dict):
+        raw.append(str(analysis.get("story_summary", "")))
+        raw.append(str(analysis.get("current_identity", "")))
+        raw.extend(str(item) for item in analysis.get("experience_snapshot", []) if isinstance(item, str))
+    text = _normalize_text("\n".join(raw))
+
+    entrepreneur_markers = (
+        "предприним", "собственн", "свой бизнес", "ип", "фоп", "founder", "startup", "бизнес"
+    )
+    leader_markers = (
+        "руковод", "началь", "директор", "team lead", "head of", "управлял команд", "менеджер отдела"
+    )
+    worker_markers = (
+        "свар", "монтаж", "слесар", "токар", "электрик", "строит", "производств", "цех", "завод", "шве", "станок"
+    )
+    service_markers = (
+        "сидел", "уход", "няня", "caregiver", "медсестр", "санитар", "официант", "бариста", "повар", "салон", "beauty"
+    )
+    logistics_markers = (
+        "водител", "курьер", "доставка", "логист", "склад", "warehouse", "погрузчик", "forklift", "экспедитор", "транспорт"
+    )
+    office_markers = (
+        "офис", "документооборот", "секретар", "администратор", "ассистент", "бухгалтер", "back-office", "operations coordinator"
+    )
+    specialist_markers = (
+        "аналит", "разработ", "инженер", "маркетолог", "юрист", "дизайнер", "архитектор", "эксперт", "специалист"
+    )
+
+    if any(marker in text for marker in entrepreneur_markers):
+        return SEGMENT_ENTREPRENEUR
+    if any(marker in text for marker in leader_markers):
+        return SEGMENT_LEADER
+    if any(marker in text for marker in worker_markers):
+        return SEGMENT_WORKER
+    if any(marker in text for marker in logistics_markers):
+        return SEGMENT_LOGISTICS
+    if any(marker in text for marker in service_markers):
+        return SEGMENT_SERVICE
+    if any(marker in text for marker in office_markers):
+        return SEGMENT_OFFICE
+    if any(marker in text for marker in specialist_markers):
+        return SEGMENT_SPECIALIST
+    return SEGMENT_SPECIALIST
+
+
+def _segment_label(segment: str) -> str:
+    labels = {
+        SEGMENT_WORKER: "Рабочие профессии и производство",
+        SEGMENT_SERVICE: "Сервис и уход за людьми",
+        SEGMENT_LOGISTICS: "Логистика и транспорт",
+        SEGMENT_OFFICE: "Офисные сотрудники",
+        SEGMENT_SPECIALIST: "Специалисты и эксперты",
+        SEGMENT_LEADER: "Руководители",
+        SEGMENT_ENTREPRENEUR: "Предприниматели",
+    }
+    return labels.get(segment, labels[SEGMENT_SPECIALIST])
+
+
+def _segment_common_questions() -> list[dict[str, object]]:
+    return [
+        {"id": 1, "question": "Какой минимальный доход нужен в месяц?", "options": []},
+        {
+            "id": 2,
+            "question": "Как быстро нужен первый стабильный доход?",
+            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Можно дольше"],
+        },
+        {"id": 3, "question": "Какие языки вы используете и на каком уровне?", "options": []},
+        {"id": 4, "question": "Сколько часов в неделю реально готовы выделять на поиск/обучение?", "options": []},
+    ]
+
+
+def _segment_questions(segment: str) -> list[dict[str, object]]:
+    if segment == SEGMENT_WORKER:
+        return [
+            {"id": 1, "question": "Что вы умеете делать руками лучше всего?", "options": []},
+            {"id": 2, "question": "С каким оборудованием или техникой уже работали?", "options": []},
+            {"id": 3, "question": "Есть ли права, сертификаты, допуски или лицензии?", "options": []},
+            {"id": 4, "question": "Готовы ли к сменной работе и какой график вам подходит?", "options": ["готов(а) к сменам", "только дневной", "гибкий график"]},
+            {"id": 5, "question": "Готовы ли к переезду или работе в соседнем городе?", "options": ["да", "нет", "только в пределах региона"]},
+            {"id": 6, "question": "Есть ли опыт обучения новичков или управления бригадой?", "options": []},
+        ]
+    if segment == SEGMENT_SERVICE:
+        return [
+            {"id": 1, "question": "В какой сфере сервиса или ухода у вас больше всего опыта?", "options": []},
+            {"id": 2, "question": "С какими категориями людей вам комфортнее работать?", "options": ["дети", "взрослые", "пожилые", "клиенты в сервисе"]},
+            {"id": 3, "question": "Какие задачи у вас получаются лучше: уход, сервис, организация, коммуникация?", "options": []},
+            {"id": 4, "question": "Есть ли у вас профильные курсы, сертификаты, медкнижка?", "options": []},
+            {"id": 5, "question": "Готовы ли к сменному графику и работе в выходные?", "options": ["да", "нет", "частично"]},
+            {"id": 6, "question": "Что готовы изучить в ближайшие 1-2 месяца для роста?", "options": []},
+        ]
+    if segment == SEGMENT_LOGISTICS:
+        return [
+            {"id": 1, "question": "Какой у вас опыт в логистике, транспорте или складе?", "options": []},
+            {"id": 2, "question": "Какие категории прав и допуски у вас есть?", "options": []},
+            {"id": 3, "question": "С какими системами или маршрутами работали (TMS, склад, международные рейсы)?", "options": []},
+            {"id": 4, "question": "Готовы ли к ночным сменам, рейсам или плавающему графику?", "options": ["да", "нет", "частично"]},
+            {"id": 5, "question": "Есть ли опыт координации перевозок или управления сменой/складом?", "options": []},
+            {"id": 6, "question": "В какую роль хотите вырасти: диспетчер, координатор, логист, супервайзер?", "options": []},
+        ]
+    if segment == SEGMENT_OFFICE:
+        return [
+            {"id": 1, "question": "Какие офисные процессы вы вели: документы, отчеты, координация, поддержка клиентов?", "options": []},
+            {"id": 2, "question": "Какими инструментами владеете (Excel, CRM, ERP, таблицы)?", "options": []},
+            {"id": 3, "question": "Какой формат ближе: back-office, ассистент, администрирование, координатор?", "options": []},
+            {"id": 4, "question": "Какие задачи хотите исключить из новой роли?", "options": []},
+            {"id": 5, "question": "Готовы ли к гибриду или только удаленно/офлайн?", "options": ["офис", "гибрид", "удаленно"]},
+            {"id": 6, "question": "Есть ли опыт обучения коллег или ведения небольших команд?", "options": []},
+        ]
+    if segment == SEGMENT_LEADER:
+        return [
+            {"id": 1, "question": "Опишите ситуацию, которой в работе особенно гордитесь (S/T/A/R).", "options": []},
+            {"id": 2, "question": "Какую сложную проблему вы решили как руководитель?", "options": []},
+            {"id": 3, "question": "Когда вам приходилось организовывать людей или процессы в кризисе?", "options": []},
+            {"id": 4, "question": "Какой масштаб команды/бюджета/зоны ответственности у вас был?", "options": []},
+            {"id": 5, "question": "Когда вы обучали или наставляли других и какой был результат?", "options": []},
+            {"id": 6, "question": "Какую управленческую роль хотите взять сейчас как основной трек?", "options": []},
+        ]
+    if segment == SEGMENT_ENTREPRENEUR:
+        return [
+            {"id": 1, "question": "Опишите бизнес-ситуацию, где вы добились заметного результата (S/T/A/R).", "options": []},
+            {"id": 2, "question": "Какую самую сложную проблему в бизнесе вам удалось решить?", "options": []},
+            {"id": 3, "question": "Как вы организовывали людей, процессы или продажи?", "options": []},
+            {"id": 4, "question": "Какие компетенции хотите монетизировать в новой стране в первую очередь?", "options": []},
+            {"id": 5, "question": "Готовы ли параллельно идти по найму для стабилизации дохода?", "options": ["да", "нет", "только временно"]},
+            {"id": 6, "question": "В какой модели хотите двигаться: услуги, микро-бизнес, партнерство, консультации?", "options": []},
+        ]
+    return [
+        {"id": 1, "question": "Опишите рабочую ситуацию, которой вы особенно гордитесь (S/T/A/R).", "options": []},
+        {"id": 2, "question": "Какую сложную проблему вы решали и за счет чего получилось?", "options": []},
+        {"id": 3, "question": "Когда вам приходилось организовывать людей или процессы?", "options": []},
+        {"id": 4, "question": "Когда вы обучали или наставляли других?", "options": []},
+        {"id": 5, "question": "В какой тип задач сейчас хотите вложить максимум усилий?", "options": []},
+        {"id": 6, "question": "Какие ограничения нужно учесть, чтобы выйти на доход без срыва?", "options": []},
+    ]
+
+
+def _mandatory_psych_social_questions() -> list[dict[str, object]]:
+    return [
+        {
+            "question": "Психологические барьеры (до 5): отметьте, что мешает начать честно и стабильно.",
+            "options": [
+                "😰 Страх отказа",
+                "🧩 Хаос в голове",
+                "⏳ Прокрастинация",
+                "🔁 Сомнения и откаты",
+                "🪫 Усталость / выгорание",
+                _INTERVIEW_PSYCH_DONE,
+            ],
+            "multi_key": "psych",
+            "done_text": _INTERVIEW_PSYCH_DONE,
+            "max_select": 5,
+            "force_options_keyboard": True,
+        },
+        {
+            "question": "Социальная опора и миграционный статус (до 5): что сейчас про вас наиболее точно?",
+            "options": [
+                "👨‍👩‍👧 Есть семья/партнер рядом",
+                "👥 Есть друзья/контакты",
+                "🌫 Почти нет поддержки",
+                "🧭 Новая миграция (0-6 месяцев)",
+                "🏠 Стадия стабилизации (6+ месяцев)",
+                _INTERVIEW_SOCIAL_DONE,
+            ],
+            "multi_key": "social",
+            "done_text": _INTERVIEW_SOCIAL_DONE,
+            "max_select": 5,
+            "force_options_keyboard": True,
+        },
+        {
+            "question": "Источники энергии (до 5): что дает вам больше энергии в работе?",
+            "options": [
+                "Работа с людьми",
+                "Помощь людям",
+                "Обучение",
+                "Организация процессов",
+                "Управление",
+                "Творчество",
+                "Анализ",
+                "Техника",
+                "Исследования",
+                "Продажи",
+                "Проведение мероприятий",
+                _INTERVIEW_ENERGY_DONE,
+            ],
+            "multi_key": "energy",
+            "done_text": _INTERVIEW_ENERGY_DONE,
+            "max_select": 5,
+            "force_options_keyboard": True,
+        },
+        {
+            "question": "Карьерные приоритеты (до 4): что для вас сейчас важнее всего?",
+            "options": [
+                "Быстро выйти на доход",
+                "Сохранить профессиональный статус",
+                "Сменить профессию",
+                "Открыть собственное дело",
+                "Работать удаленно",
+                "Работать по специальности",
+                "Повысить доход",
+                "Найти устойчивость и баланс",
+                _INTERVIEW_PRIORITIES_DONE,
+            ],
+            "multi_key": "priorities",
+            "done_text": _INTERVIEW_PRIORITIES_DONE,
+            "max_select": 4,
+            "force_options_keyboard": True,
+        },
+    ]
+
+
 def _extract_int_values(text: str) -> list[int]:
     compact = re.sub(r"[^0-9]", " ", text or "")
     values: list[int] = []
@@ -564,20 +950,37 @@ def _question_id(question_row: dict | object, default_index: int) -> int:
     return default_index + 1
 
 
-def _set_mvp_questions(analysis: dict, limit: int = 8, mode: str = "calm_steps", story_text: str = "") -> dict:
+def _set_mvp_questions(
+    analysis: dict,
+    limit: int = 8,
+    mode: str = "calm_steps",
+    story_text: str = "",
+    user_segment: str = SEGMENT_SPECIALIST,
+) -> dict:
     updated = dict(analysis or {})
-    if mode == "fast":
-        base = _questions_fast()
-    elif mode == "support":
-        base = _questions_support()
-    else:
-        base = _questions_calm()
-    deduped = _filter_known_questions(base, story_text)
-    selected: list[dict[str, object]] = list(deduped)
+    segment_specific = _segment_questions(user_segment)
+    common = _segment_common_questions()
+    mode_base = _questions_fast() if mode == "fast" else _questions_support() if mode == "support" else _questions_calm()
+    mandatory = _mandatory_psych_social_questions()
+    mandatory_keys = {str(row.get("question", "")).strip().lower() for row in mandatory}
+    effective_limit = max(int(limit), len(mandatory))
+    regular_limit = max(0, effective_limit - len(mandatory))
 
-    # If model already produced extra relevant questions, append unique ones up to requested limit.
+    merged_base = segment_specific + common + mode_base
+    deduped = _filter_known_questions(merged_base, story_text)
+    selected: list[dict[str, object]] = []
+    for row in deduped:
+        if not isinstance(row, dict):
+            continue
+        q_key = str(row.get("question", "")).strip().lower()
+        if not q_key or q_key in mandatory_keys:
+            continue
+        selected.append(row)
+        if len(selected) >= regular_limit:
+            break
+
     raw_extra = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)}
+    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)} | mandatory_keys
     if isinstance(raw_extra, list):
         for row in raw_extra:
             if not isinstance(row, dict):
@@ -593,13 +996,14 @@ def _set_mvp_questions(analysis: dict, limit: int = 8, mode: str = "calm_steps",
                 opts = []
             selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:6]})
             seen.add(q_key)
-            if len(selected) >= limit:
+            if len(selected) >= regular_limit:
                 break
 
-    if len(selected) < 1:
-        selected = base[:1]
+    if len(selected) < 1 and regular_limit > 0:
+        selected = [deduped[0]] if deduped and isinstance(deduped[0], dict) else []
 
-    trimmed = selected[: max(1, min(limit, len(selected)))]
+    combined = selected[:regular_limit] + mandatory
+    trimmed = combined[: max(1, min(effective_limit, len(combined)))]
     normalized: list[dict[str, object]] = []
     for idx, row in enumerate(trimmed, start=1):
         if not isinstance(row, dict):
@@ -607,9 +1011,22 @@ def _set_mvp_questions(analysis: dict, limit: int = 8, mode: str = "calm_steps",
         opts = row.get("options", [])
         if not isinstance(opts, list):
             opts = []
-        normalized.append({"id": idx, "question": str(row.get("question", "")).strip() or f"Вопрос {idx}", "options": opts[:6]})
+        normalized_row: dict[str, object] = {
+            "id": idx,
+            "question": str(row.get("question", "")).strip() or f"Вопрос {idx}",
+            "options": opts[:6],
+        }
+        if row.get("multi_key"):
+            normalized_row["multi_key"] = str(row.get("multi_key"))
+        if row.get("done_text"):
+            normalized_row["done_text"] = str(row.get("done_text"))
+        if row.get("max_select"):
+            normalized_row["max_select"] = int(row.get("max_select") or 5)
+        if row.get("force_options_keyboard"):
+            normalized_row["force_options_keyboard"] = True
+        normalized.append(normalized_row)
 
-    updated["follow_up_questions"] = normalized[: max(1, min(limit, len(normalized)))]
+    updated["follow_up_questions"] = normalized[: max(1, min(effective_limit, len(normalized)))]
     return updated
 
 
@@ -932,12 +1349,37 @@ def _has_income_signal(report: dict) -> bool:
     return False
 
 
+def _level_label(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    labels = {
+        "high": "высокий",
+        "medium": "средний",
+        "low": "низкий",
+    }
+    return labels.get(normalized, str(value or "не уточнено").strip() or "не уточнено")
+
+
 def report_chunks(report: dict, lang: str) -> dict[str, str]:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     recommendations = report.get("career_recommendations", [])
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     roadmap = report.get("development_map", {})
     week = report.get("weekly_plan", [])
+    energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
+    career_priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
+    competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
+    resource_level_raw = str(report.get("resource_level") or "не уточнено").strip() or "не уточнено"
+    integration_level_raw = str(report.get("integration_level") or "не уточнено").strip() or "не уточнено"
+    resource_level = (
+        f"{resource_level_raw} ({_level_label(resource_level_raw)})"
+        if resource_level_raw != "не уточнено"
+        else resource_level_raw
+    )
+    integration_level = (
+        f"{integration_level_raw} ({_level_label(integration_level_raw)})"
+        if integration_level_raw != "не уточнено"
+        else integration_level_raw
+    )
 
     header = _clip(
         "\n\n".join(
@@ -948,6 +1390,11 @@ def report_chunks(report: dict, lang: str) -> dict[str, str]:
                 f"{t(lang, 'main_risk_label')}:\n{digital_human.get('main_risk') or '-'}",
                 f"Главный барьер:\n{digital_human.get('main_barrier') or '-'}",
                 f"Главный страх:\n{digital_human.get('main_fear') or '-'}",
+                f"Источники энергии:\n{_list_block(energy_sources)}",
+                f"Карьерные приоритеты:\n{_list_block(career_priorities)}",
+                f"STAR-компетенции:\n{_list_block(competency_signals)}",
+                f"Уровень ресурса:\n{resource_level}",
+                f"Уровень интеграции:\n{integration_level}",
                 f"Скрытые сильные стороны:\n{_list_block(digital_human.get('hidden_strengths', []))}",
                 f"{t(lang, 'fast_income_path_label')}:\n{digital_human.get('fastest_path_to_income') or '-'}",
                 f"{t(lang, 'strengths_label')}:\n{_list_block((digital_human.get('skills') or {}).get('professional', []))}",
@@ -1072,15 +1519,24 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     analysis_raw = data.get("story_analysis") or {}
     profile = data.get("interaction_profile") or _build_interaction_profile(story_text, data)
     user_mode = str(data.get("user_mode") or "calm_steps")
+    user_segment = str(data.get("user_segment") or _detect_user_segment(story_text, analysis_raw))
     mode_max = int(data.get("max_questions") or 8)
     cv_uploaded = bool(data.get("cv_uploaded"))
     q_count = min(3, max(1, mode_max)) if cv_uploaded else max(1, mode_max)
-    analysis = _set_mvp_questions(analysis_raw, limit=q_count, mode=user_mode, story_text=story_text)
+    analysis = _set_mvp_questions(
+        analysis_raw,
+        limit=q_count,
+        mode=user_mode,
+        story_text=story_text,
+        user_segment=user_segment,
+    )
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
     quick_report_after_questions = cv_uploaded or user_mode == "fast"
 
     await state.update_data(
         story_analysis=analysis,
+        user_segment=user_segment,
+        user_segment_label=_segment_label(user_segment),
         interaction_profile=profile,
         qa_answers=[],
         qa_index=0,
@@ -1090,8 +1546,12 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         selected_barriers=[],
         selected_fears=[],
         selected_social_state=[],
+        selected_energy_sources=[],
+        selected_career_priorities=[],
         psych_selected=[],
         social_selected=[],
+        energy_selected=[],
+        priorities_selected=[],
     )
 
     if not questions:
@@ -1127,6 +1587,16 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         social_block = "\n".join(f"- {item}" for item in social_state[:5] if str(item).strip())
         if social_block:
             answers_text = (answers_text + "\n\nСоциальная поддержка и миграционный статус:\n" + social_block).strip()
+    energy_sources = data.get("selected_energy_sources") or []
+    if isinstance(energy_sources, list) and energy_sources:
+        energy_block = "\n".join(f"- {item}" for item in energy_sources[:5] if str(item).strip())
+        if energy_block:
+            answers_text = (answers_text + "\n\nИсточники энергии пользователя:\n" + energy_block).strip()
+    career_priorities = data.get("selected_career_priorities") or []
+    if isinstance(career_priorities, list) and career_priorities:
+        priorities_block = "\n".join(f"- {item}" for item in career_priorities[:4] if str(item).strip())
+        if priorities_block:
+            answers_text = (answers_text + "\n\nКарьерные приоритеты пользователя:\n" + priorities_block).strip()
     resume_analysis = data.get("resume_analysis") or {}
     selected_barriers = data.get("selected_barriers") or []
     selected_fears = data.get("selected_fears") or []
@@ -1147,6 +1617,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         selected_barriers=selected_barriers,
         selected_fears=selected_fears,
         selected_psych_markers=selected_psych_markers,
+        selected_energy_sources=energy_sources,
+        selected_career_priorities=career_priorities,
         language=lang,
     )
     chunks = report_chunks(report, lang)
@@ -1156,6 +1628,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         post_result_stage="ready",
         final_report_generated=True,
     )
+    await _track_event(message, state, "report_generated", meta={"has_income_signal": _has_income_signal(report)})
     await state.set_state(CareerFlow.FINAL_READY)
 
     await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
@@ -1179,6 +1652,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
         if pdf_path is not None:
             pdf_report_path = str(pdf_path)
+            await _track_event(message, state, "pdf_ready", meta={"engine": settings.report_pdf_engine})
             await state.set_state(CareerFlow.PDF_READY)
             await message.answer_document(
                 FSInputFile(str(pdf_path)),
@@ -1186,12 +1660,14 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
                 reply_markup=result_actions_keyboard(),
             )
         else:
+            await _track_event(message, state, "pdf_fallback_html", meta={"engine": settings.report_pdf_engine})
             await message.answer_document(
                 FSInputFile(str(html_path)),
                 caption=t(lang, "pdf_send_error"),
                 reply_markup=result_actions_keyboard(),
             )
     except Exception:
+        await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         if html_report_path and os.path.exists(html_report_path):
             await message.answer_document(
                 FSInputFile(html_report_path),
@@ -1208,194 +1684,6 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         pdf_report_path=pdf_report_path,
         html_report_path=html_report_path,
     )
-def _questions_support() -> list[dict[str, object]]:
-    return [
-        {
-            "id": 1,
-            "question": "Что сейчас больше всего тревожит: деньги, работа, язык, страх отказов, усталость, дети, документы или одиночество?",
-            "options": ["деньги", "работа", "язык", "страх отказов", "усталость", "дети", "документы", "одиночество"],
-        },
-        {"id": 2, "question": "Какой минимальный доход нужен в месяц?", "options": []},
-        {
-            "id": 3,
-            "question": "Как быстро нужен доход?",
-            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Могу менять траекторию год"],
-        },
-        {"id": 4, "question": "Какие языки и уровень?", "options": []},
-        {"id": 5, "question": "Чего точно не хотите делать?", "options": []},
-        {"id": 6, "question": "Какие варианты работы вам кажутся хоть немного возможными?", "options": []},
-        {"id": 7, "question": "Сколько часов в неделю реально готовы уделять поиску или обучению?", "options": []},
-        {
-            "id": 8,
-            "question": "Как вы живёте и адаптируетесь в новой стране: кто рядом, какие барьеры, есть ли сообщество?",
-            "options": ["семья", "друзья", "профконтакты", "сообщество", "пока никто"],
-        },
-    ]
-
-
-def _mandatory_psych_social_questions() -> list[dict[str, object]]:
-    return [
-        {
-            "question": "Психологические барьеры (до 5): отметьте, что мешает начать честно и стабильно.",
-            "options": [
-                "😰 Страх отказа",
-                "🧩 Хаос в голове",
-                "⏳ Прокрастинация",
-                "🔁 Сомнения и откаты",
-                "🪫 Усталость / выгорание",
-                _INTERVIEW_PSYCH_DONE,
-            ],
-            "multi_key": "psych",
-            "done_text": _INTERVIEW_PSYCH_DONE,
-            "max_select": 5,
-            "force_options_keyboard": True,
-        },
-        {
-            "question": "Социальная опора и миграционный статус (до 5): что сейчас про вас наиболее точно?",
-            "options": [
-                "👨‍👩‍👧 Есть семья/партнер рядом",
-                "👥 Есть друзья/контакты",
-                "🌫 Почти нет поддержки",
-                "🧭 Новая миграция (0-6 месяцев)",
-                "🏠 Стадия стабилизации (6+ месяцев)",
-                _INTERVIEW_SOCIAL_DONE,
-            ],
-            "multi_key": "social",
-            "done_text": _INTERVIEW_SOCIAL_DONE,
-            "max_select": 5,
-            "force_options_keyboard": True,
-        },
-    ]
-
-
-def _known_story_fields(story_text: str) -> set[str]:
-    low = (story_text or "").lower()
-    known: set[str] = set()
-    if any(token in low for token in ["доход", "зарплат", "евро", "pln", "zl", "зл"]) and _extract_int_values(low):
-        known.add("income")
-    if any(token in low for token in ["2-4", "2–4", "недел", "месяц", "срочно"]):
-        known.add("speed")
-    if any(token in low for token in ["язык", "english", "polish", "русск", "украин", "b1", "a2", "c1"]):
-        known.add("languages")
-    if any(token in low for token in ["документ", "график", "ребен", "дет", "здоров", "физич", "огранич"]):
-        known.add("constraints")
-    if any(token in low for token in ["офис", "hr", "back-office", "поддержк", "сфера", "направлен"]):
-        known.add("directions")
-    if any(token in low for token in ["поддерж", "семья", "друз", "контакт"]):
-        known.add("support")
-    if any(token in low for token in ["сообще", "интеграц", "адаптац", "местн", "клуб", "группа", "community"]):
-        known.add("integration")
-    return known
-
-
-def _filter_known_questions(questions: list[dict[str, object]], story_text: str) -> list[dict[str, object]]:
-    known = _known_story_fields(story_text)
-    if not known:
-        return questions
-    filtered: list[dict[str, object]] = []
-    for row in questions:
-        q_low = str(row.get("question", "")).lower()
-        if "доход" in q_low and "income" in known:
-            continue
-        if "быстро" in q_low and "speed" in known:
-            continue
-        if "язык" in q_low and "languages" in known:
-            continue
-        if any(token in q_low for token in ["огранич", "дет", "здоров", "документ"]) and "constraints" in known:
-            continue
-        if any(token in q_low for token in ["направлен", "сферы"]) and "directions" in known:
-            continue
-        if "поддерж" in q_low and "support" in known:
-            continue
-        if any(token in q_low for token in ["интеграц", "сообще", "адаптац", "барьер"]) and "integration" in known:
-            continue
-        filtered.append(row)
-    return filtered
-
-
-def _question_id(question_row: dict | object, default_index: int) -> int:
-    if isinstance(question_row, dict):
-        try:
-            return int(question_row.get("id", default_index + 1))
-        except Exception:
-            return default_index + 1
-    return default_index + 1
-
-
-def _set_mvp_questions(analysis: dict, limit: int = 8, mode: str = "calm_steps", story_text: str = "") -> dict:
-    updated = dict(analysis or {})
-    if mode == "fast":
-        base = _questions_fast()
-    elif mode == "support":
-        base = _questions_support()
-    else:
-        base = _questions_calm()
-    mandatory = _mandatory_psych_social_questions()
-    mandatory_keys = {str(row.get("question", "")).strip().lower() for row in mandatory}
-    effective_limit = max(int(limit), len(mandatory))
-    regular_limit = max(0, effective_limit - len(mandatory))
-
-    deduped = _filter_known_questions(base, story_text)
-    selected: list[dict[str, object]] = []
-    for row in deduped:
-        if not isinstance(row, dict):
-            continue
-        q_key = str(row.get("question", "")).strip().lower()
-        if not q_key or q_key in mandatory_keys:
-            continue
-        selected.append(row)
-        if len(selected) >= regular_limit:
-            break
-
-    raw_extra = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)} | mandatory_keys
-    if isinstance(raw_extra, list):
-        for row in raw_extra:
-            if not isinstance(row, dict):
-                continue
-            q_text = str(row.get("question", "")).strip()
-            if not q_text:
-                continue
-            q_key = q_text.lower()
-            if q_key in seen:
-                continue
-            opts = row.get("options", [])
-            if not isinstance(opts, list):
-                opts = []
-            selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:6]})
-            seen.add(q_key)
-            if len(selected) >= regular_limit:
-                break
-
-    if len(selected) < 1 and regular_limit > 0:
-        selected = [base[0]] if base and isinstance(base[0], dict) else []
-
-    combined = selected[:regular_limit] + mandatory
-    trimmed = combined[: max(1, min(effective_limit, len(combined)))]
-    normalized: list[dict[str, object]] = []
-    for idx, row in enumerate(trimmed, start=1):
-        if not isinstance(row, dict):
-            continue
-        opts = row.get("options", [])
-        if not isinstance(opts, list):
-            opts = []
-        normalized_row: dict[str, object] = {
-            "id": idx,
-            "question": str(row.get("question", "")).strip() or f"Вопрос {idx}",
-            "options": opts[:6],
-        }
-        if row.get("multi_key"):
-            normalized_row["multi_key"] = str(row.get("multi_key"))
-        if row.get("done_text"):
-            normalized_row["done_text"] = str(row.get("done_text"))
-        if row.get("max_select"):
-            normalized_row["max_select"] = int(row.get("max_select") or 5)
-        if row.get("force_options_keyboard"):
-            normalized_row["force_options_keyboard"] = True
-        normalized.append(normalized_row)
-
-    updated["follow_up_questions"] = normalized[: max(1, min(effective_limit, len(normalized)))]
-    return updated
 
 
 def _question_reply_markup(analysis: dict, index: int):
@@ -1470,6 +1758,12 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         detail_preference=profile.get("detail_preference", "balanced"),
         preferred_input=preferred_input,
     )
+    await _track_event(
+        message,
+        state,
+        "story_submitted",
+        meta={"chars": len(clean), "answer_length": profile.get("answer_length", ""), "tone": profile.get("emotional_tone", "")},
+    )
 
     if profile.get("answer_length") == "long":
         await message.answer(t(lang, "adaptive_q_many"))
@@ -1482,11 +1776,22 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
 
     await message.answer(t(lang, "processing_story"))
     analysis = await ai_client.analyze_story(clean, lang)
+    user_segment = _detect_user_segment(clean, analysis)
     q_count = int(data.get("max_questions") or 8)
     if profile.get("emotional_tone") in {"tired", "angry"}:
         q_count = min(q_count, 3)
-    analysis = _set_mvp_questions(analysis, limit=q_count, mode=selected_mode, story_text=clean)
-    await state.update_data(story_analysis=analysis)
+    analysis = _set_mvp_questions(
+        analysis,
+        limit=q_count,
+        mode=selected_mode,
+        story_text=clean,
+        user_segment=user_segment,
+    )
+    await state.update_data(
+        story_analysis=analysis,
+        user_segment=user_segment,
+        user_segment_label=_segment_label(user_segment),
+    )
     await state.set_state(CareerFlow.ASK_CV)
     await message.answer(t(lang, "story_after_received"))
     await message.answer(t(lang, "step_resume"), reply_markup=resume_choice_keyboard())
@@ -1511,6 +1816,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
     interaction_profile["structure_level"] = _detect_structure_level(clean)
     interaction_profile["agency_level"] = _detect_agency_level(clean)
     await state.update_data(interaction_profile=interaction_profile, interaction_turn=interaction_turn)
+
+    if clean:
+        await _track_event(
+            message,
+            state,
+            "answer_submitted",
+            meta={"question_index": qa_index + 1, "chars": len(clean), "turn": interaction_turn},
+        )
 
     if pending_review:
         await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
@@ -1565,6 +1878,10 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_fears"] = selected_values[:5]
                 if multi_key == "social":
                     update_payload["selected_social_state"] = selected_values[:5]
+                if multi_key == "energy":
+                    update_payload["selected_energy_sources"] = selected_values[:5]
+                if multi_key == "priorities":
+                    update_payload["selected_career_priorities"] = selected_values[:4]
                 await state.update_data(**update_payload)
                 if qa_index < len(questions):
                     await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
@@ -1595,6 +1912,10 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_fears"] = selected_values[:5]
                 if multi_key == "social":
                     update_payload["selected_social_state"] = selected_values[:5]
+                if multi_key == "energy":
+                    update_payload["selected_energy_sources"] = selected_values[:5]
+                if multi_key == "priorities":
+                    update_payload["selected_career_priorities"] = selected_values[:4]
                 await state.update_data(**update_payload)
                 await message.answer(
                     t(
@@ -1850,8 +2171,12 @@ async def restart_flow(message: Message, state: FSMContext) -> None:
         selected_fears=[],
         selected_psych_markers=[],
         selected_social_state=[],
+        selected_energy_sources=[],
+        selected_career_priorities=[],
         psych_selected=[],
         social_selected=[],
+        energy_selected=[],
+        priorities_selected=[],
         report_chunks={},
         skiller_today_task="",
         final_report_generated=False,
@@ -1983,6 +2308,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     report = data.get("final_report") or {}
     chunks = data.get("report_chunks") or report_chunks(report, lang)
     action = (message.text or "").strip()
+    await _track_event(message, state, "result_action_clicked", action=action)
 
     if action in {RESULT_REBUILD, "➕ Добавить детали"}:
         await state.set_state(CareerFlow.WAITING_ROUTE_CHANGES)
@@ -2003,6 +2329,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(chunks.get("week", "-"), reply_markup=result_actions_keyboard())
         await message.answer(chunks.get("today", "-"), reply_markup=result_actions_keyboard())
         await state.set_state(CareerFlow.FINAL_READY)
+        await _track_event(message, state, "details_opened")
         return
 
     if action == RESULT_FIX_CV:
@@ -2016,23 +2343,27 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(chunks.get("market", "-"), reply_markup=result_actions_keyboard())
         await message.answer(chunks.get("translation", "-"), reply_markup=result_actions_keyboard())
         await state.set_state(CareerFlow.FINAL_READY)
+        await _track_event(message, state, "keywords_opened")
         return
 
     if action == RESULT_ANALYZE_FEARS:
         await state.set_state(CareerFlow.BARRIER_ANALYSIS_MENU)
         await message.answer(t(lang, "barrier_practical_intro"), reply_markup=practical_barrier_keyboard())
         await message.answer(chunks.get("barrier", "-"), reply_markup=practical_barrier_keyboard())
+        await _track_event(message, state, "barrier_analysis_opened")
         return
 
     if action == RESULT_SUPPORT:
         await state.set_state(CareerFlow.SUPPORT_OFFER)
-        await message.answer(t(lang, "support_free_intro"), reply_markup=support_mode_keyboard())
+        await message.answer(_build_system_offer_text(data), reply_markup=support_mode_keyboard())
         await message.answer(t(lang, "support_free_hint"), reply_markup=support_mode_keyboard())
+        await _track_event(message, state, "support_offer_opened")
         return
 
     if action == RESULT_THINK:
         await state.set_state(CareerFlow.THINKING_REMINDER)
         await message.answer(t(lang, "offer_think_reply"), reply_markup=think_reminder_keyboard())
+        await _track_event(message, state, "thinking_mode_opened")
         return
 
     await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
@@ -2105,6 +2436,8 @@ async def process_route_changes_input(message: Message, state: FSMContext, text:
         selected_barriers=data.get("selected_barriers") or [],
         selected_fears=data.get("selected_fears") or [],
         selected_psych_markers=data.get("selected_psych_markers") or [],
+        selected_energy_sources=data.get("selected_energy_sources") or [],
+        selected_career_priorities=data.get("selected_career_priorities") or [],
         language=lang,
     )
     chunks = report_chunks(report, lang)
@@ -2204,15 +2537,18 @@ async def handle_support_offer_actions(message: Message, state: FSMContext) -> N
     chunks = data.get("report_chunks") or report_chunks(report, lang)
     action = (message.text or "").strip()
     if action == RESULT_MY_MAP:
+        await _track_event(message, state, "support_map_opened", action=action)
         await message.answer(t(lang, "support_map_reply"), reply_markup=support_mode_keyboard())
         await message.answer(chunks.get("month_roadmap", "-"), reply_markup=support_mode_keyboard())
         await message.answer(chunks.get("week", "-"), reply_markup=support_mode_keyboard())
         return
     if action == RESULT_TODAY_STEP:
+        await _track_event(message, state, "today_step_opened", action=action)
         await message.answer(t(lang, "support_first_step_reply"), reply_markup=support_mode_keyboard())
         await message.answer(chunks.get("today", "-"), reply_markup=support_mode_keyboard())
         return
     if action == SUPPORT_BACK_TO_MAP:
+        await _track_event(message, state, "support_back_to_map", action=action)
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
@@ -2226,12 +2562,14 @@ async def handle_thinking_reminder(message: Message, state: FSMContext) -> None:
     if text == "🔔 Да, напомнить через 2 дня":
         due_at = _schedule_reminder(message.bot, message.chat.id, lang)
         await state.update_data(reminder_due_at=due_at)
+        await _track_event(message, state, "reminder_scheduled", action=text, meta={"due_at": due_at})
         await message.answer(t(lang, "thinking_saved"), reply_markup=result_actions_keyboard())
         await state.set_state(CareerFlow.FINAL_READY)
         return
     if text in {"Нет, я сам/сама вернусь", "↩️ Назад к карте"}:
         _cancel_reminder(message.chat.id)
         await state.update_data(reminder_due_at="")
+        await _track_event(message, state, "reminder_declined", action=text)
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
