@@ -1851,8 +1851,11 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             options = [
                 str(item).strip()
                 for item in options_raw
-                if str(item).strip() and str(item).strip() != done_text
+                if str(item).strip()
             ] if isinstance(options_raw, list) else []
+            # Ensure done_text is in options for display
+            if done_text not in options:
+                options.append(done_text)
 
             if clean == done_text:
                 if not selected_values:
