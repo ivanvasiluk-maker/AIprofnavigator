@@ -330,9 +330,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 <head>
   <meta charset='UTF-8' />
   <style>
-        {font_face_css}
     @page {{ size: A4; margin: 18mm; }}
-        body {{ font-family: CareerUnicode, DejaVu Sans, Arial, sans-serif; color: #1f2937; font-size: 12px; line-height: 1.45; }}
+    body {{ font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; color: #1f2937; font-size: 12px; line-height: 1.45; }}
     h1 {{ font-size: 26px; margin: 0 0 6px 0; color: #0f172a; }}
     h2 {{ font-size: 18px; margin: 0 0 8px 0; color: #0f766e; }}
     h3 {{ font-size: 14px; margin: 0 0 6px 0; }}
