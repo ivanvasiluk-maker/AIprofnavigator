@@ -287,7 +287,7 @@ def question_options_keyboard(options: list[str]) -> ReplyKeyboardMarkup | None:
 
     rows: list[list[KeyboardButton]] = []
     row: list[KeyboardButton] = []
-    for item in cleaned[:8]:
+    for item in cleaned[:15]:
         row.append(KeyboardButton(text=item))
         if len(row) == 2:
             rows.append(row)
