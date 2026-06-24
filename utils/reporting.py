@@ -105,6 +105,11 @@ def build_telegram_summary(report: dict) -> str:
     priorities_block = "\n".join(f"- {item}" for item in _list_items(career_priorities)[:4])
     competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
     competency_block = "\n".join(f"- {item}" for item in _list_items(competency_signals)[:5])
+    weaknesses = []
+    barriers = (digital_human.get("barriers") or {}) if isinstance(digital_human.get("barriers"), dict) else {}
+    weaknesses.extend(_list_items(barriers.get("internal"))[:2])
+    weaknesses.extend(_list_items(barriers.get("external"))[:2])
+    weaknesses_block = "\n".join(f"- {item}" for item in weaknesses[:4]) if weaknesses else "- данных недостаточно"
     resource_level_raw = _safe_text(report.get("resource_level"), "не уточнено")
     integration_level_raw = _safe_text(report.get("integration_level"), "не уточнено")
     resource_level = f"{resource_level_raw} ({_level_label(resource_level_raw)})" if resource_level_raw != "не уточнено" else resource_level_raw
@@ -118,6 +123,7 @@ def build_telegram_summary(report: dict) -> str:
         f"Источники энергии:\n{energy_block}",
         f"Карьерные приоритеты:\n{priorities_block}",
         f"STAR-компетенции:\n{competency_block}",
+        f"Слабые места / риски входа:\n{weaknesses_block}",
         f"Уровень ресурса:\n{resource_level}",
         f"Уровень интеграции:\n{integration_level}",
         f"Главный риск:\n{_safe_text(digital_human.get('main_risk'))}",
@@ -189,6 +195,29 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         "Новый стек навыков и рабочий фокус под текущую неделю",
         "Система сопровождения, которая удерживает дисциплину до результата",
     ]
+    strengths_items = list(dict.fromkeys(_list_items(not_reset)[:4] + _list_items(digital_human.get("hidden_strengths"))[:4]))[:6]
+    barriers_obj = digital_human.get("barriers") if isinstance(digital_human.get("barriers"), dict) else {}
+    weaknesses_items = list(dict.fromkeys(_list_items(barriers_obj.get("internal"))[:3] + _list_items(barriers_obj.get("external"))[:3]))[:6]
+    blind_spots = [
+        _safe_text(digital_human.get("main_risk"), ""),
+        _safe_text(digital_human.get("main_barrier"), ""),
+        _safe_text((decision or {}).get("avoid_for_now"), ""),
+        _safe_text((barrier_landscape or {}).get("behavioral_risk"), ""),
+    ]
+    blind_spots = [item for item in blind_spots if item and item != "-"][:4]
+    important_consider = [
+        f"Ресурс: {resource_level}",
+        f"Интеграция: {integration_level}",
+        f"Приоритеты: {', '.join(_list_items(career_priorities)[:3])}",
+    ]
+    market_questions = []
+    for item in market[:6]:
+        if not isinstance(item, dict):
+            continue
+        for req in _list_items(item.get("requirements"))[:4]:
+            if req not in market_questions and req != "-":
+                market_questions.append(req)
+    scenario_labels = ["Быстрый сценарий", "Средний сценарий", "Идеальный сценарий"]
 
     possibilities = []
     labels = ["Возможность 1", "Возможность 2", "Возможность 3"]
@@ -230,13 +259,13 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         )
 
     solutions_html = []
-    for item in real_solutions[:3]:
+    for idx, item in enumerate(real_solutions[:3]):
         if not isinstance(item, dict):
             continue
         solutions_html.append(
             f"""
             <div class='card'>
-                <h3>{escape(_safe_text(item.get('title')))}</h3>
+                <h3>{escape(scenario_labels[idx])}: {escape(_safe_text(item.get('title')))}</h3>
                 <ul>
                     <li><b>Уровень рекомендации:</b> {escape(_safe_text(item.get('recommendation_level')))}</li>
                     <li><b>Вероятность успеха:</b> {escape(_safe_text(item.get('success_probability')))}</li>
@@ -287,7 +316,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
                 <h3>{escape(_safe_text(item.get('barrier')))}</h3>
                 <ul>
                     <li><b>Сила влияния:</b> {escape(str(item.get('severity', '-')))} / 100</li>
-                    <li><b>Механизм:</b> {escape(_safe_text(item.get('mechanism')))}</li>
+                    <li><b>Что это значит:</b> {escape(_safe_text(item.get('mechanism')))}</li>
                     <li><b>Навык для компенсации:</b> {escape(_safe_text(item.get('recommended_skill')))}</li>
                     <li><b>Первое упражнение:</b> {escape(_safe_text(item.get('first_exercise')))}</li>
                 </ul>
@@ -349,6 +378,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         .closing-card {{ border: 1px solid #bae6fd; border-radius: 10px; padding: 12px; background: #f8fafc; }}
         .closing-title {{ font-size: 15px; color: #0f172a; margin-bottom: 6px; }}
         .offer-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
+            .swot-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
         .offer-card {{ border: 1px solid #dbeafe; border-radius: 10px; padding: 12px; background: #f8fafc; }}
         .offer-card.free {{ border-color: #d1d5db; background: #fcfcfc; }}
         .offer-card.paid {{ border-color: #93c5fd; background: #eff6ff; }}
@@ -383,11 +413,18 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Уровень ресурса</h3><p>{escape(resource_level)}</p></div>
         <div class='card'><h3>Уровень интеграции</h3><p>{escape(integration_level)}</p></div>
         <div class='card'><h3>Слои опыта</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(experience_layers)[:6])}</ul></div>
+        <div class='swot-grid'>
+            <div class='card'><h3>Сильные стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>Слабые стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in weaknesses_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>Что вы можете не видеть</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in blind_spots) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>Что ещё важно учесть</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in important_consider) or '<li>Данных недостаточно.</li>'}</ul></div>
+        </div>
   </section>
 
   <section class='page'>
     <h2>Анализ возможностей</h2>
     {''.join(possibilities) if possibilities else '<p class="muted">Данных недостаточно.</p>'}
+        <div class='card'><h3>Что рынок будет проверять</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in market_questions[:10]) or '<li>Данных недостаточно.</li>'}</ul></div>
         <h2>Рекомендованные роли</h2>
         {''.join(recommendations_html) if recommendations_html else '<p class="muted">Данных недостаточно.</p>'}
         <h2>Реальные решения</h2>

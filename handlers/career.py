@@ -17,6 +17,8 @@ from config import settings
 from keyboards import (
     ALL_INPUT_DONT_KNOW,
     ALL_SHORT_STORY_OPTIONS,
+    ALL_SELF_EXPLORE_ACTIONS,
+    ALL_STEP_TRACKING_ACTIONS,
     ALL_SUPPORT_OPTIONS,
     ALL_INPUT_TEXT,
     ALL_INPUT_VOICE,
@@ -34,15 +36,26 @@ from keyboards import (
     SUPPORT_DONE,
     ALL_RESULT_ACTIONS,
     RESULT_ANALYZE_FEARS,
+    RESULT_BACK_TO_MENU,
+    RESULT_CLARIFY,
     RESULT_DETAILS,
+    RESULT_DO_STEPS,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_REBUILD,
+    RESULT_SELF_EXPLORE,
+    RESULT_SPECIALIST,
+    RESULT_SUPPORT_GROUP,
     RESULT_MY_MAP,
     RESULT_SUPPORT,
     RESULT_THINK,
     RESULT_TODAY_STEP,
     SUPPORT_BACK_TO_MAP,
+    STEP_BARRIERS,
+    STEP_DONE,
+    STEP_NEXT_DAY,
+    STEP_NOT_DONE,
+    STEP_OPEN_TODAY,
     PSYCH_SKIP,
     BARRIER_GROUP_BEHAVIOR,
     BARRIER_GROUP_INTERNAL,
@@ -71,11 +84,14 @@ from keyboards import (
     input_method_keyboard,
     question_options_keyboard,
     result_actions_keyboard,
+    self_exploration_keyboard,
     short_story_keyboard,
     practical_barrier_keyboard,
     resume_choice_keyboard,
     resume_wait_keyboard,
+    step_tracking_keyboard,
     support_mode_keyboard,
+    telegram_link_keyboard,
     think_reminder_keyboard,
 )
 from localization import t
@@ -1382,6 +1398,119 @@ def _today_task_from_report(report: dict) -> str:
     return "Сделайте первый шаг по маршруту сегодня."
 
 
+def _build_execution_steps(report: dict) -> list[dict[str, str]]:
+    steps: list[dict[str, str]] = []
+    weekly_plan = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
+    for item in weekly_plan[:7]:
+        if not isinstance(item, dict):
+            continue
+        steps.append(
+            {
+                "day": str(len(steps) + 1),
+                "focus": str(item.get("focus") or f"День {len(steps) + 1}"),
+                "task": str(item.get("task") or "Сделайте шаг по плану."),
+                "time": str(item.get("time") or "15-30 минут"),
+                "result": str(item.get("result") or "Есть зафиксированный следующий шаг."),
+                "why": str(item.get("why") or "Это продвигает вас по основному маршруту."),
+            }
+        )
+
+    development = report.get("development_map", {}) if isinstance(report.get("development_map"), dict) else {}
+    first_month = development.get("first_month", []) if isinstance(development.get("first_month"), list) else []
+    for row in first_month:
+        if not isinstance(row, dict):
+            continue
+        tasks = row.get("tasks", []) if isinstance(row.get("tasks"), list) else []
+        for task in tasks:
+            if len(steps) >= 14:
+                break
+            steps.append(
+                {
+                    "day": str(len(steps) + 1),
+                    "focus": f"Неделя {row.get('week', '-')} · {row.get('focus', 'Следующий шаг')}",
+                    "task": str(task or "Сделайте следующий шаг по карте."),
+                    "time": "20-40 минут",
+                    "result": str(row.get("output") or "Есть прогресс по маршруту."),
+                    "why": str(row.get("focus") or "Это поддерживает движение по маршруту."),
+                }
+            )
+        if len(steps) >= 14:
+            break
+
+    if not steps:
+        steps.append(
+            {
+                "day": "1",
+                "focus": "Первый шаг",
+                "task": _today_task_from_report(report),
+                "time": "15 минут",
+                "result": "Первое действие запущено.",
+                "why": "Так карта превращается в реальное движение.",
+            }
+        )
+    return steps[:14]
+
+
+def _execution_step_text(step: dict[str, str], progress: dict[str, dict[str, str]] | None = None) -> str:
+    day = step.get("day", "1")
+    status = "не отмечен"
+    barrier_note = ""
+    if isinstance(progress, dict):
+        row = progress.get(str(day), {}) if isinstance(progress.get(str(day), {}), dict) else {}
+        status = str(row.get("status") or status)
+        barrier = str(row.get("barrier") or "").strip()
+        if barrier:
+            barrier_note = f"\n\nГде застрял(а):\n{barrier}"
+    return (
+        f"День {day}\n\n"
+        f"Фокус:\n{step.get('focus', '-')}\n\n"
+        f"Задача:\n{step.get('task', '-')}\n\n"
+        f"Время:\n{step.get('time', '-')}\n\n"
+        f"Ожидаемый результат:\n{step.get('result', '-')}\n\n"
+        f"Зачем это делать:\n{step.get('why', '-')}\n\n"
+        f"Статус: {status}{barrier_note}"
+    )
+
+
+def _reframe_clarification(text: str) -> str:
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return "Уточнение не распознано."
+    return f"Нужно учесть следующее уточнение пользователя: {clean}"
+
+
+async def _download_bot_file(message: Message, file_id: str, suffix: str = ".tmp") -> str:
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp_path = tmp_file.name
+    tmp_file.close()
+    file_info = await message.bot.get_file(file_id)
+    await message.bot.download(file_info, destination=tmp_path)
+    return tmp_path
+
+
+async def _rebuild_report_with_note(message: Message, state: FSMContext, lang: str, note_text: str) -> None:
+    data = await state.get_data()
+    await state.set_state(CareerFlow.REBUILDING_ROUTE)
+    await message.answer(t(lang, "route_rebuild_progress"), reply_markup=result_actions_keyboard())
+    report = await ai_client.build_report(
+        (data.get("story_text") or "").strip(),
+        data.get("story_analysis") or {},
+        ((data.get("answers_text") or "").strip() + "\n\nУточнение пользователя:\n" + note_text).strip(),
+        resume_analysis=data.get("resume_analysis") or {},
+        selected_barriers=data.get("selected_barriers") or [],
+        selected_fears=data.get("selected_fears") or [],
+        selected_psych_markers=data.get("selected_psych_markers") or [],
+        selected_energy_sources=data.get("selected_energy_sources") or [],
+        selected_career_priorities=data.get("selected_career_priorities") or [],
+        language=lang,
+    )
+    chunks = report_chunks(report, lang)
+    await state.update_data(final_report=report, report_chunks=chunks, final_report_generated=True)
+    await state.set_state(CareerFlow.FINAL_READY)
+    await message.answer(t(lang, "route_rebuild_result_intro"), reply_markup=result_actions_keyboard())
+    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+
+
 def _has_income_signal(report: dict) -> bool:
     market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
     for item in market:
@@ -1700,6 +1829,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
     await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "post_result_scenarios_intro"), reply_markup=result_actions_keyboard())
 
     pdf_report_path = ""
     html_report_path = ""
@@ -1749,6 +1879,9 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         skiller_today_task=today_task,
         pdf_report_path=pdf_report_path,
         html_report_path=html_report_path,
+        execution_steps=_build_execution_steps(report),
+        execution_progress={},
+        current_execution_day=0,
     )
 
 
@@ -2382,31 +2515,88 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "generation_lock_message"))
         return
 
-    report = data.get("final_report") or {}
-    chunks = data.get("report_chunks") or report_chunks(report, lang)
     action = (message.text or "").strip()
     await _track_event(message, state, "result_action_clicked", action=action)
 
-    if action in {RESULT_REBUILD, "➕ Добавить детали"}:
-        await state.set_state(CareerFlow.WAITING_ROUTE_CHANGES)
-        await message.answer(t(lang, "route_changes_prompt"), reply_markup=result_actions_keyboard())
+    if action == RESULT_SELF_EXPLORE:
+        await state.set_state(CareerFlow.SHOWING_DETAILS)
+        await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
+        return
+
+    if action == RESULT_DO_STEPS:
+        steps = data.get("execution_steps") or _build_execution_steps(data.get("final_report") or {})
+        progress = data.get("execution_progress") or {}
+        current_day = int(data.get("current_execution_day", 0))
+        if current_day >= len(steps):
+            current_day = max(0, len(steps) - 1)
+        await state.update_data(execution_steps=steps, execution_progress=progress, current_execution_day=current_day)
+        await state.set_state(CareerFlow.STEP_TRACKING)
+        await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
+        await message.answer(t(lang, "step_tracking_current_day", day=current_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
+        return
+
+    if action == RESULT_CLARIFY:
+        await state.set_state(CareerFlow.REPORT_CLARIFICATION)
+        await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
+        return
+
+    if action == RESULT_SPECIALIST:
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(t(lang, "specialist_contact_intro"), reply_markup=result_actions_keyboard())
+        if settings.specialist_telegram_url:
+            await message.answer(
+                settings.specialist_telegram_url,
+                reply_markup=telegram_link_keyboard("Написать в Telegram", settings.specialist_telegram_url),
+            )
+        else:
+            await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
+        return
+
+    if action == RESULT_SUPPORT_GROUP:
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(t(lang, "support_group_contact_intro"), reply_markup=result_actions_keyboard())
+        if settings.support_group_telegram_url:
+            await message.answer(
+                settings.support_group_telegram_url,
+                reply_markup=telegram_link_keyboard("Хочу в группу поддержки", settings.support_group_telegram_url),
+            )
+        else:
+            await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
+        return
+
+    await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+
+
+@router.message(CareerFlow.SHOWING_DETAILS, F.text.in_(ALL_SELF_EXPLORE_ACTIONS))
+async def handle_self_exploration_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    report = data.get("final_report") or {}
+    chunks = data.get("report_chunks") or report_chunks(report, lang)
+    action = (message.text or "").strip()
+
+    if action == RESULT_BACK_TO_MENU:
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+        return
+
+    if action in {RESULT_REBUILD, RESULT_CLARIFY}:
+        await state.set_state(CareerFlow.REPORT_CLARIFICATION)
+        await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
         return
 
     if action == RESULT_DETAILS:
-        await state.set_state(CareerFlow.SHOWING_DETAILS)
-        await message.answer(t(lang, "details_intro"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("layers", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("not_reset", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("translation", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("bridges", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("barrier", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("integration", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("decision", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("month_roadmap", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("week", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("today", "-"), reply_markup=result_actions_keyboard())
-        await state.set_state(CareerFlow.FINAL_READY)
-        await _track_event(message, state, "details_opened")
+        await message.answer(t(lang, "details_intro"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("layers", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("not_reset", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("translation", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("bridges", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("barrier", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("integration", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("decision", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("month_roadmap", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("week", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("today", "-"), reply_markup=self_exploration_keyboard())
         return
 
     if action == RESULT_FIX_CV:
@@ -2415,35 +2605,124 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         return
 
     if action == RESULT_KEYWORDS:
-        await state.set_state(CareerFlow.KEYWORDS_MODE)
-        await message.answer(t(lang, "show_keywords_reply"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("market", "-"), reply_markup=result_actions_keyboard())
-        await message.answer(chunks.get("translation", "-"), reply_markup=result_actions_keyboard())
+        await message.answer(t(lang, "show_keywords_reply"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("market", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("translation", "-"), reply_markup=self_exploration_keyboard())
+        return
+
+    await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
+
+
+@router.message(CareerFlow.STEP_TRACKING, F.text.in_(ALL_STEP_TRACKING_ACTIONS))
+async def handle_step_tracking_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    steps = data.get("execution_steps") or []
+    progress = data.get("execution_progress") or {}
+    current_day = int(data.get("current_execution_day", 0))
+    action = (message.text or "").strip()
+
+    if action == RESULT_BACK_TO_MENU:
         await state.set_state(CareerFlow.FINAL_READY)
-        await _track_event(message, state, "keywords_opened")
+        await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
 
-    if action == RESULT_ANALYZE_FEARS:
-        await state.set_state(CareerFlow.BARRIER_ANALYSIS_MENU)
-        await message.answer(t(lang, "barrier_practical_intro"), reply_markup=practical_barrier_keyboard())
-        await message.answer(chunks.get("barrier", "-"), reply_markup=practical_barrier_keyboard())
-        await _track_event(message, state, "barrier_analysis_opened")
+    if not steps:
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(t(lang, "step_tracking_finished"), reply_markup=result_actions_keyboard())
         return
 
-    if action == RESULT_SUPPORT:
-        await state.set_state(CareerFlow.SUPPORT_OFFER)
-        await message.answer(_build_system_offer_text(data), reply_markup=support_mode_keyboard())
-        await message.answer(t(lang, "support_free_hint"), reply_markup=support_mode_keyboard())
-        await _track_event(message, state, "support_offer_opened")
+    current_day = max(0, min(current_day, len(steps) - 1))
+    current_step = steps[current_day]
+    day_key = str(current_step.get("day", current_day + 1))
+
+    if action == STEP_OPEN_TODAY:
+        await message.answer(_execution_step_text(current_step, progress), reply_markup=step_tracking_keyboard())
         return
 
-    if action == RESULT_THINK:
-        await state.set_state(CareerFlow.THINKING_REMINDER)
-        await message.answer(t(lang, "offer_think_reply"), reply_markup=think_reminder_keyboard())
-        await _track_event(message, state, "thinking_mode_opened")
+    if action == STEP_DONE:
+        progress[day_key] = {"status": "сделал"}
+        next_day = min(current_day + 1, len(steps) - 1)
+        await state.update_data(execution_progress=progress, current_execution_day=next_day)
+        await message.answer(t(lang, "step_tracking_done_reply"), reply_markup=step_tracking_keyboard())
+        await message.answer(t(lang, "step_tracking_current_day", day=next_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
         return
 
-    await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+    if action == STEP_NOT_DONE:
+        progress[day_key] = {"status": "не сделал"}
+        await state.update_data(execution_progress=progress)
+        await message.answer(t(lang, "step_tracking_not_done_reply"), reply_markup=step_tracking_keyboard())
+        return
+
+    if action == STEP_BARRIERS:
+        await state.update_data(step_barrier_day=day_key)
+        await state.set_state(CareerFlow.STEP_BARRIER_INPUT)
+        await message.answer(t(lang, "step_tracking_barrier_prompt"), reply_markup=step_tracking_keyboard())
+        return
+
+    if action == STEP_NEXT_DAY:
+        if current_day + 1 >= len(steps):
+            await message.answer(t(lang, "step_tracking_finished"), reply_markup=step_tracking_keyboard())
+            return
+        next_day = current_day + 1
+        await state.update_data(current_execution_day=next_day)
+        await message.answer(t(lang, "step_tracking_current_day", day=next_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
+        await message.answer(_execution_step_text(steps[next_day], progress), reply_markup=step_tracking_keyboard())
+        return
+
+
+@router.message(CareerFlow.STEP_BARRIER_INPUT, F.text)
+async def handle_step_barrier_input(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    barrier_text = (message.text or "").strip()
+    progress = data.get("execution_progress") or {}
+    day_key = str(data.get("step_barrier_day") or "1")
+    row = progress.get(day_key, {}) if isinstance(progress.get(day_key), dict) else {}
+    row["status"] = "барьер"
+    row["barrier"] = barrier_text or "не уточнено"
+    progress[day_key] = row
+    await state.update_data(execution_progress=progress, step_barrier_day="")
+    await state.set_state(CareerFlow.STEP_TRACKING)
+    await message.answer(t(lang, "step_tracking_barrier_saved"), reply_markup=step_tracking_keyboard())
+
+
+@router.message(CareerFlow.REPORT_CLARIFICATION, F.text)
+async def handle_report_clarification_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    clean = (message.text or "").strip()
+    if not clean:
+        await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
+        return
+    reframed = _reframe_clarification(clean)
+    await message.answer(t(lang, "report_clarify_reframed", summary=reframed), reply_markup=result_actions_keyboard())
+    await _rebuild_report_with_note(message, state, lang, reframed)
+
+
+@router.message(CareerFlow.REPORT_CLARIFICATION, F.voice)
+async def handle_report_clarification_voice(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    voice = message.voice
+    if not voice:
+        await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
+        return
+    await message.answer(t(lang, "voice_clarify_processing"), reply_markup=result_actions_keyboard())
+    temp_path = await _download_bot_file(message, voice.file_id, suffix=".ogg")
+    try:
+        transcript = (await ai_client.transcribe_voice(temp_path)).strip()
+    except Exception:
+        transcript = ""
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    if not transcript:
+        await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
+        return
+    reframed = _reframe_clarification(transcript)
+    await message.answer(t(lang, "report_clarify_reframed", summary=reframed), reply_markup=result_actions_keyboard())
+    await _rebuild_report_with_note(message, state, lang, reframed)
 
 
 @router.message(CareerFlow.BARRIER_ANALYSIS_MENU, F.text.in_(ALL_BARRIER_DETAIL_ACTIONS))
@@ -2659,6 +2938,10 @@ async def handle_thinking_reminder(message: Message, state: FSMContext) -> None:
 @router.message(CareerFlow.waiting_for_barriers, F.photo | F.sticker)
 @router.message(CareerFlow.waiting_for_answers, F.photo | F.sticker)
 @router.message(CareerFlow.waiting_for_post_result_action, F.photo | F.sticker)
+@router.message(CareerFlow.SHOWING_DETAILS, F.photo | F.sticker)
+@router.message(CareerFlow.STEP_TRACKING, F.photo | F.sticker)
+@router.message(CareerFlow.STEP_BARRIER_INPUT, F.photo | F.sticker)
+@router.message(CareerFlow.REPORT_CLARIFICATION, F.photo | F.sticker)
 @router.message(CareerFlow.SUPPORT_OFFER, F.photo | F.sticker)
 @router.message(CareerFlow.CV_REVIEW_WAITING_FILE, F.photo | F.sticker)
 @router.message(CareerFlow.CV_REVIEW_READY, F.photo | F.sticker)
@@ -2679,6 +2962,9 @@ async def resume_decision_fallback(message: Message, state: FSMContext) -> None:
 @router.message(CareerFlow.waiting_for_resume, F.voice)
 @router.message(CareerFlow.waiting_for_barriers, F.voice)
 @router.message(CareerFlow.waiting_for_post_result_action, F.voice)
+@router.message(CareerFlow.SHOWING_DETAILS, F.voice)
+@router.message(CareerFlow.STEP_TRACKING, F.voice)
+@router.message(CareerFlow.STEP_BARRIER_INPUT, F.voice)
 @router.message(CareerFlow.SUPPORT_OFFER, F.voice)
 @router.message(CareerFlow.CV_REVIEW_WAITING_FILE, F.voice)
 @router.message(CareerFlow.CV_REVIEW_READY, F.voice)
@@ -2690,6 +2976,9 @@ async def non_voice_step_fallback(message: Message, state: FSMContext) -> None:
     if await state.get_state() == CareerFlow.SUPPORT_OFFER.state:
         await message.answer(t(lang, "support_mode_fallback"), reply_markup=support_mode_keyboard())
         return
+    if await state.get_state() == CareerFlow.STEP_TRACKING.state:
+        await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
+        return
     await message.answer(t(lang, "input_media_fallback"))
 
 
@@ -2697,3 +2986,30 @@ async def non_voice_step_fallback(message: Message, state: FSMContext) -> None:
 async def support_offer_fallback(message: Message, state: FSMContext) -> None:
     lang = _user_language(await state.get_data())
     await message.answer(t(lang, "support_mode_fallback"), reply_markup=support_mode_keyboard())
+
+
+@router.message(CareerFlow.SHOWING_DETAILS, F.text)
+async def self_exploration_fallback(message: Message, state: FSMContext) -> None:
+    lang = _user_language(await state.get_data())
+    await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
+
+
+@router.message(CareerFlow.STEP_TRACKING, F.text)
+async def step_tracking_fallback(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    steps = data.get("execution_steps") or []
+    current_day = int(data.get("current_execution_day", 0))
+    if steps:
+        current_day = max(0, min(current_day, len(steps) - 1))
+        await message.answer(_execution_step_text(steps[current_day], data.get("execution_progress") or {}), reply_markup=step_tracking_keyboard())
+        return
+    await message.answer(t(lang, "step_tracking_finished"), reply_markup=result_actions_keyboard())
+
+
+@router.message(CareerFlow.REPORT_CLARIFICATION, F.text | F.document)
+async def report_clarification_fallback(message: Message, state: FSMContext) -> None:
+    if message.text:
+        return
+    lang = _user_language(await state.get_data())
+    await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())

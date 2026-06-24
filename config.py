@@ -19,6 +19,8 @@ class Settings:
         self.google_sheets_webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
         self.analytics_registry_path = os.getenv("ANALYTICS_REGISTRY_PATH", "reports/user_registry.json").strip()
         self.analytics_events_log_path = os.getenv("ANALYTICS_EVENTS_LOG_PATH", "reports/behavior_events.jsonl").strip()
+        self.specialist_telegram_url = os.getenv("SPECIALIST_TELEGRAM_URL", "").strip()
+        self.support_group_telegram_url = os.getenv("SUPPORT_GROUP_TELEGRAM_URL", "").strip()
 
     def validate(self) -> None:
         missing = []

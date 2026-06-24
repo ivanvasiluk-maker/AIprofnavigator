@@ -1,4 +1,4 @@
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 
 LANG_RU = "ru"
@@ -105,6 +105,17 @@ RESULT_REBUILD = "🔄 Внести изменения"
 RESULT_ANALYZE_FEARS = "🧠 Разобрать барьеры"
 RESULT_SUPPORT = "🤝 Сопровождение в боте"
 RESULT_THINK = "🤔 Хочу подумать"
+RESULT_SELF_EXPLORE = "🔎 Продолжить самоисследование"
+RESULT_DO_STEPS = "🚀 Делать шаги в боте"
+RESULT_CLARIFY = "✍️ Немного уточнить"
+RESULT_SPECIALIST = "🧭 Продолжить со специалистом"
+RESULT_SUPPORT_GROUP = "👥 В группу поддержки поиска работы"
+RESULT_BACK_TO_MENU = "↩️ К выбору сценария"
+STEP_OPEN_TODAY = "📅 Открыть текущий день"
+STEP_DONE = "✅ Сделал"
+STEP_NOT_DONE = "❌ Не сделал"
+STEP_BARRIERS = "🧩 Какие есть барьеры"
+STEP_NEXT_DAY = "➡️ Следующий день"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 ANSWER_RETRY = "✍️ Ответить заново"
@@ -167,14 +178,27 @@ ALL_PSYCH_BARRIER_OPTIONS = set(PSYCH_BARRIER_OPTIONS)
 ALL_PSYCH_BARRIER_DONE = {PSYCH_BARRIER_DONE}
 ALL_PSYCH_GROUP_OPTIONS = {BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE, BARRIER_GROUP_MORE, PSYCH_SKIP}
 ALL_RESULT_ACTIONS = {
+    RESULT_SELF_EXPLORE,
+    RESULT_DO_STEPS,
+    RESULT_CLARIFY,
+    RESULT_SPECIALIST,
+    RESULT_SUPPORT_GROUP,
+}
+ALL_SELF_EXPLORE_ACTIONS = {
     RESULT_DETAILS,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_REBUILD,
-    RESULT_ANALYZE_FEARS,
-    RESULT_SUPPORT,
-    RESULT_THINK,
-    "➕ Добавить детали",
+    RESULT_CLARIFY,
+    RESULT_BACK_TO_MENU,
+}
+ALL_STEP_TRACKING_ACTIONS = {
+    STEP_OPEN_TODAY,
+    STEP_DONE,
+    STEP_NOT_DONE,
+    STEP_BARRIERS,
+    STEP_NEXT_DAY,
+    RESULT_BACK_TO_MENU,
 }
 ALL_ANSWER_REVIEW_ACTIONS = {ANSWER_RETRY, ANSWER_SKIP, ANSWER_KEEP}
 ALL_BARRIER_DETAIL_ACTIONS = {
@@ -383,14 +407,47 @@ def skiller_reason_keyboard() -> ReplyKeyboardMarkup:
 def result_actions_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=RESULT_DETAILS)],
-            [KeyboardButton(text=RESULT_FIX_CV), KeyboardButton(text=RESULT_KEYWORDS)],
-            [KeyboardButton(text=RESULT_REBUILD)],
-            [KeyboardButton(text=RESULT_ANALYZE_FEARS)],
-            [KeyboardButton(text=RESULT_SUPPORT), KeyboardButton(text=RESULT_THINK)],
+            [KeyboardButton(text=RESULT_SELF_EXPLORE)],
+            [KeyboardButton(text=RESULT_DO_STEPS)],
+            [KeyboardButton(text=RESULT_CLARIFY)],
+            [KeyboardButton(text=RESULT_SPECIALIST)],
+            [KeyboardButton(text=RESULT_SUPPORT_GROUP)],
             [KeyboardButton(text=RESTART)],
         ],
         resize_keyboard=True,
+    )
+
+
+def self_exploration_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=RESULT_DETAILS)],
+            [KeyboardButton(text=RESULT_FIX_CV), KeyboardButton(text=RESULT_KEYWORDS)],
+            [KeyboardButton(text=RESULT_REBUILD), KeyboardButton(text=RESULT_CLARIFY)],
+            [KeyboardButton(text=RESULT_BACK_TO_MENU)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def step_tracking_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=STEP_OPEN_TODAY)],
+            [KeyboardButton(text=STEP_DONE), KeyboardButton(text=STEP_NOT_DONE)],
+            [KeyboardButton(text=STEP_BARRIERS)],
+            [KeyboardButton(text=STEP_NEXT_DAY)],
+            [KeyboardButton(text=RESULT_BACK_TO_MENU)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def telegram_link_keyboard(button_text: str, url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=button_text, url=url)],
+        ]
     )
 
 

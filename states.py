@@ -23,6 +23,9 @@ class CareerFlow(StatesGroup):
     KEYWORDS_MODE = State()
     SUPPORT_OFFER = State()
     THINKING_REMINDER = State()
+    STEP_TRACKING = State()
+    STEP_BARRIER_INPUT = State()
+    REPORT_CLARIFICATION = State()
     PDF_GENERATING = State()
     PDF_READY = State()
 
