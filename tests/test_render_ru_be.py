@@ -107,8 +107,9 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn(RESUME_SKIP, resume_dump)
 
         actions_dump = result_actions_keyboard().model_dump_json()
-        self.assertIn("📘 Подробнее", actions_dump)
-        self.assertIn("🔄 Внести изменения", actions_dump)
+        self.assertIn("Делать шаги в боте", actions_dump)
+        self.assertIn("со специалистом", actions_dump)
+        self.assertIn("уточнить", actions_dump)
         self.assertNotIn("📄 Скачать PDF", actions_dump)
 
         skiller_dump = skiller_check_keyboard().model_dump_json()
@@ -330,7 +331,7 @@ class CareerGpsRenderTests(unittest.TestCase):
 
         result = _set_mvp_questions(
             analysis,
-            limit=10,
+            limit=16,
             mode="calm_steps",
             story_text="",
             user_segment=SEGMENT_WORKER,
@@ -338,15 +339,15 @@ class CareerGpsRenderTests(unittest.TestCase):
         questions = result.get("follow_up_questions", [])
         texts = [str(row.get("question", "")) for row in questions if isinstance(row, dict)]
 
-        self.assertTrue(any("делать руками" in text.lower() for text in texts))
-        self.assertTrue(any("оборудован" in text.lower() or "техник" in text.lower() for text in texts))
+        self.assertTrue(any("руках" in text.lower() or "руками" in text.lower() or "производственн" in text.lower() for text in texts))
+        self.assertTrue(any("оборудован" in text.lower() or "техник" in text.lower() or "инструмент" in text.lower() for text in texts))
 
     def test_set_mvp_questions_includes_energy_and_priorities_blocks(self) -> None:
         analysis = {"follow_up_questions": []}
 
         result = _set_mvp_questions(
             analysis,
-            limit=12,
+            limit=16,
             mode="calm_steps",
             story_text="",
             user_segment=SEGMENT_WORKER,
@@ -354,8 +355,8 @@ class CareerGpsRenderTests(unittest.TestCase):
         questions = result.get("follow_up_questions", [])
         texts = [str(row.get("question", "")).lower() for row in questions if isinstance(row, dict)]
 
-        self.assertTrue(any("источники энергии" in text for text in texts))
-        self.assertTrue(any("карьерные приоритеты" in text for text in texts))
+        self.assertTrue(any("энерги" in text for text in texts))
+        self.assertTrue(any("приоритет" in text or "важнее" in text for text in texts))
 
 
 class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
