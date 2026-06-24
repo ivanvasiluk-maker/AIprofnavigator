@@ -2642,10 +2642,14 @@ async def handle_step_tracking_actions(message: Message, state: FSMContext) -> N
 
     if action == STEP_DONE:
         progress[day_key] = {"status": "сделал"}
-        next_day = min(current_day + 1, len(steps) - 1)
+        next_day = current_day + 1
         await state.update_data(execution_progress=progress, current_execution_day=next_day)
         await message.answer(t(lang, "step_tracking_done_reply"), reply_markup=step_tracking_keyboard())
-        await message.answer(t(lang, "step_tracking_current_day", day=next_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
+        if next_day >= len(steps):
+            await message.answer(t(lang, "step_tracking_finished"), reply_markup=result_actions_keyboard())
+            await state.set_state(CareerFlow.FINAL_READY)
+        else:
+            await message.answer(t(lang, "step_tracking_current_day", day=next_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
         return
 
     if action == STEP_NOT_DONE:
