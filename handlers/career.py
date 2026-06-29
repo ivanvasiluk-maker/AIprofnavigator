@@ -17,6 +17,7 @@ from config import settings
 from keyboards import (
     ALL_INPUT_DONT_KNOW,
     ALL_SHORT_STORY_OPTIONS,
+    ALL_STORY_CONFIRM_ACTIONS,
     ALL_SELF_EXPLORE_ACTIONS,
     ALL_STEP_TRACKING_ACTIONS,
     ALL_SUPPORT_OPTIONS,
@@ -29,6 +30,8 @@ from keyboards import (
     ALL_RESUME_SKIP,
     ALL_RESUME_UPLOAD,
     ALL_SUPPORT_MODE_ACTIONS,
+    ALL_ROUTE_CHOICE_ACTIONS,
+    ALL_CAREER_SWITCH_REASON_OPTIONS,
     ALL_ANSWER_REVIEW_ACTIONS,
     ALL_BARRIER_DETAIL_ACTIONS,
     ALL_CV_REVIEW_ACTIONS,
@@ -42,6 +45,11 @@ from keyboards import (
     RESULT_DO_STEPS,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
+    RESULT_OPEN_FULL_REPORT,
+    MAP_CHECK_TRUE,
+    MAP_CHECK_FIX_FACT,
+    MAP_CHECK_CHANGE_PRIORITY,
+    MAP_CHECK_DISAGREE_ROUTE,
     RESULT_REBUILD,
     RESULT_SELF_EXPLORE,
     RESULT_SPECIALIST,
@@ -51,11 +59,20 @@ from keyboards import (
     RESULT_THINK,
     RESULT_TODAY_STEP,
     SUPPORT_BACK_TO_MAP,
+    PDF_FALLBACK_STEPS,
+    PDF_FALLBACK_CLARIFY,
+    PDF_FALLBACK_SPECIALIST,
+    ROUTE_CHOICE_STABLE,
+    ROUTE_CHOICE_PRIVATE,
+    ROUTE_CHOICE_RETRAIN,
+    ROUTE_CHOICE_HELP,
     STEP_BARRIERS,
     STEP_DONE,
     STEP_NEXT_DAY,
     STEP_NOT_DONE,
     STEP_OPEN_TODAY,
+    STORY_CONFIRM_FIX,
+    STORY_CONFIRM_OK,
     PSYCH_SKIP,
     BARRIER_GROUP_BEHAVIOR,
     BARRIER_GROUP_INTERNAL,
@@ -63,6 +80,8 @@ from keyboards import (
     ANSWER_KEEP,
     ANSWER_SKIP,
     ANSWER_RETRY,
+    ANSWER_CONTEXT_YES,
+    ANSWER_CONTEXT_NO,
     BARRIER_DETAIL_BACK,
     BARRIER_DETAIL_CHAOS,
     BARRIER_DETAIL_FEAR_REJECTION,
@@ -87,10 +106,15 @@ from keyboards import (
     self_exploration_keyboard,
     short_story_keyboard,
     practical_barrier_keyboard,
+    pdf_fallback_keyboard,
+    map_validation_keyboard,
     resume_choice_keyboard,
     resume_wait_keyboard,
     step_tracking_keyboard,
     support_mode_keyboard,
+    route_choice_keyboard,
+    career_switch_reason_keyboard,
+    story_confirmation_keyboard,
     telegram_link_keyboard,
     think_reminder_keyboard,
 )
@@ -99,7 +123,7 @@ from openai_client import ai_client
 from states import CareerFlow
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.reporting import build_telegram_summary, generate_pdf_report
-from utils.reporting import generate_report_files
+from utils.reporting import generate_html_report_file, generate_pdf_from_html_file_with_error
 
 router = Router()
 _REMINDER_TASKS: dict[int, asyncio.Task] = {}
@@ -160,6 +184,31 @@ def _ensure_public_id(data: dict, message: Message) -> str:
         return existing
     source_id = message.from_user.id if message.from_user else message.chat.id
     return ensure_public_user_id(source_id)
+
+
+def _canonical_event_aliases(event: str, action: str) -> list[str]:
+    normalized_event = str(event or "").strip()
+    normalized_action = str(action or "").strip()
+    aliases: list[str] = []
+
+    if normalized_event == "answer_submitted":
+        aliases.append("question_answered")
+    if normalized_event in {"pdf_generation_error", "pdf_fallback_html"}:
+        aliases.append("pdf_failed")
+    if normalized_event == "route_selected":
+        aliases.append("route_changed")
+    if normalized_event == "result_action_clicked" and normalized_action == MAP_CHECK_DISAGREE_ROUTE:
+        aliases.append("user_disagreed")
+    if normalized_event == "result_action_clicked" and normalized_action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST}:
+        aliases.append("specialist_clicked")
+    if normalized_event == "step_action" and normalized_action == STEP_OPEN_TODAY:
+        aliases.append("first_step_started")
+    if normalized_event == "step_action" and normalized_action == STEP_DONE:
+        aliases.append("first_step_completed")
+    if normalized_event == "step_action" and normalized_action == STEP_NOT_DONE:
+        aliases.append("first_step_too_hard")
+
+    return aliases
 
 
 async def _track_event(
@@ -226,6 +275,18 @@ async def _track_event(
         language=lang,
         meta=event_meta,
     )
+    for alias in _canonical_event_aliases(event, action):
+        alias_meta = dict(event_meta)
+        alias_meta["source_event"] = event
+        await log_behavior_event(
+            public_user_id=public_user_id,
+            event=alias,
+            state_name=state_name,
+            action=action,
+            user_mode=user_mode,
+            language=lang,
+            meta=alias_meta,
+        )
     await state.update_data(
         public_user_id=public_user_id,
         state_name=state_name,
@@ -394,6 +455,22 @@ def _adaptive_question_count(story_text: str, profile: dict, analysis: dict) -> 
     return 6
 
 
+def _question_count_for_mode(mode: str, configured_value: object = None) -> int:
+    try:
+        configured = int(configured_value or 0)
+    except Exception:
+        configured = 0
+    if configured > 0:
+        return configured
+    defaults = {
+        "fast": 5,
+        "calm_steps": 8,
+        "deep_route": 12,
+        "support": 12,
+    }
+    return defaults.get(str(mode or "calm_steps"), 8)
+
+
 def _join_items(items: list[str], limit: int = 6) -> str:
     cleaned = [item.strip() for item in items if isinstance(item, str) and item.strip()]
     return ", ".join(cleaned[:limit]) if cleaned else "-"
@@ -428,6 +505,39 @@ def _selection_to_text(items: list[str]) -> str:
     if not cleaned:
         return "-"
     return "\n".join(f"- {item}" for item in cleaned)
+
+
+def _slugify(value: str) -> str:
+    text = str(value or "").strip().lower().replace("ё", "е")
+    text = re.sub(r"[^a-zа-я0-9]+", "_", text, flags=re.IGNORECASE)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or "option"
+
+
+def _question_semantic_intent(question_text: str) -> str:
+    q = str(question_text or "").lower()
+    if "цель" in q:
+        return "main_goal"
+    if "барьер" in q or "мешает" in q:
+        return "main_barrier"
+    if "язык" in q or "документ" in q or "прав" in q:
+        return "language_documents_work_right"
+    if "сколько времени" in q and "стране" in q:
+        return "time_in_country"
+    if "ресур" in q or "времени" in q:
+        return "resource_and_time"
+    if "стресс" in q or "справля" in q:
+        return "what_helps_under_stress"
+    return "general_clarification"
+
+
+def _expected_answer_type(row: dict[str, object]) -> str:
+    if row.get("multi_key"):
+        return "multi_select"
+    opts = row.get("options", [])
+    if isinstance(opts, list) and any(str(item).strip() for item in opts):
+        return "single_select"
+    return "free_text"
 
 
 def _extract_docx_text(raw_bytes: bytes) -> str:
@@ -544,6 +654,38 @@ def format_story_snapshot(analysis: dict, lang: str) -> str:
     )
 
 
+def _story_confirmation_text(analysis: dict, question_count: int) -> str:
+    lines = ["Вот что я понял из вашей истории.", ""]
+
+    current_identity = str(analysis.get("current_identity") or analysis.get("story_summary") or "").strip()
+    if current_identity:
+        lines.append(current_identity)
+
+    bullets: list[str] = []
+    for source in [analysis.get("experience_snapshot", []), analysis.get("skills", []), analysis.get("constraints", []), analysis.get("goals", [])]:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            text = str(item or "").strip()
+            if text and text not in bullets:
+                bullets.append(text)
+            if len(bullets) >= 4:
+                break
+        if len(bullets) >= 4:
+            break
+
+    if bullets:
+        lines.append("")
+        lines.extend(f"- {item}" for item in bullets[:4])
+
+    lines.append("")
+    if question_count == 1:
+        lines.append("Дальше задам 1 уточняющий вопрос и затем покажу маршруты.")
+    else:
+        lines.append(f"Дальше задам ровно {question_count} уточняющих вопросов и затем покажу маршруты.")
+    return _clip("\n".join(lines), 1600)
+
+
 def format_follow_up_questions(analysis: dict, lang: str) -> str:
     questions = analysis.get("follow_up_questions", [])
     numbered: list[str] = []
@@ -592,15 +734,31 @@ def _question_prompt(analysis: dict, index: int, lang: str) -> str:
 
 def _questions_fast() -> list[dict[str, object]]:
     return [
-        {"id": 1, "question": "Кем вы работали раньше и что умеете лучше всего?", "options": []},
+        {
+            "id": 1,
+            "question": "Какая у вас сейчас главная цель на ближайшие 1-3 месяца?",
+            "options": ["Быстро выйти на доход", "Найти стабильную работу", "Сменить сферу", "Перепаковать опыт"],
+        },
         {
             "id": 2,
-            "question": "Что сейчас сильнее мешает: тревога, усталость, страх отказов, прокрастинация или хаос?",
-            "options": ["тревога", "усталость", "страх отказов", "прокрастинация", "хаос"],
+            "question": "Что сейчас главный барьер, который мешает двигаться?",
+            "options": ["Язык", "Документы/право работать", "Страх отказов", "Нестабильный доход", "Неясный маршрут"],
         },
-        {"id": 3, "question": "Какой минимальный доход нужен в месяц?", "options": []},
-        {"id": 4, "question": "Какие языки вы знаете и примерно на каком уровне?", "options": []},
-        {"id": 5, "question": "Есть ли сейчас поддержка: семья, друзья, контакты, сообщество?", "options": ["семья", "друзья", "контакты", "сообщество", "пока мало поддержки"]},
+        {
+            "id": 3,
+            "question": "Что у вас сейчас с языком, документами и правом работать?",
+            "options": ["Язык достаточный", "Язык пока мешает", "Документы в порядке", "Нужны документы/уточнения", "Право работать неясно"],
+        },
+        {
+            "id": 4,
+            "question": "Сколько времени вы уже живете в этой стране?",
+            "options": ["Меньше 6 месяцев", "6-12 месяцев", "1-2 года", "Больше 2 лет"],
+        },
+        {
+            "id": 5,
+            "question": "Сколько ресурса и времени у вас сейчас на поиск и действия?",
+            "options": ["Низкий ресурс, до 15 минут в день", "Средний ресурс, 30-60 минут", "Хороший ресурс, 1-2 часа"],
+        },
     ]
 
 
@@ -647,6 +805,16 @@ def _questions_support() -> list[dict[str, object]]:
             "question": "Как вы живёте и адаптируетесь в новой стране: кто рядом, какие барьеры, есть ли сообщество?",
             "options": ["семья", "друзья", "профконтакты", "сообщество", "пока никто"],
         },
+    ]
+
+
+def _questions_deep_route() -> list[dict[str, object]]:
+    return [
+        {"id": 1, "question": "Какая цель на ближайшие 3 месяца и как вы поймете, что цель достигнута?", "options": []},
+        {"id": 2, "question": "Какие 2-3 роли на рынке кажутся вам реалистичными прямо сейчас?", "options": []},
+        {"id": 3, "question": "Какие барьеры критичны: язык, документы, график, здоровье, дети, финансы?", "options": []},
+        {"id": 4, "question": "Какие результаты и цифры из опыта вы уже можете показать в CV/профиле?", "options": []},
+        {"id": 5, "question": "Какие навыки нужно усилить в первую очередь, чтобы повысить шанс интервью?", "options": []},
     ]
 
 
@@ -1017,6 +1185,84 @@ def _question_id(question_row: dict | object, default_index: int) -> int:
     return default_index + 1
 
 
+def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text: str) -> dict[str, list[str]]:
+    analysis = story_analysis if isinstance(story_analysis, dict) else {}
+    qa_answers = data.get("qa_answers") if isinstance(data.get("qa_answers"), list) else []
+    profile = data.get("interaction_profile") if isinstance(data.get("interaction_profile"), dict) else {}
+
+    def _append_unique(target: list[str], value: str) -> None:
+        text = str(value or "").strip()
+        if text and text not in target:
+            target.append(text)
+
+    career_profile: list[str] = []
+    constraints: list[str] = []
+    psychological_state: list[str] = []
+    action_capacity: list[str] = []
+
+    _append_unique(career_profile, f"Текущая идентичность: {str(analysis.get('current_identity', '')).strip() or 'данных недостаточно'}")
+    for item in analysis.get("experience_snapshot", []) if isinstance(analysis.get("experience_snapshot"), list) else []:
+        _append_unique(career_profile, f"Опыт: {item}")
+
+    for row in qa_answers:
+        if not isinstance(row, dict):
+            continue
+        question = str(row.get("question", "")).lower()
+        answer = str(row.get("answer", "")).strip()
+        signal = str(row.get("signal", "")).strip().lower()
+        if signal:
+            _append_unique(psychological_state, f"Сигнал: {signal}")
+        if "язык" in question:
+            _append_unique(career_profile, f"Язык: {answer}")
+        if any(token in question for token in ["документ", "право работать", "разрешен", "лиценз", "допуск"]):
+            _append_unique(career_profile, f"Документы/право работать: {answer}")
+        if any(token in question for token in ["цель", "роль", "направлен", "варианты работы"]):
+            _append_unique(career_profile, f"Реальная цель пользователя: {answer}")
+        if "доход" in question:
+            _append_unique(constraints, f"Доходная цель/финансовая необходимость: {answer}")
+        if any(token in question for token in ["сколько часов", "времени", "график"]):
+            _append_unique(constraints, f"Доступное время: {answer}")
+        if any(token in question for token in ["рынок", "ваканс", "конкурен", "спрос"]):
+            _append_unique(constraints, f"Рынок: {answer}")
+        if any(token in question for token in ["риск", "страх"]):
+            _append_unique(constraints, f"Готовность к риску: {answer}")
+        if any(token in question for token in ["тревож", "устал", "сомне", "не знаю, с чего начать", "перегруз", "стресс"]):
+            _append_unique(psychological_state, answer)
+
+    for marker in data.get("selected_psych_markers", []) if isinstance(data.get("selected_psych_markers"), list) else []:
+        _append_unique(psychological_state, str(marker))
+
+    choice_reasons = data.get("selected_choice_reasons") if isinstance(data.get("selected_choice_reasons"), dict) else {}
+    for choice, reason in choice_reasons.items():
+        c = str(choice or "").strip()
+        r = str(reason or "").strip()
+        if c and r:
+            _append_unique(career_profile, f"Причина выбора «{c}»: {r}")
+
+    answers_low = str(answers_text or "").lower().replace("ё", "е")
+    if any(token in answers_low for token in ["не знаю, с чего начать", "не знаю с чего начать", "слишком сложно", "устал", "тревог", "сомне"]):
+        _append_unique(psychological_state, "Эмоциональный перегруз/неопределенность")
+
+    pace = str(profile.get("pace") or data.get("pace") or "normal")
+    support_need = str(profile.get("support_need") or data.get("support_need") or "medium")
+    detail_pref = str(profile.get("detail_preference") or data.get("detail_preference") or "balanced")
+    _append_unique(action_capacity, f"Темп: {pace}")
+    _append_unique(action_capacity, f"Потребность в поддержке: {support_need}")
+    _append_unique(action_capacity, f"Размер шага: {detail_pref}")
+
+    if not constraints:
+        _append_unique(constraints, "Данных о изменении ограничений пока недостаточно")
+    if not psychological_state:
+        _append_unique(psychological_state, "Стабильное состояние без явного перегруза")
+
+    return {
+        "career_profile": career_profile[:10],
+        "constraints": constraints[:10],
+        "psychological_state": psychological_state[:10],
+        "action_capacity": action_capacity[:8],
+    }
+
+
 def _set_mvp_questions(
     analysis: dict,
     limit: int = 8,
@@ -1025,29 +1271,59 @@ def _set_mvp_questions(
     user_segment: str = SEGMENT_SPECIALIST,
 ) -> dict:
     updated = dict(analysis or {})
+    mode_key = str(mode or "calm_steps")
+    effective_limit = max(1, int(limit) if int(limit) > 0 else _question_count_for_mode(mode_key))
+
+    if mode_key == "fast":
+        normalized_fast: list[dict[str, object]] = []
+        for idx, row in enumerate(_questions_fast()[:effective_limit], start=1):
+            opts = row.get("options", []) if isinstance(row.get("options", []), list) else []
+            option_labels = [str(item).strip() for item in opts[:6] if str(item).strip()]
+            allowed_button_ids: list[str] = []
+            allowed_button_map: dict[str, str] = {}
+            for option in option_labels:
+                slug = _slugify(option)
+                suffix = 2
+                while slug in allowed_button_map:
+                    slug = f"{slug}_{suffix}"
+                    suffix += 1
+                allowed_button_ids.append(slug)
+                allowed_button_map[slug] = option
+            question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
+            normalized_fast.append(
+                {
+                    "id": idx,
+                    "question": question_text,
+                    "options": option_labels,
+                    "question_id": str(row.get("question_id") or _slugify(question_text)),
+                    "allowed_button_ids": allowed_button_ids,
+                    "allowed_button_map": allowed_button_map,
+                    "expected_answer_type": str(row.get("expected_answer_type") or _expected_answer_type(row)),
+                    "semantic_intent": str(row.get("semantic_intent") or _question_semantic_intent(question_text)),
+                }
+            )
+        updated["follow_up_questions"] = normalized_fast[:effective_limit]
+        return updated
+
     segment_specific = _segment_questions(user_segment)
     common = _segment_common_questions()
-    mode_base = _questions_fast() if mode == "fast" else _questions_support() if mode == "support" else _questions_calm()
-    mandatory = _mandatory_psych_social_questions()
-    mandatory_keys = {str(row.get("question", "")).strip().lower() for row in mandatory}
-    effective_limit = max(int(limit), len(mandatory))
-    regular_limit = max(0, effective_limit - len(mandatory))
-
+    mode_base = _questions_deep_route() if mode_key in {"deep_route", "support"} else _questions_calm()
     merged_base = segment_specific + common + mode_base
     deduped = _filter_known_questions(merged_base, story_text)
+
     selected: list[dict[str, object]] = []
     for row in deduped:
         if not isinstance(row, dict):
             continue
         q_key = str(row.get("question", "")).strip().lower()
-        if not q_key or q_key in mandatory_keys:
+        if not q_key:
             continue
         selected.append(row)
-        if len(selected) >= regular_limit:
+        if len(selected) >= effective_limit:
             break
 
     raw_extra = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)} | mandatory_keys
+    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)}
     if isinstance(raw_extra, list):
         for row in raw_extra:
             if not isinstance(row, dict):
@@ -1064,14 +1340,25 @@ def _set_mvp_questions(
             max_options = 15 if row.get("force_options_keyboard") else 6
             selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:max_options]})
             seen.add(q_key)
-            if len(selected) >= regular_limit:
+            if len(selected) >= effective_limit:
                 break
 
-    if len(selected) < 1 and regular_limit > 0:
-        selected = [deduped[0]] if deduped and isinstance(deduped[0], dict) else []
+    if len(selected) < effective_limit:
+        for row in merged_base:
+            if not isinstance(row, dict):
+                continue
+            q_key = str(row.get("question", "")).strip().lower()
+            if not q_key or q_key in seen:
+                continue
+            selected.append(row)
+            seen.add(q_key)
+            if len(selected) >= effective_limit:
+                break
 
-    combined = selected[:regular_limit] + mandatory
-    trimmed = combined[: max(1, min(effective_limit, len(combined)))]
+    if len(selected) < 1:
+        selected = [merged_base[0]] if merged_base and isinstance(merged_base[0], dict) else []
+
+    trimmed = selected[:effective_limit]
     normalized: list[dict[str, object]] = []
     for idx, row in enumerate(trimmed, start=1):
         if not isinstance(row, dict):
@@ -1080,10 +1367,29 @@ def _set_mvp_questions(
         if not isinstance(opts, list):
             opts = []
         max_options = 15 if row.get("force_options_keyboard") else 6
+        option_labels = [str(item).strip() for item in opts[:max_options] if str(item).strip()]
+        allowed_button_ids: list[str] = []
+        allowed_button_map: dict[str, str] = {}
+        for option in option_labels:
+            slug = _slugify(option)
+            suffix = 2
+            while slug in allowed_button_map:
+                slug = f"{slug}_{suffix}"
+                suffix += 1
+            allowed_button_ids.append(slug)
+            allowed_button_map[slug] = option
+
+        question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
+        question_id = str(row.get("question_id") or _slugify(question_text))
         normalized_row: dict[str, object] = {
             "id": idx,
-            "question": str(row.get("question", "")).strip() or f"Вопрос {idx}",
-            "options": opts[:max_options],
+            "question": question_text,
+            "options": option_labels,
+            "question_id": question_id,
+            "allowed_button_ids": allowed_button_ids,
+            "allowed_button_map": allowed_button_map,
+            "expected_answer_type": str(row.get("expected_answer_type") or _expected_answer_type(row)),
+            "semantic_intent": str(row.get("semantic_intent") or _question_semantic_intent(question_text)),
         }
         if row.get("multi_key"):
             normalized_row["multi_key"] = str(row.get("multi_key"))
@@ -1095,7 +1401,7 @@ def _set_mvp_questions(
             normalized_row["force_options_keyboard"] = True
         normalized.append(normalized_row)
 
-    updated["follow_up_questions"] = normalized[: max(1, min(effective_limit, len(normalized)))]
+    updated["follow_up_questions"] = normalized[:effective_limit]
     return updated
 
 
@@ -1144,6 +1450,54 @@ def _validate_answer(question_row: dict | object, answer: str, qa_answers: list[
             return "answer_validation_salary_conflict"
 
     return None
+
+
+def _is_known_previous_button(questions: list[dict], current_index: int, answer_text: str) -> bool:
+    candidate = str(answer_text or "").strip().lower()
+    if not candidate:
+        return False
+    for row in questions[:max(0, current_index)]:
+        if not isinstance(row, dict):
+            continue
+        options = row.get("options", [])
+        if not isinstance(options, list):
+            continue
+        for option in options:
+            if str(option).strip().lower() == candidate:
+                return True
+    return False
+
+
+def _free_text_signal(question_row: dict | object, answer_text: str) -> dict[str, str] | None:
+    if not isinstance(question_row, dict):
+        return None
+    expected = str(question_row.get("expected_answer_type") or "")
+    if expected != "free_text":
+        return None
+    low = str(answer_text or "").strip().lower().replace("ё", "е")
+    overwhelm_markers = [
+        "не знаю, с чего начать",
+        "не знаю с чего начать",
+        "не понимаю с чего начать",
+        "сложно начать",
+        "не понимаю",
+        "хаос",
+        "растерян",
+    ]
+    if any(marker in low for marker in overwhelm_markers):
+        return {
+            "signal": "overwhelm",
+            "meaning": "перегруз / неопределенность / трудность выбора",
+            "not_equal_to": "новая карьерная цель",
+        }
+    return None
+
+
+def _is_career_switch_choice(choice: object) -> bool:
+    low = str(choice or "").strip().lower().replace("ё", "е")
+    if not low:
+        return False
+    return "сменить сфер" in low or "сменить профес" in low
 
 
 def format_cv_route_review(resume_analysis: dict, report: dict, lang: str) -> str:
@@ -1490,12 +1844,17 @@ async def _download_bot_file(message: Message, file_id: str, suffix: str = ".tmp
 
 async def _rebuild_report_with_note(message: Message, state: FSMContext, lang: str, note_text: str) -> None:
     data = await state.get_data()
+    story_analysis = data.get("story_analysis") or {}
+    base_answers = (data.get("answers_text") or "").strip()
+    updated_answers = (base_answers + "\n\nУточнение пользователя:\n" + note_text).strip()
+    decision_layers = _build_decision_layers(data, story_analysis, updated_answers)
     await state.set_state(CareerFlow.REBUILDING_ROUTE)
     await message.answer(t(lang, "route_rebuild_progress"), reply_markup=result_actions_keyboard())
     report = await ai_client.build_report(
         (data.get("story_text") or "").strip(),
-        data.get("story_analysis") or {},
-        ((data.get("answers_text") or "").strip() + "\n\nУточнение пользователя:\n" + note_text).strip(),
+        story_analysis,
+        updated_answers,
+        decision_layers=decision_layers,
         resume_analysis=data.get("resume_analysis") or {},
         selected_barriers=data.get("selected_barriers") or [],
         selected_fears=data.get("selected_fears") or [],
@@ -1506,9 +1865,8 @@ async def _rebuild_report_with_note(message: Message, state: FSMContext, lang: s
     )
     chunks = report_chunks(report, lang)
     await state.update_data(final_report=report, report_chunks=chunks, final_report_generated=True)
-    await state.set_state(CareerFlow.FINAL_READY)
-    await message.answer(t(lang, "route_rebuild_result_intro"), reply_markup=result_actions_keyboard())
-    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "route_rebuild_result_intro"), reply_markup=route_choice_keyboard())
+    await _present_route_selection(message, state, lang, report)
 
 
 def _has_income_signal(report: dict) -> bool:
@@ -1541,6 +1899,285 @@ def _level_label(value: object) -> str:
     return labels.get(normalized, str(value or "не уточнено").strip() or "не уточнено")
 
 
+def _resource_human_message(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "low":
+        return (
+            "Сейчас ресурс ограничен.\n"
+            "Вам важнее не брать на себя большой карьерный разворот, а выбрать путь, который дает доход "
+            "и не требует резко учиться всему с нуля."
+        )
+    if normalized == "medium":
+        return (
+            "Сейчас ресурс частично ограничен.\n"
+            "Лучше двигаться короткими шагами: сначала стабильный доход и понятный ритм, затем расширять траекторию."
+        )
+    if normalized == "high":
+        return (
+            "Сейчас ресурс устойчивый.\n"
+            "Вы можете брать более амбициозные шаги, но сохранять контроль: измеримые действия и проверка гипотез на рынке."
+        )
+    return (
+        "Ресурс пока нельзя оценить точно.\n"
+        "Нужно уточнить, насколько стабильно у вас хватает времени, сил и темпа на регулярные карьерные действия."
+    )
+
+
+def _integration_human_message(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "low":
+        return (
+            "Интеграция пока начальная.\n"
+            "Нужен щадящий маршрут: меньше зависимости от широких контактов и сложных локальных процессов на старте."
+        )
+    if normalized == "medium":
+        return (
+            "Интеграция пока частичная.\n"
+            "Вы уже живете и работаете в стране, но язык, местные контакты и понимание рынка еще требуют укрепления."
+        )
+    if normalized == "high":
+        return (
+            "Интеграция уже устойчивая.\n"
+            "Можно делать ставку на роли с более высокой планкой входа и активнее использовать локальный нетворк."
+        )
+    return (
+        "Интеграцию пока нельзя оценить точно.\n"
+        "Мы знаем, что вы уже живете в стране, но пока не понимаем, насколько уверенно вы используете язык, "
+        "контакты и местные сервисы."
+    )
+
+
+def _professional_core_summary(report: dict) -> str:
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    not_reset = report.get("what_not_reset") if isinstance(report.get("what_not_reset"), list) else []
+    snapshot = " ".join(str(item) for item in not_reset[:6]).lower().replace("ё", "е")
+    state_blob = " ".join(
+        [
+            str(digital_human.get("current_state", "")),
+            str(digital_human.get("main_asset", "")),
+            snapshot,
+        ]
+    ).lower().replace("ё", "е")
+
+    worker_markers = ["плитк", "гипсокарт", "ремонт", "строит", "мебел", "рукам", "отделк"]
+    if any(marker in state_blob for marker in worker_markers):
+        return (
+            "Вы не начинаете с нуля. Ваш основной капитал — практический опыт, способность работать руками, "
+            "доводить задачу до результата и общаться с заказчиком.\n\n"
+            "Сейчас вам нужен не абстрактный «новый старт», а перевод уже имеющегося опыта в понятный доход в новой стране."
+        )
+
+    return (
+        "Вы не начинаете с нуля. У вас уже есть профессиональный капитал: практический опыт, рабочая дисциплина, "
+        "умение доводить задачи до результата и взаимодействовать с людьми.\n\n"
+        "Сейчас нужен не «новый старт с пустого места», а точная упаковка и перевод вашего опыта в понятный доход в новой стране."
+    )
+
+
+def _route_speed_label(raw: str) -> str:
+    low = str(raw or "").lower()
+    if any(token in low for token in ["1-3", "1–3", "2-4", "2–4", "быстр", "short"]):
+        return "быстрее"
+    if any(token in low for token in ["6", "12", "долг", "long"]):
+        return "медленнее"
+    return "средняя"
+
+
+def _route_risk_label(raw: str) -> str:
+    low = str(raw or "").lower()
+    if any(token in low for token in ["выс", "high", "ниже", "низк", "low"]):
+        return "ниже" if any(token in low for token in ["ниже", "низк", "low"]) else "выше"
+    if any(token in low for token in ["сред", "medium", "умер"]):
+        return "средний"
+    return "средний"
+
+
+def _route_income_label(raw: str) -> str:
+    low = str(raw or "").lower()
+    if any(token in low for token in ["9000", "10000", "12000", "выс", "high"]):
+        return "выше"
+    if any(token in low for token in ["позже", "later", "долгоср", "6-18", "6–18"]):
+        return "позже"
+    return "средний"
+
+
+def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    recs = report.get("career_recommendations") if isinstance(report.get("career_recommendations"), list) else []
+    solutions = report.get("real_solutions") if isinstance(report.get("real_solutions"), list) else []
+
+    rows: list[dict[str, str]] = []
+
+    main_title = str(decision.get("recommended_main_path") or "Основной маршрут").strip()
+    main_rec = recs[0] if recs and isinstance(recs[0], dict) else {}
+    rows.append(
+        {
+            "route": main_title,
+            "income": _route_income_label(str(main_rec.get("income_range") or "")),
+            "speed": _route_speed_label(str(main_rec.get("entry_timeline") or "")),
+            "risk": _route_risk_label(_join_items(main_rec.get("risks", []), 3)),
+            "need": _join_items(main_rec.get("pros", []), 2) or _join_items(main_rec.get("risks", []), 2) or "резюме, отклики",
+        }
+    )
+
+    backup = str(decision.get("backup_path") or "").strip()
+    if backup and backup.lower() != main_title.lower():
+        backup_rec = recs[1] if len(recs) > 1 and isinstance(recs[1], dict) else {}
+        rows.append(
+            {
+                "route": backup,
+                "income": _route_income_label(str(backup_rec.get("income_range") or "")),
+                "speed": _route_speed_label(str(backup_rec.get("entry_timeline") or "")),
+                "risk": _route_risk_label(_join_items(backup_rec.get("risks", []), 3)),
+                "need": _join_items(backup_rec.get("pros", []), 2) or "резюме, отклики",
+            }
+        )
+
+    long_route = ""
+    for item in solutions:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        level = str(item.get("recommendation_level") or "").lower()
+        if "долг" in level or "идеал" in level or "переобуч" in title.lower() or "смена" in title.lower():
+            long_route = title
+            break
+    if not long_route:
+        long_route = "Переобучение / долгий трек"
+    if all(long_route.lower() != row["route"].lower() for row in rows):
+        rows.append(
+            {
+                "route": long_route,
+                "income": "позже",
+                "speed": "медленнее",
+                "risk": "средний",
+                "need": "язык, время, деньги",
+            }
+        )
+
+    return rows[:3]
+
+
+def _format_route_comparison(rows: list[dict[str, str]]) -> str:
+    lines = [
+        "Маршрут | Потенциал дохода | Скорость | Риск | Что нужно",
+        "--- | --- | --- | --- | ---",
+    ]
+    for row in rows:
+        lines.append(
+            " | ".join(
+                [
+                    row.get("route", "-"),
+                    row.get("income", "-"),
+                    row.get("speed", "-"),
+                    row.get("risk", "-"),
+                    row.get("need", "-"),
+                ]
+            )
+        )
+    return "\n".join(lines)
+
+
+def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str, str]]) -> str:
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    if not decision:
+        return ""
+
+    selected_route = str(decision.get("recommended_main_path") or "").strip()
+    if action == ROUTE_CHOICE_STABLE:
+        target = next((r for r in rows if "ниже" in str(r.get("risk", "")).lower() or "быстр" in str(r.get("speed", "")).lower()), rows[0] if rows else {})
+        selected_route = str(target.get("route") or selected_route)
+    elif action == ROUTE_CHOICE_PRIVATE:
+        target = next((r for r in rows if "част" in str(r.get("route", "")).lower()), None)
+        selected_route = str((target or {}).get("route") or "Постепенный выход на частные заказы")
+    elif action == ROUTE_CHOICE_RETRAIN:
+        target = next((r for r in rows if any(token in str(r.get("route", "")).lower() for token in ["переобуч", "долг", "смен"])), None)
+        selected_route = str((target or {}).get("route") or "Переобучение / долгосрочный переход")
+    elif action == ROUTE_CHOICE_HELP:
+        target = next((r for r in rows if "ниже" in str(r.get("risk", "")).lower()), rows[0] if rows else {})
+        selected_route = str(target.get("route") or selected_route)
+
+    if selected_route:
+        decision["recommended_main_path"] = selected_route
+        decision_summary = str(decision.get("decision_summary") or "").strip()
+        suffix = "Маршрут зафиксирован совместно с пользователем на этапе выбора перед финальной картой."
+        if suffix not in decision_summary:
+            decision["decision_summary"] = f"{decision_summary} {suffix}".strip()
+        report["career_decision"] = decision
+    return selected_route
+
+
+async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
+    await state.set_state(CareerFlow.FINAL_READY)
+    await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
+    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "post_result_scenarios_intro"), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "map_validation_block"), reply_markup=map_validation_keyboard())
+
+    pdf_report_path = ""
+    html_report_path = ""
+    try:
+        user_name = " ".join(
+            part
+            for part in [
+                (message.from_user.first_name if message.from_user else "") or "",
+                (message.from_user.last_name if message.from_user else "") or "",
+            ]
+            if part
+        ).strip()
+
+        # Required flow: HTML report is always prepared first.
+        html_path = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+        html_report_path = str(html_path)
+
+        await _track_event(message, state, "html_ready", meta={"path": html_path.name})
+        await state.set_state(CareerFlow.PDF_GENERATING)
+        pdf_path, pdf_error = generate_pdf_from_html_file_with_error(html_path)
+
+        if pdf_path is not None:
+            pdf_report_path = str(pdf_path)
+            await _track_event(message, state, "pdf_ready", meta={"engine": settings.report_pdf_engine})
+            await state.set_state(CareerFlow.PDF_READY)
+            await message.answer_document(
+                FSInputFile(str(pdf_path)),
+                caption=t(lang, "pdf_send_caption"),
+                reply_markup=result_actions_keyboard(),
+            )
+        else:
+            await _track_event(
+                message,
+                state,
+                "pdf_fallback_html",
+                meta={"engine": settings.report_pdf_engine, "reason": str(pdf_error or "unknown")[:240]},
+            )
+            await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
+    except Exception:
+        await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
+        await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
+
+    await state.set_state(CareerFlow.FINAL_READY)
+    today_task = _today_task_from_report(report)
+    await state.update_data(
+        skiller_today_task=today_task,
+        pdf_report_path=pdf_report_path,
+        html_report_path=html_report_path,
+        execution_steps=_build_execution_steps(report),
+        execution_progress={},
+        current_execution_day=0,
+    )
+
+
+async def _present_route_selection(message: Message, state: FSMContext, lang: str, report: dict) -> None:
+    rows = _build_route_comparison_rows(report)
+    compare_text = _format_route_comparison(rows)
+    await state.update_data(route_compare_rows=rows)
+    await state.set_state(CareerFlow.ROUTE_SELECTION)
+    await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
+    await message.answer(f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
+    await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+
+
 def report_chunks(report: dict, lang: str) -> dict[str, str]:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     recommendations = report.get("career_recommendations", [])
@@ -1550,23 +2187,14 @@ def report_chunks(report: dict, lang: str) -> dict[str, str]:
     energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
     career_priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
     competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
-    resource_level_raw = str(report.get("resource_level") or "не уточнено").strip() or "не уточнено"
-    integration_level_raw = str(report.get("integration_level") or "не уточнено").strip() or "не уточнено"
-    resource_level = (
-        f"{resource_level_raw} ({_level_label(resource_level_raw)})"
-        if resource_level_raw != "не уточнено"
-        else resource_level_raw
-    )
-    integration_level = (
-        f"{integration_level_raw} ({_level_label(integration_level_raw)})"
-        if integration_level_raw != "не уточнено"
-        else integration_level_raw
-    )
+    resource_level = _resource_human_message(report.get("resource_level"))
+    integration_level = _integration_human_message(report.get("integration_level"))
 
     header = _clip(
         "\n\n".join(
             [
                 f"=== {t(lang, 'digital_human_label')} ===\n{digital_human.get('summary') or '-'}",
+                f"Ваше профессиональное ядро:\n{_professional_core_summary(report)}",
                 f"{t(lang, 'who_now_label')}:\n{digital_human.get('current_state') or '-'}",
                 f"{t(lang, 'main_asset_label')}:\n{digital_human.get('main_asset') or '-'}",
                 f"{t(lang, 'main_risk_label')}:\n{digital_human.get('main_risk') or '-'}",
@@ -1575,8 +2203,8 @@ def report_chunks(report: dict, lang: str) -> dict[str, str]:
                 f"Источники энергии:\n{_list_block(energy_sources)}",
                 f"Карьерные приоритеты:\n{_list_block(career_priorities)}",
                 f"STAR-компетенции:\n{_list_block(competency_signals)}",
-                f"Уровень ресурса:\n{resource_level}",
-                f"Уровень интеграции:\n{integration_level}",
+                f"Ресурс и рабочий темп:\n{resource_level}",
+                f"Состояние интеграции:\n{integration_level}",
                 f"Скрытые сильные стороны:\n{_list_block(digital_human.get('hidden_strengths', []))}",
                 f"{t(lang, 'fast_income_path_label')}:\n{digital_human.get('fastest_path_to_income') or '-'}",
                 f"{t(lang, 'strengths_label')}:\n{_list_block((digital_human.get('skills') or {}).get('professional', []))}",
@@ -1702,9 +2330,9 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     profile = data.get("interaction_profile") or _build_interaction_profile(story_text, data)
     user_mode = str(data.get("user_mode") or "calm_steps")
     user_segment = str(data.get("user_segment") or _detect_user_segment(story_text, analysis_raw))
-    mode_max = int(data.get("max_questions") or 8)
+    mode_max = _question_count_for_mode(user_mode, data.get("promised_question_count") or data.get("max_questions"))
     cv_uploaded = bool(data.get("cv_uploaded"))
-    q_count = min(3, max(1, mode_max)) if cv_uploaded else max(1, mode_max)
+    q_count = max(1, mode_max)
     analysis = _set_mvp_questions(
         analysis_raw,
         limit=q_count,
@@ -1736,6 +2364,9 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         integration_selected=[],
         energy_selected=[],
         priorities_selected=[],
+        selected_choice_reasons={},
+        pending_choice_reason={},
+        promised_question_count=q_count,
     )
 
     if not questions:
@@ -1756,8 +2387,17 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     else:
         await message.answer(t(lang, "step_questions"))
     await message.answer(_question_prompt(analysis, 0, lang), reply_markup=_question_reply_markup(analysis, 0))
+    first_question = questions[0] if questions and isinstance(questions[0], dict) else {}
+    await _track_event(
+        message,
+        state,
+        "question_shown",
+        meta={
+            "question_index": 1,
+            "question_id": _question_id(first_question, 0) if first_question else 1,
+        },
+    )
     if cv_uploaded:
-        first_question = questions[0] if questions and isinstance(questions[0], dict) else {}
         _resume_debug_log(message, "question_1_sent", question_id=first_question.get("id", 1))
 
 
@@ -1796,26 +2436,50 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     selected_barriers = data.get("selected_barriers") or []
     selected_fears = data.get("selected_fears") or []
     selected_psych_markers = data.get("selected_psych_markers") or []
+    selected_choice_reasons = data.get("selected_choice_reasons") if isinstance(data.get("selected_choice_reasons"), dict) else {}
+    if isinstance(selected_psych_markers, list) and selected_psych_markers:
+        psych_block = "\n".join(f"- {item}" for item in selected_psych_markers[:6] if str(item).strip())
+        if psych_block:
+            answers_text = (answers_text + "\n\nПсихологические маркеры:\n" + psych_block).strip()
+    if isinstance(selected_barriers, list) and selected_barriers:
+        barrier_block = "\n".join(f"- {item}" for item in selected_barriers[:6] if str(item).strip())
+        if barrier_block:
+            answers_text = (answers_text + "\n\nВыбранные барьеры:\n" + barrier_block).strip()
+    if selected_choice_reasons:
+        reason_lines = [
+            f"- {str(choice).strip()}: {str(reason).strip()}"
+            for choice, reason in selected_choice_reasons.items()
+            if str(choice).strip() and str(reason).strip()
+        ]
+        if reason_lines:
+            answers_text = (answers_text + "\n\nПричины ключевых выборов:\n" + "\n".join(reason_lines)).strip()
     user_mode = str(data.get("user_mode") or "calm_steps")
+    decision_layers = _build_decision_layers(data, story_analysis, answers_text)
 
     await state.set_state(CareerFlow.GENERATING_REPORT)
-    if user_mode == "support":
+    if user_mode in {"support", "deep_route"}:
         await message.answer(t(lang, "support_before_map"))
     await message.answer(t(lang, "step_report"))
     await message.answer(t(lang, "processing_answers"))
+    await _track_event(message, state, "report_started", meta={"mode": user_mode})
 
-    report = await ai_client.build_report(
-        story_text,
-        story_analysis,
-        answers_text,
-        resume_analysis=resume_analysis,
-        selected_barriers=selected_barriers,
-        selected_fears=selected_fears,
-        selected_psych_markers=selected_psych_markers,
-        selected_energy_sources=energy_sources,
-        selected_career_priorities=career_priorities,
-        language=lang,
-    )
+    try:
+        report = await ai_client.build_report(
+            story_text,
+            story_analysis,
+            answers_text,
+            decision_layers=decision_layers,
+            resume_analysis=resume_analysis,
+            selected_barriers=selected_barriers,
+            selected_fears=selected_fears,
+            selected_psych_markers=selected_psych_markers,
+            selected_energy_sources=energy_sources,
+            selected_career_priorities=career_priorities,
+            language=lang,
+        )
+    except Exception as exc:
+        await _track_event(message, state, "report_failed", meta={"error": type(exc).__name__})
+        raise
     chunks = report_chunks(report, lang)
     await state.update_data(
         final_report=report,
@@ -1824,65 +2488,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         final_report_generated=True,
     )
     await _track_event(message, state, "report_generated", meta={"has_income_signal": _has_income_signal(report)})
-    await state.set_state(CareerFlow.FINAL_READY)
-
-    await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
-    await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
-    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
-    await message.answer(t(lang, "post_result_scenarios_intro"), reply_markup=result_actions_keyboard())
-
-    pdf_report_path = ""
-    html_report_path = ""
-    try:
-        user_name = " ".join(
-            part
-            for part in [
-                (message.from_user.first_name if message.from_user else "") or "",
-                (message.from_user.last_name if message.from_user else "") or "",
-            ]
-            if part
-        ).strip()
-        await state.set_state(CareerFlow.PDF_GENERATING)
-        pdf_path, html_path = generate_report_files(report, output_dir=settings.report_output_dir, user_name=user_name)
-        html_report_path = str(html_path)
-
-        if pdf_path is not None:
-            pdf_report_path = str(pdf_path)
-            await _track_event(message, state, "pdf_ready", meta={"engine": settings.report_pdf_engine})
-            await state.set_state(CareerFlow.PDF_READY)
-            await message.answer_document(
-                FSInputFile(str(pdf_path)),
-                caption=t(lang, "pdf_send_caption"),
-                reply_markup=result_actions_keyboard(),
-            )
-        else:
-            await _track_event(message, state, "pdf_fallback_html", meta={"engine": settings.report_pdf_engine})
-            await message.answer_document(
-                FSInputFile(str(html_path)),
-                caption=t(lang, "pdf_send_error"),
-                reply_markup=result_actions_keyboard(),
-            )
-    except Exception:
-        await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
-        if html_report_path and os.path.exists(html_report_path):
-            await message.answer_document(
-                FSInputFile(html_report_path),
-                caption=t(lang, "pdf_send_error"),
-                reply_markup=result_actions_keyboard(),
-            )
-        else:
-            await message.answer(t(lang, "pdf_send_error"), reply_markup=result_actions_keyboard())
-
-    await state.set_state(CareerFlow.FINAL_READY)
-    today_task = _today_task_from_report(report)
-    await state.update_data(
-        skiller_today_task=today_task,
-        pdf_report_path=pdf_report_path,
-        html_report_path=html_report_path,
-        execution_steps=_build_execution_steps(report),
-        execution_progress={},
-        current_execution_day=0,
-    )
+    await _present_route_selection(message, state, lang, report)
 
 
 def _question_reply_markup(analysis: dict, index: int):
@@ -1947,8 +2553,8 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     preferred_input = str(data.get("preferred_input") or profile.get("preferred_input") or "text")
     if selected_mode == "fast":
         profile.update({"pace": "fast", "support_need": "low", "detail_preference": "brief"})
-    elif selected_mode == "support":
-        profile.update({"pace": "slow", "support_need": "high", "detail_preference": "balanced"})
+    elif selected_mode in {"deep_route", "support"}:
+        profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "detailed"})
     else:
         profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "balanced"})
     profile["preferred_input"] = preferred_input
@@ -1980,9 +2586,7 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     await message.answer(t(lang, "processing_story"))
     analysis = await ai_client.analyze_story(clean, lang)
     user_segment = _detect_user_segment(clean, analysis)
-    q_count = int(data.get("max_questions") or 8)
-    if profile.get("emotional_tone") in {"tired", "angry"}:
-        q_count = min(q_count, 3)
+    q_count = _question_count_for_mode(selected_mode, data.get("max_questions"))
     analysis = _set_mvp_questions(
         analysis,
         limit=q_count,
@@ -1994,11 +2598,69 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         story_analysis=analysis,
         user_segment=user_segment,
         user_segment_label=_segment_label(user_segment),
+        promised_question_count=q_count,
+        awaiting_story_correction=False,
     )
-    await state.set_state(CareerFlow.ASK_CV)
-    await message.answer(t(lang, "story_after_received"))
-    await message.answer(t(lang, "step_resume"), reply_markup=resume_choice_keyboard())
-    await message.answer(t(lang, "resume_offer"), reply_markup=resume_choice_keyboard())
+    await state.set_state(CareerFlow.CONFIRMING_STORY)
+    await message.answer(_story_confirmation_text(analysis, q_count), reply_markup=story_confirmation_keyboard())
+    await message.answer(t(lang, "story_confirmation_prompt"), reply_markup=story_confirmation_keyboard())
+
+
+@router.message(CareerFlow.CONFIRMING_STORY, F.text.in_(ALL_STORY_CONFIRM_ACTIONS))
+async def handle_story_confirmation_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    action = (message.text or "").strip()
+
+    if action == STORY_CONFIRM_OK:
+        await state.update_data(awaiting_story_correction=False)
+        await _start_questions_module(message, state, lang)
+        return
+
+    if action == STORY_CONFIRM_FIX:
+        await state.update_data(awaiting_story_correction=True)
+        await message.answer(t(lang, "story_correction_prompt"), reply_markup=input_method_keyboard())
+        return
+
+
+@router.message(CareerFlow.CONFIRMING_STORY, F.text)
+async def handle_story_confirmation_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    clean = (message.text or "").strip()
+
+    if not clean:
+        await message.answer(t(lang, "story_confirmation_fallback"), reply_markup=story_confirmation_keyboard())
+        return
+
+    if not bool(data.get("awaiting_story_correction")):
+        await message.answer(t(lang, "story_confirmation_fallback"), reply_markup=story_confirmation_keyboard())
+        return
+
+    story_text = (data.get("story_text") or "").strip()
+    updated_story = (story_text + "\n\nУточнение пользователя:\n" + clean).strip()
+    user_mode = str(data.get("user_mode") or "calm_steps")
+    q_count = _question_count_for_mode(user_mode, data.get("promised_question_count") or data.get("max_questions"))
+    await state.update_data(story_text=updated_story, awaiting_story_correction=False)
+    await message.answer(t(lang, "story_correction_applied"))
+    await message.answer(t(lang, "processing_story"))
+    analysis = await ai_client.analyze_story(updated_story, lang)
+    user_segment = _detect_user_segment(updated_story, analysis)
+    analysis = _set_mvp_questions(
+        analysis,
+        limit=q_count,
+        mode=user_mode,
+        story_text=updated_story,
+        user_segment=user_segment,
+    )
+    await state.update_data(
+        story_analysis=analysis,
+        user_segment=user_segment,
+        user_segment_label=_segment_label(user_segment),
+        promised_question_count=q_count,
+    )
+    await message.answer(_story_confirmation_text(analysis, q_count), reply_markup=story_confirmation_keyboard())
+    await message.answer(t(lang, "story_confirmation_prompt"), reply_markup=story_confirmation_keyboard())
 
 
 async def process_answers_input(message: Message, state: FSMContext, text: str) -> None:
@@ -2032,6 +2694,26 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
         await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
         return
 
+    pending_choice_reason = data.get("pending_choice_reason") if isinstance(data.get("pending_choice_reason"), dict) else {}
+    if pending_choice_reason:
+        if not clean:
+            await message.answer(
+                t(lang, "career_switch_reason_prompt", choice=str(pending_choice_reason.get("choice_label") or "Сменить профессию")),
+                reply_markup=career_switch_reason_keyboard(),
+            )
+            return
+        allowed_options = {str(item).strip().lower() for item in ALL_CAREER_SWITCH_REASON_OPTIONS}
+        normalized = clean.strip().lower()
+        reason_value = clean if normalized in allowed_options else f"Другое: {clean}"
+        selected_choice_reasons = dict(data.get("selected_choice_reasons") or {})
+        choice_label = str(pending_choice_reason.get("choice_label") or "Сменить профессию")
+        selected_choice_reasons[choice_label] = reason_value
+        await state.update_data(selected_choice_reasons=selected_choice_reasons, pending_choice_reason={})
+        await message.answer(t(lang, "career_switch_reason_saved", reason=reason_value))
+        if questions and qa_index < len(questions):
+            await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+        return
+
     if not clean:
         await message.answer(t(lang, "answers_too_short"))
         return
@@ -2040,6 +2722,39 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
         current = questions[qa_index]
         current_q_id = _question_id(current, qa_index)
         question_text = current.get("question", f"Вопрос {qa_index + 1}") if isinstance(current, dict) else str(current)
+        current_options = current.get("options", []) if isinstance(current, dict) and isinstance(current.get("options", []), list) else []
+        current_options_low = {str(item).strip().lower() for item in current_options if str(item).strip()}
+
+        # Reject stale button answers from previous questions and require explicit confirmation.
+        if clean.lower() not in current_options_low and _is_known_previous_button(questions, qa_index, clean):
+            semantic_intent = str(current.get("semantic_intent") or "ответ по текущему вопросу") if isinstance(current, dict) else "ответ по текущему вопросу"
+            inferred_meaning = f"{semantic_intent}: {clean}"
+            await _track_event(
+                message,
+                state,
+                "conflict_detected",
+                meta={
+                    "question_index": qa_index + 1,
+                    "question_id": current_q_id,
+                    "reason": "context_mismatch",
+                },
+            )
+            await state.update_data(
+                pending_answer_review={
+                    "index": qa_index,
+                    "question": question_text,
+                    "question_id": current_q_id,
+                    "answer": clean,
+                    "review_type": "context_mismatch",
+                    "normalized_answer": inferred_meaning,
+                }
+            )
+            await message.answer(t(lang, "answer_context_mismatch_intro"), reply_markup=answer_review_keyboard(context_mismatch=True))
+            await message.answer(
+                t(lang, "answer_context_mismatch_question", meaning=inferred_meaning),
+                reply_markup=answer_review_keyboard(context_mismatch=True),
+            )
+            return
 
         if isinstance(current, dict) and current.get("multi_key"):
             multi_key = str(current.get("multi_key") or "").strip()
@@ -2064,6 +2779,29 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 if not selected_values:
                     await message.answer(t(lang, "multi_select_empty"), reply_markup=_question_reply_markup(analysis, qa_index))
                     return
+                if multi_key == "priorities":
+                    selected_choice_reasons = dict(data.get("selected_choice_reasons") or {})
+                    missing_reason_choice = next(
+                        (
+                            choice
+                            for choice in selected_values
+                            if _is_career_switch_choice(choice) and not str(selected_choice_reasons.get(choice) or "").strip()
+                        ),
+                        "",
+                    )
+                    if missing_reason_choice:
+                        await state.update_data(
+                            pending_choice_reason={
+                                "question_index": qa_index,
+                                "question_id": current_q_id,
+                                "choice_label": missing_reason_choice,
+                            }
+                        )
+                        await message.answer(
+                            t(lang, "career_switch_reason_prompt", choice=missing_reason_choice),
+                            reply_markup=career_switch_reason_keyboard(),
+                        )
+                        return
                 qa_answers.append(
                     {
                         "question": question_text,
@@ -2071,6 +2809,21 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                         "answer": ", ".join(selected_values[:max_select]),
                     }
                 )
+                if multi_key == "priorities":
+                    selected_choice_reasons = dict(data.get("selected_choice_reasons") or {})
+                    for selected_item in selected_values:
+                        if not _is_career_switch_choice(selected_item):
+                            continue
+                        reason_value = str(selected_choice_reasons.get(selected_item) or "").strip()
+                        if reason_value:
+                            qa_answers.append(
+                                {
+                                    "question": "Почему выбрана смена профессии",
+                                    "question_id": "career_switch_reason",
+                                    "answer": reason_value,
+                                }
+                            )
+                        break
                 qa_index += 1
                 update_payload: dict[str, object] = {
                     "qa_answers": qa_answers,
@@ -2093,6 +2846,13 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 await state.update_data(**update_payload)
                 if qa_index < len(questions):
                     await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+                    next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
+                    await _track_event(
+                        message,
+                        state,
+                        "question_shown",
+                        meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                    )
                     return
 
                 merged_answers = "\n".join(
@@ -2126,6 +2886,16 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_energy_sources"] = selected_values[:5]
                 if multi_key == "priorities":
                     update_payload["selected_career_priorities"] = selected_values[:4]
+                    selected_choice_reasons = dict(data.get("selected_choice_reasons") or {})
+                    if _is_career_switch_choice(clean) and not str(selected_choice_reasons.get(clean) or "").strip():
+                        update_payload["pending_choice_reason"] = {
+                            "question_index": qa_index,
+                            "question_id": current_q_id,
+                            "choice_label": clean,
+                        }
+                        await state.update_data(**update_payload)
+                        await message.answer(t(lang, "career_switch_reason_prompt", choice=clean), reply_markup=career_switch_reason_keyboard())
+                        return
                 await state.update_data(**update_payload)
                 await message.answer(
                     t(
@@ -2145,6 +2915,12 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
         issue_key = _validate_answer(current, clean, qa_answers)
         if issue_key:
+            await _track_event(
+                message,
+                state,
+                "invalid_answer",
+                meta={"question_index": qa_index + 1, "question_id": _question_id(current, qa_index), "issue": issue_key},
+            )
             if issue_key == "answer_validation_speed_mismatch":
                 await message.answer(t(lang, issue_key))
                 await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
@@ -2162,6 +2938,11 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             return
 
         qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean})
+        signal_payload = _free_text_signal(current, clean)
+        if signal_payload:
+            qa_answers[-1]["signal"] = signal_payload["signal"]
+            qa_answers[-1]["meaning"] = signal_payload["meaning"]
+            qa_answers[-1]["not_equal_to"] = signal_payload["not_equal_to"]
         qa_index += 1
         await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={})
 
@@ -2175,6 +2956,13 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
         if qa_index < len(questions):
             await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+            next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
+            await _track_event(
+                message,
+                state,
+                "question_shown",
+                meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+            )
             return
 
         merged_answers = "\n".join(
@@ -2354,6 +3142,7 @@ async def barriers_fallback(message: Message, state: FSMContext) -> None:
 @router.message(CareerFlow.PDF_GENERATING, F.text | F.voice | F.document | F.photo | F.sticker)
 async def generation_lock_fallback(message: Message, state: FSMContext) -> None:
     lang = _user_language(await state.get_data())
+    await _track_event(message, state, "invalid_answer", action="during_generation", meta={"kind": "stale_input_while_generating"})
     await message.answer(t(lang, "generation_lock_message"))
 
 
@@ -2392,6 +3181,8 @@ async def restart_flow(message: Message, state: FSMContext) -> None:
         final_report_generated=False,
         pdf_report_path="",
         pending_answer_review={},
+        selected_choice_reasons={},
+        pending_choice_reason={},
         reminder_due_at="",
     )
     await state.set_state(CareerFlow.WAITING_STORY)
@@ -2460,6 +3251,69 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         await message.answer(t(lang, "question_answer_hint"))
         return
 
+    review_type = str(pending.get("review_type") or "").strip()
+    if review_type == "context_mismatch":
+        qa_index = int(data.get("qa_index", 0))
+        analysis = data.get("story_analysis") or {}
+        qa_answers = list(data.get("qa_answers") or [])
+        user_mode = str(data.get("user_mode") or "calm_steps")
+        quick_report_after_questions = bool(data.get("quick_report_after_questions"))
+
+        if action == ANSWER_CONTEXT_NO:
+            await state.update_data(pending_answer_review={})
+            await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+            questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+            next_q = questions[qa_index] if qa_index < len(questions) and isinstance(questions[qa_index], dict) else {}
+            await _track_event(
+                message,
+                state,
+                "question_shown",
+                meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+            )
+            return
+
+        if action == ANSWER_CONTEXT_YES:
+            qa_answers.append(
+                {
+                    "question": str(pending.get("question", f"Вопрос {qa_index + 1}")),
+                    "question_id": int(pending.get("question_id", qa_index + 1)),
+                    "answer": str(pending.get("normalized_answer") or str(pending.get("answer", "")).strip()),
+                }
+            )
+            qa_index += 1
+            await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={})
+
+            questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+            if qa_index < len(questions):
+                await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+                next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
+                await _track_event(
+                    message,
+                    state,
+                    "question_shown",
+                    meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                )
+                return
+
+            merged_answers = "\n".join(
+                f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
+                for idx, row in enumerate(qa_answers)
+                if isinstance(row, dict)
+            )
+            await state.update_data(answers_text=merged_answers)
+            if quick_report_after_questions or user_mode == "fast":
+                await _build_and_send_report(message, state, lang)
+                return
+            await _start_barriers_module(message, state, lang)
+            return
+
+        await message.answer(t(lang, "answer_context_mismatch_intro"), reply_markup=answer_review_keyboard(context_mismatch=True))
+        await message.answer(
+            t(lang, "answer_context_mismatch_question", meaning=str(pending.get("normalized_answer") or "")),
+            reply_markup=answer_review_keyboard(context_mismatch=True),
+        )
+        return
+
     qa_answers = list(data.get("qa_answers") or [])
     qa_index = int(data.get("qa_index", 0))
     analysis = data.get("story_analysis") or {}
@@ -2469,11 +3323,24 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     if action == ANSWER_RETRY:
         await state.update_data(pending_answer_review={})
         await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+        questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+        next_q = questions[qa_index] if qa_index < len(questions) and isinstance(questions[qa_index], dict) else {}
+        await _track_event(
+            message,
+            state,
+            "question_shown",
+            meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+        )
+        return
+
+    if action in {ANSWER_CONTEXT_YES, ANSWER_CONTEXT_NO}:
+        await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
         return
 
     answer_text = str(pending.get("answer", "")).strip()
     if action == ANSWER_SKIP:
         answer_text = "(пропущено пользователем)"
+        await _track_event(message, state, "user_skipped", meta={"question_index": qa_index + 1, "question_id": int(pending.get("question_id", qa_index + 1))})
 
     qa_answers.append(
         {
@@ -2488,6 +3355,13 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
     if qa_index < len(questions):
         await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+        next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
+        await _track_event(
+            message,
+            state,
+            "question_shown",
+            meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+        )
         return
 
     merged_answers = "\n".join(
@@ -2507,6 +3381,44 @@ async def handle_answers_text(message: Message, state: FSMContext) -> None:
     await process_answers_input(message, state, message.text or "")
 
 
+@router.message(CareerFlow.ROUTE_SELECTION, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
+async def handle_route_selection_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    report = data.get("final_report") or {}
+    rows = data.get("route_compare_rows") if isinstance(data.get("route_compare_rows"), list) else _build_route_comparison_rows(report)
+    action = (message.text or "").strip()
+
+    if action == ROUTE_CHOICE_HELP:
+        await message.answer(t(lang, "route_choice_help"), reply_markup=route_choice_keyboard())
+
+    selected_route = _apply_route_choice_to_report(report, action, rows)
+    chunks = report_chunks(report, lang)
+    await state.update_data(
+        final_report=report,
+        report_chunks=chunks,
+        final_report_generated=True,
+        user_route_choice=action,
+        route_compare_rows=rows,
+    )
+
+    await _track_event(
+        message,
+        state,
+        "route_selected",
+        action=action,
+        meta={"selected_route": selected_route or ""},
+    )
+    await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=result_actions_keyboard())
+    await _send_final_map_bundle(message, state, lang, report)
+
+
+@router.message(CareerFlow.ROUTE_SELECTION, F.text)
+async def handle_route_selection_fallback(message: Message, state: FSMContext) -> None:
+    lang = _user_language(await state.get_data())
+    await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+
+
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_RESULT_ACTIONS))
 async def handle_post_result_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
@@ -2517,13 +3429,35 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     action = (message.text or "").strip()
     await _track_event(message, state, "result_action_clicked", action=action)
+    if action == MAP_CHECK_DISAGREE_ROUTE:
+        await _track_event(message, state, "user_disagreed", action=action)
 
-    if action == RESULT_SELF_EXPLORE:
+    if action == MAP_CHECK_TRUE:
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(t(lang, "map_validation_true_reply"), reply_markup=result_actions_keyboard())
+        return
+
+    if action == MAP_CHECK_FIX_FACT:
+        await state.set_state(CareerFlow.REPORT_CLARIFICATION)
+        await message.answer(t(lang, "map_validation_fix_fact_prompt"), reply_markup=input_method_keyboard())
+        return
+
+    if action == MAP_CHECK_CHANGE_PRIORITY:
+        await state.set_state(CareerFlow.WAITING_ROUTE_CHANGES)
+        await message.answer(t(lang, "map_validation_priority_prompt"), reply_markup=input_method_keyboard())
+        return
+
+    if action == MAP_CHECK_DISAGREE_ROUTE:
+        await state.set_state(CareerFlow.WAITING_ROUTE_CHANGES)
+        await message.answer(t(lang, "map_validation_disagree_prompt"), reply_markup=input_method_keyboard())
+        return
+
+    if action in {RESULT_SELF_EXPLORE, RESULT_OPEN_FULL_REPORT}:
         await state.set_state(CareerFlow.SHOWING_DETAILS)
         await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
         return
 
-    if action == RESULT_DO_STEPS:
+    if action in {RESULT_DO_STEPS, PDF_FALLBACK_STEPS}:
         steps = data.get("execution_steps") or _build_execution_steps(data.get("final_report") or {})
         progress = data.get("execution_progress") or {}
         current_day = int(data.get("current_execution_day", 0))
@@ -2535,12 +3469,13 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "step_tracking_current_day", day=current_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
         return
 
-    if action == RESULT_CLARIFY:
+    if action in {RESULT_CLARIFY, PDF_FALLBACK_CLARIFY}:
         await state.set_state(CareerFlow.REPORT_CLARIFICATION)
         await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
         return
 
-    if action == RESULT_SPECIALIST:
+    if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST}:
+        await _track_event(message, state, "specialist_clicked", action=action)
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "specialist_contact_intro"), reply_markup=result_actions_keyboard())
         if settings.specialist_telegram_url:
@@ -2621,6 +3556,7 @@ async def handle_step_tracking_actions(message: Message, state: FSMContext) -> N
     progress = data.get("execution_progress") or {}
     current_day = int(data.get("current_execution_day", 0))
     action = (message.text or "").strip()
+    await _track_event(message, state, "step_action", action=action)
 
     if action == RESULT_BACK_TO_MENU:
         await state.set_state(CareerFlow.FINAL_READY)
@@ -2787,24 +3723,33 @@ async def process_route_changes_input(message: Message, state: FSMContext, text:
 
     await state.set_state(CareerFlow.REBUILDING_ROUTE)
     await message.answer(t(lang, "route_rebuild_progress"), reply_markup=result_actions_keyboard())
+    await _track_event(message, state, "report_started", meta={"mode": "rebuild"})
 
-    report = await ai_client.build_report(
-        (data.get("story_text") or "").strip(),
-        data.get("story_analysis") or {},
-        ((data.get("answers_text") or "").strip() + "\n\nИзменения пользователя:\n" + change_text).strip(),
-        resume_analysis=data.get("resume_analysis") or {},
-        selected_barriers=data.get("selected_barriers") or [],
-        selected_fears=data.get("selected_fears") or [],
-        selected_psych_markers=data.get("selected_psych_markers") or [],
-        selected_energy_sources=data.get("selected_energy_sources") or [],
-        selected_career_priorities=data.get("selected_career_priorities") or [],
-        language=lang,
-    )
+    story_analysis = data.get("story_analysis") or {}
+    updated_answers = ((data.get("answers_text") or "").strip() + "\n\nИзменения пользователя:\n" + change_text).strip()
+    decision_layers = _build_decision_layers(data, story_analysis, updated_answers)
+
+    try:
+        report = await ai_client.build_report(
+            (data.get("story_text") or "").strip(),
+            story_analysis,
+            updated_answers,
+            decision_layers=decision_layers,
+            resume_analysis=data.get("resume_analysis") or {},
+            selected_barriers=data.get("selected_barriers") or [],
+            selected_fears=data.get("selected_fears") or [],
+            selected_psych_markers=data.get("selected_psych_markers") or [],
+            selected_energy_sources=data.get("selected_energy_sources") or [],
+            selected_career_priorities=data.get("selected_career_priorities") or [],
+            language=lang,
+        )
+    except Exception as exc:
+        await _track_event(message, state, "report_failed", meta={"mode": "rebuild", "error": type(exc).__name__})
+        raise
     chunks = report_chunks(report, lang)
     await state.update_data(final_report=report, report_chunks=chunks, final_report_generated=True)
-    await state.set_state(CareerFlow.FINAL_READY)
-    await message.answer(t(lang, "route_rebuild_result_intro"), reply_markup=result_actions_keyboard())
-    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "route_rebuild_result_intro"), reply_markup=route_choice_keyboard())
+    await _present_route_selection(message, state, lang, report)
 
 
 @router.message(CareerFlow.WAITING_ROUTE_CHANGES, F.text)

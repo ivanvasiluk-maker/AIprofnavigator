@@ -1,0 +1,282 @@
+[
+  {
+    "id": 1,
+    "name": "Рабочий после миграции без языка",
+    "profile": "17 лет в отделке, язык A1, нужен быстрый доход",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 2,
+    "name": "IT-специалист с хорошим английским",
+    "profile": "Python developer, English B2/C1, хочет выйти на рынок Польши",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 3,
+    "name": "Медсестра с непризнаваемым дипломом",
+    "profile": "Опыт ухода и медработы, диплом пока не подтвержден",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 4,
+    "name": "Учительница с ребенком и ограничением по времени",
+    "profile": "Педагог, 1-2 часа в день максимум",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 5,
+    "name": "Человек после выгорания",
+    "profile": "Низкий ресурс, нужна щадящая стратегия",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 6,
+    "name": "Человек в сильной тревоге",
+    "profile": "Тревога, хаос, страх отказов",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 7,
+    "name": "Человек без резюме",
+    "profile": "Резюме отсутствует",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 8,
+    "name": "Человек с резюме, но без понимания рынка",
+    "profile": "Есть CV, но не знает, на какие роли откликаться",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 9,
+    "name": "Человек, который хочет открыть бизнес",
+    "profile": "Предпринимательский трек, но нужен денежный мост",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 10,
+    "name": "Человек, который хочет только стабильную работу",
+    "profile": "Приоритет - стабильность, минимальный риск",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 11,
+    "name": "Человек с противоречивыми ответами",
+    "profile": "Нужно быстро, но готов учиться год",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 12,
+    "name": "Человек, который отвечает не на тот вопрос",
+    "profile": "Жмет старые кнопки, дает несоответствующие ответы",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 13,
+    "name": "Человек, который все пропускает",
+    "profile": "Skip по большинству вопросов",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 14,
+    "name": "Человек, который пишет 2 слова",
+    "profile": "Очень короткие ответы",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 15,
+    "name": "Человек, который присылает очень длинную историю",
+    "profile": "Длинный неструктурированный сторителлинг",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 16,
+    "name": "Человек, который меняет цель по ходу теста",
+    "profile": "В начале стабильность, в конце смена сферы",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 17,
+    "name": "Человек, который говорит 'не знаю'",
+    "profile": "Низкая определенность, частое 'не знаю'",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 18,
+    "name": "Человек, который не согласен с маршрутом",
+    "profile": "Нажимает 'не согласен с маршрутом'",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 19,
+    "name": "Человек, который нажимает старые кнопки во время генерации",
+    "profile": "Ввод в состоянии GENERATING_REPORT",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  },
+  {
+    "id": 20,
+    "name": "Человек, у которого ломается PDF",
+    "profile": "PDF engine error -> safe fallback",
+    "checklist": {
+      "facts_not_invented": true,
+      "contradictions_detected": true,
+      "route_explained": true,
+      "first_step_realistic": true,
+      "next_action_clear": true,
+      "no_loop": true,
+      "report_delivered_html_or_pdf": true
+    }
+  }
+]

@@ -67,18 +67,18 @@ def _apply_mode_settings(mode_key: str, preferred_input: str = "text") -> dict:
             "pace": "normal",
             "detail_preference": "balanced",
         },
-        "support": {
-            "user_mode": "support",
-            "max_questions": 8,
-            "support_level": "high",
-            "explanation_level": "gentle",
-            "plan_depth": "today_3days_week",
+        "deep_route": {
+            "user_mode": "deep_route",
+            "max_questions": 15,
+            "support_level": "medium",
+            "explanation_level": "detailed",
+            "plan_depth": "today_week_month_deep",
             "psychological_block_depth": "expanded",
-            "task_size": "micro",
+            "task_size": "normal",
             "preferred_input": preferred_input,
-            "support_need": "high",
-            "pace": "slow",
-            "detail_preference": "balanced",
+            "support_need": "medium",
+            "pace": "normal",
+            "detail_preference": "detailed",
         },
     }
     return mapping.get(mode_key, mapping["calm_steps"])
@@ -145,8 +145,8 @@ async def choose_pace(message: Message, state: FSMContext) -> None:
         profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "balanced", "preferred_input": "text"})
         key = "pace_selected_normal"
     elif choice == PACE_SUPPORT:
-        mode_settings = _apply_mode_settings("support")
-        profile.update({"pace": "slow", "support_need": "high", "detail_preference": "balanced", "emotional_tone": "anxious", "preferred_input": "text"})
+        mode_settings = _apply_mode_settings("deep_route")
+        profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "detailed", "preferred_input": "text"})
         key = "pace_selected_support"
     else:
         await state.update_data(preferred_input="voice")
@@ -207,9 +207,9 @@ async def choose_voice_pace(message: Message, state: FSMContext) -> None:
         key = "pace_selected_fast"
         profile.update({"pace": "fast", "support_need": "low", "detail_preference": "brief"})
     elif choice == VOICE_PACE_SUPPORT:
-        mode_settings = _apply_mode_settings("support", preferred_input="voice")
+        mode_settings = _apply_mode_settings("deep_route", preferred_input="voice")
         key = "pace_selected_support"
-        profile.update({"pace": "slow", "support_need": "high", "detail_preference": "balanced", "emotional_tone": "anxious"})
+        profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "detailed"})
     else:
         mode_settings = _apply_mode_settings("calm_steps", preferred_input="voice")
         key = "pace_selected_normal"

@@ -22,8 +22,8 @@ INPUT_VOICE = "🎙️ Рассказать голосом"
 INPUT_DONT_KNOW = "🧭 Не знаю, с чего начать"
 
 PACE_FAST = "⚡ Быстро и по делу"
-PACE_NORMAL = "🧭 Спокойно по шагам"
-PACE_SUPPORT = "🧠 С поддержкой, я тревожусь"
+PACE_NORMAL = "🧭 Нормальный разбор"
+PACE_SUPPORT = "🔎 Глубокий маршрут"
 PACE_VOICE = "🎙 Хочу голосом"
 
 ROUTE_FIND_JOB = "Найти работу"
@@ -32,8 +32,8 @@ ROUTE_REPACK_EXPERIENCE = "Перепаковать опыт"
 ROUTE_UNKNOWN = "Я не понимаю, кем могу быть теперь"
 
 VOICE_PACE_FAST = "⚡ Быстро"
-VOICE_PACE_NORMAL = "🧭 Спокойно"
-VOICE_PACE_SUPPORT = "🧠 С поддержкой"
+VOICE_PACE_NORMAL = "🧭 Нормально"
+VOICE_PACE_SUPPORT = "🔎 Глубоко"
 
 SHORT_NEED_JOB = "💸 Нужна работа срочно"
 SHORT_NO_DIRECTION = "🧭 Не понимаю, кем могу быть"
@@ -46,6 +46,8 @@ RESUME_UPLOAD = "📄 Загрузить резюме"
 RESUME_SKIP = "➡️ Продолжить без резюме"
 RESUME_SEND = "📄 Пришлю резюме"
 RESUME_CONTINUE = "➡️ Продолжить без резюме"
+STORY_CONFIRM_OK = "✅ Да, вы поняли верно"
+STORY_CONFIRM_FIX = "✍️ Хочу поправить"
 
 PSYCH_BARRIER_OPTIONS = [
     "Боюсь отказов",
@@ -105,12 +107,16 @@ RESULT_REBUILD = "🔄 Внести изменения"
 RESULT_ANALYZE_FEARS = "🧠 Разобрать барьеры"
 RESULT_SUPPORT = "🤝 Сопровождение в боте"
 RESULT_THINK = "🤔 Хочу подумать"
+RESULT_OPEN_FULL_REPORT = "📄 Открыть полный разбор"
 RESULT_SELF_EXPLORE = "🔎 Продолжить самоисследование"
 RESULT_DO_STEPS = "🚀 Делать шаги в боте"
 RESULT_CLARIFY = "✍️ Немного уточнить"
 RESULT_SPECIALIST = "🧭 Продолжить со специалистом"
 RESULT_SUPPORT_GROUP = "👥 В группу поддержки поиска работы"
 RESULT_BACK_TO_MENU = "↩️ К выбору сценария"
+PDF_FALLBACK_STEPS = "🧭 Продолжить по шагам"
+PDF_FALLBACK_CLARIFY = "✍️ Уточнить карту"
+PDF_FALLBACK_SPECIALIST = "👤 Разобрать со специалистом"
 STEP_OPEN_TODAY = "📅 Открыть текущий день"
 STEP_DONE = "✅ Сделал"
 STEP_NOT_DONE = "❌ Не сделал"
@@ -121,6 +127,8 @@ RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 ANSWER_RETRY = "✍️ Ответить заново"
 ANSWER_SKIP = "⏭️ Пропустить этот вопрос"
 ANSWER_KEEP = "✅ Оставить как есть"
+ANSWER_CONTEXT_YES = "✅ Да, именно так"
+ANSWER_CONTEXT_NO = "↩️ Нет, выбрать другой ответ"
 
 BARRIER_DETAIL_FEAR_REJECTION = "😰 Страх отказа"
 BARRIER_DETAIL_MONEY = "💸 Страх за деньги"
@@ -144,6 +152,29 @@ RESULT_PLAN_7 = "📆 Дать план на 7 дней"
 RESULT_COVER_LETTER = "✉️ Написать сопроводительное письмо"
 RESULT_AGREE = "👍 Согласен"
 RESULT_DOUBTS = "🤔 Есть сомнения"
+
+MAP_CHECK_TRUE = "✅ Всё похоже на правду"
+MAP_CHECK_FIX_FACT = "✍️ Исправить один факт"
+MAP_CHECK_CHANGE_PRIORITY = "🧭 Изменить приоритет"
+MAP_CHECK_DISAGREE_ROUTE = "❓ Я не согласен с маршрутом"
+
+ROUTE_CHOICE_STABLE = "🧱 Сначала стабильная работа"
+ROUTE_CHOICE_PRIVATE = "🔨 Хочу постепенно выйти на частные заказы"
+ROUTE_CHOICE_RETRAIN = "🎓 Рассматриваю переобучение"
+ROUTE_CHOICE_HELP = "🧭 Пока не знаю — помоги выбрать"
+
+CAREER_SWITCH_REASON_DISLIKE = "Не нравится сама сфера"
+CAREER_SWITCH_REASON_MONEY = "Кажется, что здесь мало денег"
+CAREER_SWITCH_REASON_DOCS_LANG = "Нет документов / языка"
+CAREER_SWITCH_REASON_GROWTH_UNKNOWN = "Хочу рост, но пока не знаю куда"
+CAREER_SWITCH_REASON_OTHER = "Другое"
+CAREER_SWITCH_REASON_OPTIONS = [
+    CAREER_SWITCH_REASON_DISLIKE,
+    CAREER_SWITCH_REASON_MONEY,
+    CAREER_SWITCH_REASON_DOCS_LANG,
+    CAREER_SWITCH_REASON_GROWTH_UNKNOWN,
+    CAREER_SWITCH_REASON_OTHER,
+]
 
 OFFER_CV = "📄 Хочу разбор CV"
 OFFER_CONSULT = "🧭 Хочу карьерную консультацию"
@@ -174,15 +205,24 @@ ALL_SUPPORT_OPTIONS = set(SUPPORT_OPTIONS)
 ALL_SUPPORT_MULTI_ACTIONS = set(SUPPORT_OPTIONS) | {SUPPORT_DONE}
 ALL_RESUME_UPLOAD = {RESUME_UPLOAD, RESUME_SEND}
 ALL_RESUME_SKIP = {RESUME_SKIP, RESUME_CONTINUE}
+ALL_STORY_CONFIRM_ACTIONS = {STORY_CONFIRM_OK, STORY_CONFIRM_FIX}
 ALL_PSYCH_BARRIER_OPTIONS = set(PSYCH_BARRIER_OPTIONS)
 ALL_PSYCH_BARRIER_DONE = {PSYCH_BARRIER_DONE}
 ALL_PSYCH_GROUP_OPTIONS = {BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE, BARRIER_GROUP_MORE, PSYCH_SKIP}
 ALL_RESULT_ACTIONS = {
+    RESULT_OPEN_FULL_REPORT,
     RESULT_SELF_EXPLORE,
     RESULT_DO_STEPS,
+    PDF_FALLBACK_STEPS,
     RESULT_CLARIFY,
+    PDF_FALLBACK_CLARIFY,
     RESULT_SPECIALIST,
+    PDF_FALLBACK_SPECIALIST,
     RESULT_SUPPORT_GROUP,
+    MAP_CHECK_TRUE,
+    MAP_CHECK_FIX_FACT,
+    MAP_CHECK_CHANGE_PRIORITY,
+    MAP_CHECK_DISAGREE_ROUTE,
 }
 ALL_SELF_EXPLORE_ACTIONS = {
     RESULT_DETAILS,
@@ -200,7 +240,13 @@ ALL_STEP_TRACKING_ACTIONS = {
     STEP_NEXT_DAY,
     RESULT_BACK_TO_MENU,
 }
-ALL_ANSWER_REVIEW_ACTIONS = {ANSWER_RETRY, ANSWER_SKIP, ANSWER_KEEP}
+ALL_ANSWER_REVIEW_ACTIONS = {
+    ANSWER_RETRY,
+    ANSWER_SKIP,
+    ANSWER_KEEP,
+    ANSWER_CONTEXT_YES,
+    ANSWER_CONTEXT_NO,
+}
 ALL_BARRIER_DETAIL_ACTIONS = {
     BARRIER_DETAIL_FEAR_REJECTION,
     BARRIER_DETAIL_MONEY,
@@ -219,6 +265,13 @@ ALL_SKILLER_REASONS = {
 ALL_OFFER_ACTIONS = {OFFER_CV, OFFER_CONSULT, OFFER_SUPPORT, OFFER_DETAILS, OFFER_THINK, OFFER_REMIND}
 ALL_PRACTICAL_BARRIER_ACTIONS = {PRACTICAL_STEP, PRACTICAL_DEEP, PRACTICAL_BACK}
 ALL_SUPPORT_MODE_ACTIONS = {RESULT_MY_MAP, RESULT_TODAY_STEP, SUPPORT_BACK_TO_MAP}
+ALL_ROUTE_CHOICE_ACTIONS = {
+    ROUTE_CHOICE_STABLE,
+    ROUTE_CHOICE_PRIVATE,
+    ROUTE_CHOICE_RETRAIN,
+    ROUTE_CHOICE_HELP,
+}
+ALL_CAREER_SWITCH_REASON_OPTIONS = set(CAREER_SWITCH_REASON_OPTIONS)
 
 
 def language_keyboard() -> ReplyKeyboardMarkup:
@@ -359,6 +412,16 @@ def resume_wait_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def story_confirmation_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=STORY_CONFIRM_OK)],
+            [KeyboardButton(text=STORY_CONFIRM_FIX)],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def barriers_keyboard() -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BARRIER_GROUP_INTERNAL)],
@@ -413,6 +476,30 @@ def result_actions_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=RESULT_SPECIALIST)],
             [KeyboardButton(text=RESULT_SUPPORT_GROUP)],
             [KeyboardButton(text=RESTART)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def pdf_fallback_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=RESULT_OPEN_FULL_REPORT)],
+            [KeyboardButton(text=PDF_FALLBACK_STEPS)],
+            [KeyboardButton(text=PDF_FALLBACK_CLARIFY)],
+            [KeyboardButton(text=PDF_FALLBACK_SPECIALIST)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def map_validation_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=MAP_CHECK_TRUE)],
+            [KeyboardButton(text=MAP_CHECK_FIX_FACT)],
+            [KeyboardButton(text=MAP_CHECK_CHANGE_PRIORITY)],
+            [KeyboardButton(text=MAP_CHECK_DISAGREE_ROUTE)],
         ],
         resize_keyboard=True,
     )
@@ -482,7 +569,30 @@ def support_mode_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def answer_review_keyboard() -> ReplyKeyboardMarkup:
+def route_choice_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=ROUTE_CHOICE_STABLE)],
+            [KeyboardButton(text=ROUTE_CHOICE_PRIVATE)],
+            [KeyboardButton(text=ROUTE_CHOICE_RETRAIN)],
+            [KeyboardButton(text=ROUTE_CHOICE_HELP)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def career_switch_reason_keyboard() -> ReplyKeyboardMarkup | None:
+    return question_options_keyboard(CAREER_SWITCH_REASON_OPTIONS)
+
+
+def answer_review_keyboard(context_mismatch: bool = False) -> ReplyKeyboardMarkup:
+    if context_mismatch:
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=ANSWER_CONTEXT_YES), KeyboardButton(text=ANSWER_CONTEXT_NO)],
+            ],
+            resize_keyboard=True,
+        )
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=ANSWER_RETRY)],

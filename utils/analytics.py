@@ -256,3 +256,110 @@ def behavior_offer_snapshot(public_user_id: str, lookback_days: int = 7) -> dict
             "details_opened": details,
         },
     }
+
+
+def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
+    """Aggregate early-pilot quality metrics from local analytics events log.
+
+    The function focuses on canonical events used in PATCH 17 and returns
+    percentages for the first `sample_limit` unique users.
+    """
+    path = _events_log_path()
+    if not path.exists():
+        return {
+            "sample_users": 0,
+            "reached_map_percent": 0.0,
+            "conflict_percent": 0.0,
+            "disagreed_percent": 0.0,
+            "first_step_too_hard_percent": 0.0,
+            "specialist_click_percent": 0.0,
+            "pdf_or_report_error_percent": 0.0,
+            "dropoff_stages": [],
+        }
+
+    user_order: list[str] = []
+    by_user: dict[str, dict[str, Any]] = {}
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except Exception:
+            continue
+        uid = str(row.get("public_user_id", "")).strip()
+        if not uid:
+            continue
+        if uid not in by_user:
+            if len(user_order) >= max(1, int(sample_limit)):
+                continue
+            user_order.append(uid)
+            by_user[uid] = {
+                "events": Counter(),
+                "states": Counter(),
+                "last_state": "",
+            }
+
+        profile = by_user[uid]
+        event = str(row.get("event", "")).strip()
+        state_name = str(row.get("state", "")).strip()
+        if event:
+            profile["events"][event] += 1
+        if state_name:
+            profile["states"][state_name] += 1
+            profile["last_state"] = state_name
+
+    sample_size = len(user_order)
+    if sample_size == 0:
+        return {
+            "sample_users": 0,
+            "reached_map_percent": 0.0,
+            "conflict_percent": 0.0,
+            "disagreed_percent": 0.0,
+            "first_step_too_hard_percent": 0.0,
+            "specialist_click_percent": 0.0,
+            "pdf_or_report_error_percent": 0.0,
+            "dropoff_stages": [],
+        }
+
+    reached_map = 0
+    with_conflict = 0
+    disagreed = 0
+    too_hard = 0
+    specialist = 0
+    errors = 0
+    dropoff_counter: Counter[str] = Counter()
+
+    for uid in user_order:
+        events: Counter = by_user[uid]["events"]
+        last_state = str(by_user[uid].get("last_state", "")).strip() or "unknown"
+
+        if events.get("report_generated", 0) > 0:
+            reached_map += 1
+        else:
+            dropoff_counter[last_state] += 1
+
+        if events.get("conflict_detected", 0) > 0:
+            with_conflict += 1
+        if events.get("user_disagreed", 0) > 0:
+            disagreed += 1
+        if events.get("first_step_too_hard", 0) > 0:
+            too_hard += 1
+        if events.get("specialist_clicked", 0) > 0:
+            specialist += 1
+        if events.get("pdf_failed", 0) > 0 or events.get("report_failed", 0) > 0:
+            errors += 1
+
+    def _pct(value: int) -> float:
+        return round((100.0 * value) / sample_size, 2)
+
+    return {
+        "sample_users": sample_size,
+        "reached_map_percent": _pct(reached_map),
+        "conflict_percent": _pct(with_conflict),
+        "disagreed_percent": _pct(disagreed),
+        "first_step_too_hard_percent": _pct(too_hard),
+        "specialist_click_percent": _pct(specialist),
+        "pdf_or_report_error_percent": _pct(errors),
+        "dropoff_stages": dropoff_counter.most_common(5),
+    }

@@ -371,6 +371,28 @@ FINAL_REPORT_SCHEMA = {
         "energy_sources": {"type": "array", "items": {"type": "string"}},
         "career_priorities": {"type": "array", "items": {"type": "string"}},
         "competency_signals": {"type": "array", "items": {"type": "string"}},
+        "decision_layers": {
+            "type": "object",
+            "properties": {
+                "career_profile": {"type": "array", "items": {"type": "string"}},
+                "constraints": {"type": "array", "items": {"type": "string"}},
+                "psychological_state": {"type": "array", "items": {"type": "string"}},
+                "action_capacity": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["career_profile", "constraints", "psychological_state", "action_capacity"],
+            "additionalProperties": False,
+        },
+        "facts_only": {
+            "type": "object",
+            "properties": {
+                "explicit_facts": {"type": "array", "items": {"type": "string"}},
+                "inferences": {"type": "array", "items": {"type": "string"}},
+                "unknowns": {"type": "array", "items": {"type": "string"}},
+                "contradictions": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["explicit_facts", "inferences", "unknowns", "contradictions"],
+            "additionalProperties": False,
+        },
         "closing_message": {"type": "string"},
     },
     "required": [
@@ -394,6 +416,7 @@ FINAL_REPORT_SCHEMA = {
         "energy_sources",
         "career_priorities",
         "competency_signals",
+        "facts_only",
         "closing_message",
     ],
     "additionalProperties": False,
@@ -844,6 +867,33 @@ FINAL_REPORT_FALLBACK = {
         "Организация процессов",
         "Решение проблем",
     ],
+    "decision_layers": {
+        "career_profile": [
+            "Текущая идентичность: данных недостаточно",
+        ],
+        "constraints": [
+            "Данных о изменении ограничений пока недостаточно",
+        ],
+        "psychological_state": [
+            "Стабильное состояние без явного перегруза",
+        ],
+        "action_capacity": [
+            "Темп: normal",
+        ],
+    },
+    "facts_only": {
+        "explicit_facts": [
+            "Пока доступен только общий миграционный контекст и базовый карьерный запрос.",
+        ],
+        "inferences": [
+            "Похоже, пользователю нужен короткий и структурный маршрут к первому доходу.",
+        ],
+        "unknowns": [
+            "Пока не хватает данных, чтобы понять, насколько пользователь знаком с местным рынком и какие документы уже есть. Это можно уточнить позже.",
+            "Пока не хватает данных, чтобы оценить наличие профессиональных контактов и степень социальной интеграции. Это можно уточнить позже.",
+        ],
+        "contradictions": [],
+    },
     "closing_message": "У вас уже есть материал для перехода. Следующая задача не искать идеальный путь, а собрать первый работающий маршрут и проверить его на рынке за неделю.",
 }
 
@@ -1103,6 +1153,7 @@ class CareerOpenAIClient:
         story: str,
         story_analysis: dict[str, Any],
         answers: str,
+        decision_layers: dict[str, Any] | None = None,
         resume_analysis: dict[str, Any] | None = None,
         selected_barriers: list[str] | None = None,
         selected_fears: list[str] | None = None,
@@ -1112,25 +1163,42 @@ class CareerOpenAIClient:
         language: str = "ru",
     ) -> dict[str, Any]:
         language = "be" if language == "be" else "ru"
+        facts_only = self._build_facts_only(story, story_analysis, answers)
         prompt = FINAL_REPORT_PROMPT.format(
             story=story,
             analysis_json=json.dumps(story_analysis or {}, ensure_ascii=False),
             resume_analysis_json=json.dumps(resume_analysis or {}, ensure_ascii=False),
+            decision_layers_json=json.dumps(self._normalize_decision_layers(decision_layers), ensure_ascii=False),
             selected_barriers=json.dumps(selected_barriers or [], ensure_ascii=False),
             selected_fears=json.dumps(selected_fears or [], ensure_ascii=False),
             selected_psych_markers=json.dumps(selected_psych_markers or [], ensure_ascii=False),
             selected_energy_sources=json.dumps(selected_energy_sources or [], ensure_ascii=False),
             selected_career_priorities=json.dumps(selected_career_priorities or [], ensure_ascii=False),
+            facts_only_json=json.dumps(facts_only, ensure_ascii=False),
             answers=answers,
             language=language,
         )
         fallback = FINAL_REPORT_FALLBACK_BE if language == "be" else FINAL_REPORT_FALLBACK
         report = await self._run_json(prompt, fallback, FINAL_REPORT_SCHEMA, language)
-        return self._align_report_with_story(report, story_analysis, answers)
+        return self._align_report_with_story(report, story_analysis, answers, story, facts_only, decision_layers)
 
-    def _align_report_with_story(self, report: dict[str, Any], story_analysis: dict[str, Any], answers_text: str = "") -> dict[str, Any]:
+    def _align_report_with_story(
+        self,
+        report: dict[str, Any],
+        story_analysis: dict[str, Any],
+        answers_text: str = "",
+        story_text: str = "",
+        facts_only: dict[str, Any] | None = None,
+        decision_layers: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(report, dict):
             return copy.deepcopy(FINAL_REPORT_FALLBACK)
+
+        normalized_facts = self._normalize_facts_only(
+            report.get("facts_only"),
+            base=self._build_facts_only(story_text, story_analysis, answers_text) if facts_only is None else facts_only,
+        )
+        report["facts_only"] = normalized_facts
 
         digital_human = report.get("digital_human")
         if isinstance(digital_human, dict):
@@ -1157,8 +1225,198 @@ class CareerOpenAIClient:
         self._ensure_integration_level(report, answers_text)
         self._ensure_competency_signals(report, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
+        self._ensure_barrier_driven_today_action(report, answers_text)
+        normalized_layers = self._normalize_decision_layers(decision_layers)
+        self._enforce_route_change_guardrails(report, story_analysis, answers_text, normalized_layers)
+        self._sanitize_unconfirmed_claims(report, normalized_facts)
 
         return report
+
+    def _normalize_decision_layers(self, payload: Any) -> dict[str, list[str]]:
+        source = payload if isinstance(payload, dict) else {}
+        normalized: dict[str, list[str]] = {}
+        for key in ("career_profile", "constraints", "psychological_state", "action_capacity"):
+            values = source.get(key, []) if isinstance(source.get(key), list) else []
+            bucket: list[str] = []
+            for item in values:
+                text = str(item or "").strip()
+                if text and text not in bucket:
+                    bucket.append(text)
+            normalized[key] = bucket
+        return normalized
+
+    def _contains_emotional_overload(self, layers: dict[str, list[str]], answers_text: str) -> bool:
+        blob = " ".join([*(layers.get("psychological_state", []) or []), str(answers_text or "")]).lower().replace("ё", "е")
+        markers = [
+            "не знаю, с чего начать",
+            "не знаю с чего начать",
+            "слишком сложно",
+            "тревог",
+            "устал",
+            "сомне",
+            "страх отказ",
+            "перегруз",
+            "хаос",
+            "signal: overwhelm",
+        ]
+        return any(marker in blob for marker in markers)
+
+    def _has_route_change_driver(self, layers: dict[str, list[str]], answers_text: str) -> bool:
+        blob = " ".join([
+            *(layers.get("career_profile", []) or []),
+            *(layers.get("constraints", []) or []),
+            str(answers_text or ""),
+        ]).lower().replace("ё", "е")
+        drivers = [
+            "опыт",
+            "язык",
+            "документ",
+            "право работать",
+            "доход",
+            "доступное время",
+            "финансов",
+            "рынок",
+            "риск",
+            "реальная цель",
+            "сменить профес",
+            "поменял",
+            "изменил",
+        ]
+        return any(marker in blob for marker in drivers)
+
+    def _enforce_route_change_guardrails(
+        self,
+        report: dict[str, Any],
+        story_analysis: dict[str, Any],
+        answers_text: str,
+        decision_layers: dict[str, list[str]],
+    ) -> None:
+        report["decision_layers"] = decision_layers
+        overload = self._contains_emotional_overload(decision_layers, answers_text)
+        has_driver = self._has_route_change_driver(decision_layers, answers_text)
+
+        if overload:
+            action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+            today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+            today["action"] = (
+                "Напишите в заметках три вида работ, которые вы реально умеете делать лучше всего "
+                "(например: плитка, гипсокартон, мебель)."
+            )
+            today["timebox"] = "10 минут"
+            today["result"] = "Есть список из 3 конкретных типов работ без смены текущего маршрута."
+            action_plan["today"] = today
+            report["action_plan"] = action_plan
+
+            digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+            if digital_human:
+                digital_human["strategy_mode"] = "Survival"
+
+            decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+            if decision:
+                summary = str(decision.get("decision_summary", "")).strip()
+                lock_note = "Эмоциональное состояние влияет на темп и размер шага, но не меняет профессиональный маршрут."
+                if lock_note not in summary:
+                    decision["decision_summary"] = f"{lock_note} {summary}".strip()
+
+            full_blob = " ".join(
+                [
+                    str(story_analysis.get("current_identity", "")),
+                    " ".join(str(item) for item in story_analysis.get("experience_snapshot", []) if isinstance(item, str)),
+                    " ".join(decision_layers.get("career_profile", [])),
+                ]
+            ).lower().replace("ё", "е")
+            has_private_orders_anchor = any(token in full_blob for token in ["частн", "плитк", "гипсокарт", "мебел", "ремонт"])
+            if has_private_orders_anchor and decision:
+                current_main = str(decision.get("recommended_main_path", "")).lower()
+                if "частн" not in current_main and "самозан" not in current_main:
+                    decision["recommended_main_path"] = "Частные заказы в текущем профиле / Смежные роли по вашему опыту"
+                    backup = str(decision.get("backup_path", "")).strip()
+                    if not backup:
+                        decision["backup_path"] = "Локальный найм по текущему профилю как стабилизирующий трек"
+
+            if overload and not has_driver:
+                preferred_titles = self._preferred_polish_roles(story_analysis)
+                if preferred_titles and decision:
+                    decision["recommended_main_path"] = f"{preferred_titles[0]} / {preferred_titles[1]}"
+
+    def _build_facts_only(self, story_text: str, story_analysis: dict[str, Any], answers_text: str) -> dict[str, list[str]]:
+        explicit_facts: list[str] = []
+
+        def _append_unique(target: list[str], value: str) -> None:
+            cleaned = str(value or "").strip()
+            if cleaned and cleaned not in target:
+                target.append(cleaned)
+
+        for value in [story_analysis.get("current_identity"), story_analysis.get("story_summary")]:
+            _append_unique(explicit_facts, value)
+
+        for key in ("experience_snapshot", "skills", "constraints", "goals"):
+            items = story_analysis.get(key)
+            if isinstance(items, list):
+                for item in items:
+                    _append_unique(explicit_facts, item)
+
+        for raw_line in str(answers_text or "").splitlines():
+            line = raw_line.strip().strip("-•")
+            if len(line) >= 3:
+                _append_unique(explicit_facts, f"Ответ пользователя: {line}")
+
+        blob = " ".join([str(story_text or ""), str(answers_text or ""), " ".join(explicit_facts)]).lower()
+
+        inferences: list[str] = []
+        if any(token in blob for token in ["клиент", "общ", "коммуника", "договар", "переговор"]):
+            inferences.append("Похоже, у вас есть опыт коммуникации и взаимодействия с людьми в рабочих задачах.")
+        if any(token in blob for token in ["задач", "срок", "организ", "координа"]):
+            inferences.append("Похоже, у вас есть опыт самостоятельного ведения небольших задач.")
+        if any(token in blob for token in ["клиент", "договор", "переговор", "заказ"]):
+            inferences.append(
+                "Вероятно, вам может подойти маршрут с частными заказами, потому что вы уже договаривались с клиентами."
+            )
+
+        unknowns: list[str] = []
+        if not any(token in blob for token in ["рынок", "ваканс", "рынка труда"]):
+            unknowns.append(
+                "Пока не хватает данных, чтобы понять, насколько вы знакомы с местным рынком и какие документы уже есть. Это можно уточнить позже."
+            )
+        if not any(token in blob for token in ["контакт", "сообще", "нетворк", "знаком"]):
+            unknowns.append(
+                "Пока не хватает данных, чтобы оценить наличие профессиональных контактов и опорного окружения. Это можно уточнить позже."
+            )
+        if not any(token in blob for token in ["учиться", "обуч", "переуч", "курс"]):
+            unknowns.append(
+                "Пока не хватает данных, чтобы понять готовность к переобучению и объем времени на обучение. Это можно уточнить позже."
+            )
+
+        contradictions: list[str] = []
+        if ("2-4 недели" in blob or "2–4 недели" in blob) and ("3-6 месяцев" in blob or "3–6 месяцев" in blob or "траекторию год" in blob):
+            contradictions.append(
+                "Есть противоречие в сроках: одновременно указан срочный доход и длинный горизонт смены траектории."
+            )
+
+        return self._normalize_facts_only(
+            {
+                "explicit_facts": explicit_facts,
+                "inferences": inferences,
+                "unknowns": unknowns,
+                "contradictions": contradictions,
+            }
+        )
+
+    def _normalize_facts_only(self, payload: Any, base: dict[str, Any] | None = None) -> dict[str, list[str]]:
+        source = payload if isinstance(payload, dict) else {}
+        seed = base if isinstance(base, dict) else {}
+        normalized: dict[str, list[str]] = {}
+        for key in ("explicit_facts", "inferences", "unknowns", "contradictions"):
+            merged: list[str] = []
+            for candidate in [
+                *(source.get(key, []) if isinstance(source.get(key), list) else []),
+                *(seed.get(key, []) if isinstance(seed.get(key), list) else []),
+            ]:
+                text = str(candidate or "").strip()
+                if text and text not in merged:
+                    merged.append(text)
+            normalized[key] = merged
+        return normalized
 
     def _ensure_resource_level(self, report: dict[str, Any], answers_text: str = "") -> None:
         digital_human = report.get("digital_human")
@@ -1275,8 +1533,6 @@ class CareerOpenAIClient:
             report["competency_signals"] = list(dict.fromkeys(existing))[:6]
             return
         merged = list(dict.fromkeys([*existing, *extracted]))
-        if not merged:
-            merged = ["Коммуникация", "Организация процессов", "Решение проблем"]
         report["competency_signals"] = merged[:6]
 
     def _deduplicate_directions(self, report: dict[str, Any]) -> None:
@@ -1339,25 +1595,85 @@ class CareerOpenAIClient:
         sales_markers = ["продаж", "crm", "sap", "erp", "kpi", "лид", "воронк"]
         has_sales = sum(1 for word in sales_markers if word in blob) >= 2
         if has_admin:
-            layers.append("Административный слой: документы, сроки, поручения, контроль и офисные процессы.")
+            layers.append("Похоже, у вас есть административный слой опыта: документы, сроки и координация задач.")
         if has_sales:
-            layers.append("Коммерческий слой: продажи, клиентская база, выполнение плана, CRM/SAP.")
+            layers.append("Похоже, у вас есть коммерческий слой опыта: продажи, клиентская база и CRM-процессы.")
+        if not layers:
+            layers = ["Пока не хватает данных, чтобы выделить устойчивые слои опыта. Это можно уточнить позже."]
         report["experience_layers"] = list(dict.fromkeys(layers))[:3]
 
         not_reset = report.get("what_not_reset") if isinstance(report.get("what_not_reset"), list) else []
-        base = [
-            "Умение работать с документами и формальными процедурами.",
-            "Навык контроля сроков и поручений.",
-            "Опыт координации людей и задач.",
-            "Опыт работы с клиентами и коммуникацией.",
-            "Навык держать систему и процессы в порядке.",
-        ]
+        base: list[str] = []
+        if has_admin:
+            base.extend([
+                "Похоже, у вас есть опыт работы с документами и формальными процедурами.",
+                "Похоже, у вас есть навык контроля сроков и поручений.",
+                "Похоже, у вас есть опыт координации задач.",
+            ])
+        if any(word in blob for word in ["клиент", "коммуника", "общен", "переговор"]):
+            base.append("Похоже, у вас есть опыт работы с клиентской коммуникацией.")
         if has_sales:
             base.extend([
-                "Опыт продаж и ведения клиентской базы.",
-                "Опыт работы с CRM/SAP/ERP как рабочим инструментом.",
+                "Похоже, у вас есть опыт продаж и ведения клиентской базы.",
+                "Похоже, у вас есть опыт работы с CRM/SAP/ERP как рабочим инструментом.",
             ])
-        report["what_not_reset"] = list(dict.fromkeys([*(str(item).strip() for item in not_reset if str(item).strip()), *base]))[:8]
+        merged_not_reset = list(dict.fromkeys([*(str(item).strip() for item in not_reset if str(item).strip()), *base]))
+        if not merged_not_reset:
+            merged_not_reset = ["Пока не хватает данных, чтобы выделить переносимые навыки, которые точно не обнулились. Это можно уточнить позже."]
+        report["what_not_reset"] = merged_not_reset[:8]
+
+    def _sanitize_unconfirmed_claims(self, report: dict[str, Any], facts_only: dict[str, list[str]]) -> None:
+        allowed_blob = " ".join(
+            facts_only.get("explicit_facts", [])
+            + facts_only.get("inferences", [])
+        ).lower()
+
+        checks = [
+            (re.compile(r"документ|формальн|процедур", re.IGNORECASE), ["документ", "формаль", "процедур", "документооборот"]),
+            (re.compile(r"срок|поручен|процесс|управля", re.IGNORECASE), ["срок", "поруч", "процесс", "координа"]),
+            (re.compile(r"рынок", re.IGNORECASE), ["рынок", "ваканс", "рынка труда"]),
+            (re.compile(r"контакт|интеграц|сообществ", re.IGNORECASE), ["контакт", "интеграц", "сообще", "знаком"]),
+            (re.compile(r"переуч|обучени", re.IGNORECASE), ["переуч", "учиться", "обуч", "курс"]),
+        ]
+
+        def has_evidence(markers: list[str]) -> bool:
+            return any(marker in allowed_blob for marker in markers)
+
+        def scrub_list(items: list[str], unknown_fallback: str) -> list[str]:
+            cleaned: list[str] = []
+            for item in items:
+                text = str(item or "").strip()
+                if not text:
+                    continue
+                blocked = False
+                for pattern, markers in checks:
+                    if pattern.search(text) and not has_evidence(markers):
+                        blocked = True
+                        break
+                if not blocked:
+                    cleaned.append(text)
+            return cleaned or [unknown_fallback]
+
+        what_not_reset = report.get("what_not_reset")
+        if isinstance(what_not_reset, list):
+            report["what_not_reset"] = scrub_list(
+                [str(item) for item in what_not_reset],
+                "Пока не хватает данных, чтобы выделить переносимые навыки, которые точно не обнулились. Это можно уточнить позже.",
+            )[:8]
+
+        experience_layers = report.get("experience_layers")
+        if isinstance(experience_layers, list):
+            report["experience_layers"] = scrub_list(
+                [str(item) for item in experience_layers],
+                "Пока не хватает данных, чтобы выделить устойчивые слои опыта. Это можно уточнить позже.",
+            )[:3]
+
+        competency_signals = report.get("competency_signals")
+        if isinstance(competency_signals, list):
+            report["competency_signals"] = scrub_list(
+                [str(item) for item in competency_signals],
+                "Пока не хватает данных, чтобы выделить подтвержденные STAR-компетенции. Это можно уточнить позже.",
+            )[:6]
 
     def _ensure_career_first_today_action(self, report: dict[str, Any]) -> None:
         action_plan = report.get("action_plan")
@@ -1374,6 +1690,96 @@ class CareerOpenAIClient:
             today["action"] = "Собрать 10 ключевых слов из вакансий и отправить 3 первых отклика по выбранному маршруту."
             today["timebox"] = "15 минут"
             today["result"] = "Первые рыночные данные и список требований для доработки CV."
+
+    def _ensure_barrier_driven_today_action(self, report: dict[str, Any], answers_text: str = "") -> None:
+        action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+        today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+        if not today:
+            today = {"action": "", "timebox": "", "result": ""}
+
+        digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+        main_barrier = str(digital_human.get("main_barrier", "")).lower().replace("ё", "е")
+        main_fear = str(digital_human.get("main_fear", "")).lower().replace("ё", "е")
+        answers_low = str(answers_text or "").lower().replace("ё", "е")
+        barrier_blob = " ".join([main_barrier, main_fear, answers_low])
+
+        matrix: list[tuple[list[str], dict[str, str]]] = [
+            (
+                ["страх отказ", "боюсь отказ", "отказ"],
+                {
+                    "action": (
+                        "Шаг на сегодня, 10 минут: напишите одному знакомому:\n"
+                        "«Привет. Я работаю по отделке: плитка, гипсокартон, покраска, мелкий ремонт. "
+                        "Если услышишь о подработке или объекте — буду благодарен за контакт».\n"
+                        "[Скопировать текст] [Сделал] [Слишком страшно] [Сделать проще]"
+                    ),
+                    "timebox": "10 минут",
+                    "result": "Отправлено 1 безопасное сообщение, которое запускает контакт без риска большого отказа.",
+                },
+            ),
+            (
+                ["хаос", "слишком много", "раскидан", "не могу выбрать"],
+                {
+                    "action": "Выберите один маршрут на ближайшие 7 дней и зафиксируйте правило: не переключаться до конца недели.",
+                    "timebox": "10 минут",
+                    "result": "Один маршрут зафиксирован на 7 дней без метаний.",
+                },
+            ),
+            (
+                ["нет резюме", "резюме нет", "cv нет", "без резюме"],
+                {
+                    "action": "Заполните 4 строки о прошлом опыте: что делали, какой результат, с какими задачами работали, что умеете лучше всего.",
+                    "timebox": "10 минут",
+                    "result": "Готов черновик из 4 строк для основы резюме.",
+                },
+            ),
+            (
+                ["нет языка", "язык мешает", "плохой язык", "не знаю язык"],
+                {
+                    "action": "Выучите 10 профессиональных слов по своей сфере и составьте 2 короткие рабочие фразы для общения с заказчиком/работодателем.",
+                    "timebox": "10 минут",
+                    "result": "Есть 10 слов и 2 рабочие фразы для практики.",
+                },
+            ),
+            (
+                ["нет контактов", "нет знакомых", "нет сети", "нетворк"],
+                {
+                    "action": "Напишите одному знакомому про ваш текущий профиль или вступите в один местный профессиональный чат по вашей сфере.",
+                    "timebox": "10 минут",
+                    "result": "Сделан 1 новый контактный шаг в локальной среде.",
+                },
+            ),
+            (
+                ["нет сил", "устал", "выгор", "не тяну"],
+                {
+                    "action": "Выберите действие на 5 минут: открыть 1 вакансию, выписать 3 требования и остановиться на этом.",
+                    "timebox": "5 минут",
+                    "result": "Сделан минимальный шаг без перегрузки.",
+                },
+            ),
+            (
+                ["не знаю, с чего начать", "не знаю с чего начать", "сложно начать"],
+                {
+                    "action": (
+                        "Выберите один из 3 мини-шагов:\n"
+                        "1) выписать 3 вида работ, которые умеете лучше всего;\n"
+                        "2) открыть 3 вакансии и выписать повторяющиеся требования;\n"
+                        "3) написать 1 знакомому о том, какую работу ищете."
+                    ),
+                    "timebox": "10 минут",
+                    "result": "Выбран и выполнен 1 мини-шаг вместо попытки решить всю карьеру сразу.",
+                },
+            ),
+        ]
+
+        for markers, template in matrix:
+            if any(marker in barrier_blob for marker in markers):
+                today["action"] = template["action"]
+                today["timebox"] = template["timebox"]
+                today["result"] = template["result"]
+                action_plan["today"] = today
+                report["action_plan"] = action_plan
+                return
 
     def _ensure_strategy_mode(self, report: dict[str, Any]) -> None:
         digital_human = report.get("digital_human")
@@ -1395,17 +1801,10 @@ class CareerOpenAIClient:
         integration = report.get("social_integration")
         if not isinstance(integration, dict):
             integration = {}
-        defaults = {
-            "environment": ["Пока требуется больше точек опоры в локальной среде."],
-            "people": ["Нужно расширить круг профессиональных контактов."],
-            "communities": ["Добавить минимум 1 профильное сообщество для нетворкинга."],
-            "opportunities": ["Регулярно отслеживать локальные программы и открытые мероприятия."],
-            "contribution": ["Использовать свой опыт в малых локальных инициативах как мост к работе."],
-        }
-        for key, value in defaults.items():
+        for key in ("environment", "people", "communities", "opportunities", "contribution"):
             current = integration.get(key)
-            if not isinstance(current, list) or not [item for item in current if str(item).strip()]:
-                integration[key] = value
+            if not isinstance(current, list):
+                integration[key] = []
         report["social_integration"] = integration
 
     def _preferred_polish_roles(self, story_analysis: dict[str, Any]) -> list[str]:

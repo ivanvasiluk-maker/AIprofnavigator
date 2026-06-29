@@ -6,12 +6,14 @@ class CareerFlow(StatesGroup):
     SELECTING_PACE = State()
     SELECTING_VOICE_PACE = State()
     WAITING_STORY = State()
+    CONFIRMING_STORY = State()
     ASK_CV = State()
     WAITING_CV = State()
     RESUME_ANALYZING = State()
     INTERVIEW = State()
     SELECTING_BARRIERS = State()
     GENERATING_REPORT = State()
+    ROUTE_SELECTION = State()
     FINAL_READY = State()
     SHOWING_DETAILS = State()
     WAITING_ROUTE_CHANGES = State()
@@ -36,6 +38,7 @@ class CareerFlow(StatesGroup):
     choosing_pace = SELECTING_PACE
     choosing_voice_pace = SELECTING_VOICE_PACE
     waiting_for_story = WAITING_STORY
+    confirming_story = CONFIRMING_STORY
     waiting_for_resume_decision = ASK_CV
     waiting_for_resume = WAITING_CV
     waiting_for_answers = INTERVIEW

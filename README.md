@@ -249,6 +249,36 @@ Notes:
 - `source_tag` from Telegram deep link `/start <tag>` is saved in local registry and can be sent in event meta.
 - If legal policy requires, do not push raw Telegram identifiers to external sheets.
 
+### Daily review metrics
+
+To print pilot quality metrics as a table for team daily review:
+
+.\.venv\Scripts\python.exe scripts\pilot_metrics_report.py --samples 50 100
+
+The script uses analytics events and prints:
+
+- percent reached map;
+- conflict percent;
+- disagree percent;
+- first step too hard percent;
+- specialist click percent;
+- PDF/report error percent;
+- top drop-off stages.
+
+### PDF health-check before release
+
+Run a one-command diagnostics report for PDF generation engines:
+
+.\.venv\Scripts\python.exe scripts\pdf_health_check.py
+
+It generates a test HTML report and prints a table with status/details for:
+
+- `playwright`
+- `xhtml2pdf`
+- `plain-fallback` (readable text PDF via reportlab)
+
+Use this check before deploy to quickly see which engine is stable in the current environment.
+
 PDF font quality (Cyrillic):
 
 ```bash

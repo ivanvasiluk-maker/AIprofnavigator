@@ -10,12 +10,24 @@ class ReportingUtilsTests(unittest.TestCase):
                 "current_state": "Административный специалист в Польше",
                 "main_asset": "Документооборот и координация",
                 "main_risk": "Финансовое давление",
+                "main_barrier": "Нестабильная занятость",
+                "barriers": {"external": ["Язык", "Нет локального резюме"]},
             },
             "resource_level": "medium",
             "integration_level": "low",
             "energy_sources": ["Организация процессов", "Анализ"],
             "career_priorities": ["Быстро выйти на доход", "Найти устойчивость и баланс"],
             "competency_signals": ["Коммуникация", "Организация процессов"],
+            "facts_only": {
+                "explicit_facts": [
+                    "17 лет работали в строительстве",
+                    "Умеете делать отделку и собирать мебель",
+                    "Есть опыт ведения небольших объектов",
+                ],
+                "inferences": [],
+                "unknowns": [],
+                "contradictions": [],
+            },
             "career_decision": {
                 "recommended_main_path": "Administrative Assistant",
                 "why_this_path": "Быстрый вход с текущими навыками",
@@ -24,16 +36,23 @@ class ReportingUtilsTests(unittest.TestCase):
         }
 
         summary = build_telegram_summary(report)
+        self.assertIn("Что я услышал в вашей истории", summary)
+        self.assertLess(summary.index("Что я услышал в вашей истории"), summary.index("Ваш Career GPS"))
+        self.assertIn("Главная проблема", summary)
+        self.assertIn("Ресурс", summary)
+        self.assertIn("Ограничение", summary)
         self.assertIn("Ваш Career GPS", summary)
+        self.assertIn("Ваше профессиональное ядро", summary)
+        self.assertIn("Вы не начинаете с нуля", summary)
         self.assertIn("Кто вы сейчас", summary)
         self.assertIn("Что не обнулилось", summary)
         self.assertIn("Источники энергии", summary)
         self.assertIn("Карьерные приоритеты", summary)
         self.assertIn("STAR-компетенции", summary)
-        self.assertIn("Уровень ресурса", summary)
-        self.assertIn("medium (средний)", summary)
-        self.assertIn("Уровень интеграции", summary)
-        self.assertIn("low (низкий)", summary)
+        self.assertIn("Ресурс и рабочий темп", summary)
+        self.assertIn("Сейчас ресурс частично ограничен", summary)
+        self.assertIn("Состояние интеграции", summary)
+        self.assertIn("Интеграция пока начальная", summary)
         self.assertIn("Рекомендуемый маршрут", summary)
         self.assertIn("Открыть 5 вакансий", summary)
 
@@ -79,15 +98,16 @@ class ReportingUtilsTests(unittest.TestCase):
 
         self.assertIn("Career GPS Report", html)
         self.assertIn("Профиль ситуации", html)
+        self.assertIn("Ваше профессиональное ядро", html)
         self.assertIn("Анализ возможностей", html)
         self.assertIn("План действий", html)
         self.assertIn("Источники энергии", html)
         self.assertIn("Карьерные приоритеты", html)
         self.assertIn("STAR-компетенции", html)
-        self.assertIn("Уровень ресурса", html)
-        self.assertIn("high (высокий)", html)
-        self.assertIn("Уровень интеграции", html)
-        self.assertIn("medium (средний)", html)
+        self.assertIn("Ресурс и рабочий темп", html)
+        self.assertIn("Сейчас ресурс устойчивый", html)
+        self.assertIn("Состояние интеграции", html)
+        self.assertIn("Интеграция пока частичная", html)
 
     def test_offer_text_contains_zero_price(self) -> None:
         offer = build_offer_text()

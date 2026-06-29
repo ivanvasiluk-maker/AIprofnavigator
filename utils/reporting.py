@@ -65,6 +65,81 @@ def _level_label(value: object) -> str:
     return labels.get(normalized, _safe_text(value, "не уточнено"))
 
 
+def _resource_human_message(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "low":
+        return (
+            "Сейчас ресурс ограничен.\n"
+            "Вам важнее не брать на себя большой карьерный разворот, а выбрать путь, который дает доход "
+            "и не требует резко учиться всему с нуля."
+        )
+    if normalized == "medium":
+        return (
+            "Сейчас ресурс частично ограничен.\n"
+            "Лучше двигаться короткими шагами: сначала стабильный доход и понятный ритм, затем расширять траекторию."
+        )
+    if normalized == "high":
+        return (
+            "Сейчас ресурс устойчивый.\n"
+            "Вы можете брать более амбициозные шаги, но сохранять контроль: измеримые действия и проверка гипотез на рынке."
+        )
+    return (
+        "Ресурс пока нельзя оценить точно.\n"
+        "Нужно уточнить, насколько стабильно у вас хватает времени, сил и темпа на регулярные карьерные действия."
+    )
+
+
+def _integration_human_message(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "low":
+        return (
+            "Интеграция пока начальная.\n"
+            "Нужен щадящий маршрут: меньше зависимости от широких контактов и сложных локальных процессов на старте."
+        )
+    if normalized == "medium":
+        return (
+            "Интеграция пока частичная.\n"
+            "Вы уже живете и работаете в стране, но язык, местные контакты и понимание рынка еще требуют укрепления."
+        )
+    if normalized == "high":
+        return (
+            "Интеграция уже устойчивая.\n"
+            "Можно делать ставку на роли с более высокой планкой входа и активнее использовать локальный нетворк."
+        )
+    return (
+        "Интеграцию пока нельзя оценить точно.\n"
+        "Мы знаем, что вы уже живете в стране, но пока не понимаем, насколько уверенно вы используете язык, "
+        "контакты и местные сервисы."
+    )
+
+
+def _professional_core_summary(report: dict) -> str:
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    not_reset = report.get("what_not_reset") if isinstance(report.get("what_not_reset"), list) else []
+    snapshot = " ".join(str(item) for item in not_reset[:6]).lower().replace("ё", "е")
+    state_blob = " ".join(
+        [
+            str(digital_human.get("current_state", "")),
+            str(digital_human.get("main_asset", "")),
+            snapshot,
+        ]
+    ).lower().replace("ё", "е")
+
+    worker_markers = ["плитк", "гипсокарт", "ремонт", "строит", "мебел", "рукам", "отделк"]
+    if any(marker in state_blob for marker in worker_markers):
+        return (
+            "Вы не начинаете с нуля. Ваш основной капитал — практический опыт, способность работать руками, "
+            "доводить задачу до результата и общаться с заказчиком. "
+            "Сейчас вам нужен не абстрактный «новый старт», а перевод уже имеющегося опыта в понятный доход в новой стране."
+        )
+
+    return (
+        "Вы не начинаете с нуля. У вас уже есть профессиональный капитал: практический опыт, рабочая дисциплина, "
+        "умение доводить задачи до результата и взаимодействовать с людьми. "
+        "Сейчас нужен не «новый старт с пустого места», а точная упаковка и перевод вашего опыта в понятный доход в новой стране."
+    )
+
+
 def _detect_country(report: dict) -> str:
     profile = str((report.get("digital_human") or {}).get("current_state", "")).lower()
     if "польш" in profile or "poland" in profile:
@@ -92,6 +167,62 @@ def build_meta(report: dict, user_name: str = "") -> ReportMeta:
     return ReportMeta(user_name=name, country=country, mode=mode, created_at=created_at)
 
 
+def _clean_fact_line(text: object) -> str:
+    value = str(text or "").strip()
+    if value.lower().startswith("ответ пользователя:"):
+        value = value.split(":", 1)[1].strip()
+    return value
+
+
+def _build_story_echo(report: dict) -> str:
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    explicit_facts = [_clean_fact_line(item) for item in (facts_only.get("explicit_facts") or [])]
+    explicit_facts = [item for item in explicit_facts if item]
+    inferences = [str(item).strip() for item in (facts_only.get("inferences") or []) if str(item).strip()]
+    unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()]
+
+    facts: list[str] = []
+    for item in explicit_facts:
+        if item not in facts:
+            facts.append(item)
+        if len(facts) >= 4:
+            break
+    for item in inferences:
+        if len(facts) >= 2:
+            break
+        if item not in facts:
+            facts.append(item)
+    if not facts:
+        facts = ["Пока не хватает подтвержденных фактов из вашей истории. Это можно уточнить позже."]
+
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    barriers = digital_human.get("barriers") if isinstance(digital_human.get("barriers"), dict) else {}
+
+    problem = _safe_text(digital_human.get("main_barrier"), "данных недостаточно")
+    if problem == "-":
+        problem = "данных недостаточно"
+
+    resource = _safe_text(digital_human.get("main_asset"), "данных недостаточно")
+    if resource == "-":
+        resource = "данных недостаточно"
+
+    constraint_candidates = _list_items(barriers.get("external"))
+    constraint = next((item for item in constraint_candidates if item != "-"), "")
+    if not constraint and unknowns:
+        constraint = unknowns[0]
+    if not constraint:
+        constraint = "данных недостаточно"
+
+    facts_block = "\n".join(f"- {item}" for item in facts[:4])
+    return (
+        "Что я услышал в вашей истории\n\n"
+        f"{facts_block}\n\n"
+        f"Главная проблема:\n{problem}\n\n"
+        f"Ресурс:\n{resource}\n\n"
+        f"Ограничение:\n{constraint}"
+    )
+
+
 def build_telegram_summary(report: dict) -> str:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
@@ -110,26 +241,34 @@ def build_telegram_summary(report: dict) -> str:
     weaknesses.extend(_list_items(barriers.get("internal"))[:2])
     weaknesses.extend(_list_items(barriers.get("external"))[:2])
     weaknesses_block = "\n".join(f"- {item}" for item in weaknesses[:4]) if weaknesses else "- данных недостаточно"
-    resource_level_raw = _safe_text(report.get("resource_level"), "не уточнено")
-    integration_level_raw = _safe_text(report.get("integration_level"), "не уточнено")
-    resource_level = f"{resource_level_raw} ({_level_label(resource_level_raw)})" if resource_level_raw != "не уточнено" else resource_level_raw
-    integration_level = f"{integration_level_raw} ({_level_label(integration_level_raw)})" if integration_level_raw != "не уточнено" else integration_level_raw
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()]
+    unknowns_block = "\n".join(f"- {item}" for item in unknowns[:3]) if unknowns else "- критичных неизвестных сейчас нет"
+    resource_level = _resource_human_message(report.get("resource_level"))
+    integration_level = _integration_human_message(report.get("integration_level"))
+    story_echo = _build_story_echo(report)
+    professional_core = _professional_core_summary(report)
 
     summary = [
+        story_echo,
+        "",
         "Ваш Career GPS",
         "",
+        f"Ваше профессиональное ядро:\n{professional_core}",
         f"Кто вы сейчас:\n{_safe_text(digital_human.get('current_state'))}",
         f"Что не обнулилось:\n{not_reset_block}",
         f"Источники энергии:\n{energy_block}",
         f"Карьерные приоритеты:\n{priorities_block}",
         f"STAR-компетенции:\n{competency_block}",
-        f"Слабые места / риски входа:\n{weaknesses_block}",
-        f"Уровень ресурса:\n{resource_level}",
-        f"Уровень интеграции:\n{integration_level}",
+        f"Что мешает сейчас:\n{weaknesses_block}",
+        f"Что пока неизвестно:\n{unknowns_block}",
+        f"Ресурс и рабочий темп:\n{resource_level}",
+        f"Состояние интеграции:\n{integration_level}",
         f"Главный риск:\n{_safe_text(digital_human.get('main_risk'))}",
         f"Рекомендуемый маршрут:\n{_safe_text(decision.get('recommended_main_path'))}",
+        f"Почему он предложен:\n{_safe_text(decision.get('why_this_path'))}",
         f"Запасной маршрут:\n{_safe_text(decision.get('backup_path'))}",
-        f"Первый шаг сегодня:\n{_safe_text(today.get('action'))}",
+        f"Маленький первый шаг:\n{_safe_text(today.get('action'))}",
         "Что хотите сделать дальше?",
     ]
     return "\n\n".join(summary)
@@ -169,10 +308,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
     career_priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
     competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
-    resource_level_raw = _safe_text(report.get("resource_level"), "не уточнено")
-    integration_level_raw = _safe_text(report.get("integration_level"), "не уточнено")
-    resource_level = f"{resource_level_raw} ({_level_label(resource_level_raw)})" if resource_level_raw != "не уточнено" else resource_level_raw
-    integration_level = f"{integration_level_raw} ({_level_label(integration_level_raw)})" if integration_level_raw != "не уточнено" else integration_level_raw
+    resource_level = _resource_human_message(report.get("resource_level"))
+    integration_level = _integration_human_message(report.get("integration_level"))
     closing_message = _safe_text(report.get("closing_message"), "Сконцентрируйтесь на ближайшем работающем шаге и проверьте его на рынке.")
     strengths_for_closing = _list_items(digital_human.get("hidden_strengths"))[:3]
     main_asset = _safe_text(digital_human.get("main_asset"), "")
@@ -206,8 +343,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     ]
     blind_spots = [item for item in blind_spots if item and item != "-"][:4]
     important_consider = [
-        f"Ресурс: {resource_level}",
-        f"Интеграция: {integration_level}",
+        f"Ресурс: {resource_level.splitlines()[0]}",
+        f"Интеграция: {integration_level.splitlines()[0]}",
         f"Приоритеты: {', '.join(_list_items(career_priorities)[:3])}",
     ]
     market_questions = []
@@ -342,16 +479,19 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 
     unicode_font = _resolve_unicode_font_path()
     font_face_css = ""
+    body_font_stack = "'Arial', 'Helvetica', 'DejaVu Sans', sans-serif"
     if unicode_font:
-        # Embed a local Unicode font for consistent Cyrillic rendering in Chromium PDF.
+        # Use an absolute file path to keep compatibility with both Chromium and xhtml2pdf.
+        font_src = str(unicode_font.resolve()).replace("\\", "/")
         font_face_css = (
             "@font-face {"
             "font-family: 'CareerUnicode';"
-            f"src: url('{unicode_font.as_uri()}') format('truetype');"
+            f"src: url('{font_src}') format('truetype');"
             "font-weight: normal;"
             "font-style: normal;"
             "}"
         )
+        body_font_stack = "'CareerUnicode', 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif"
 
     html = f"""
 <!DOCTYPE html>
@@ -359,8 +499,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 <head>
   <meta charset='UTF-8' />
   <style>
+        {font_face_css}
     @page {{ size: A4; margin: 18mm; }}
-    body {{ font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; color: #1f2937; font-size: 12px; line-height: 1.45; }}
+        body {{ font-family: {body_font_stack}; color: #1f2937; font-size: 12px; line-height: 1.45; }}
     h1 {{ font-size: 26px; margin: 0 0 6px 0; color: #0f172a; }}
     h2 {{ font-size: 18px; margin: 0 0 8px 0; color: #0f766e; }}
     h3 {{ font-size: 14px; margin: 0 0 6px 0; }}
@@ -402,6 +543,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
   <section class='page'>
     <h2>Профиль ситуации</h2>
     <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
+        <div class='card'><h3>Ваше профессиональное ядро</h3><p>{escape(_professional_core_summary(report))}</p></div>
     <div class='card'><h3>Ваш главный актив</h3><p>{escape(_safe_text(digital_human.get('main_asset')))}</p></div>
     <div class='card'><h3>Скрытые активы</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(digital_human.get('hidden_strengths'))[:6])}</ul></div>
     <div class='card'><h3>Главный риск</h3><p>{escape(_safe_text(digital_human.get('main_risk')))}</p></div>
@@ -410,8 +552,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Источники энергии</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(energy_sources)[:6])}</ul></div>
         <div class='card'><h3>Карьерные приоритеты</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(career_priorities)[:6])}</ul></div>
         <div class='card'><h3>STAR-компетенции</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(competency_signals)[:6])}</ul></div>
-        <div class='card'><h3>Уровень ресурса</h3><p>{escape(resource_level)}</p></div>
-        <div class='card'><h3>Уровень интеграции</h3><p>{escape(integration_level)}</p></div>
+        <div class='card'><h3>Ресурс и рабочий темп</h3><p>{escape(resource_level).replace('\n', '<br/>')}</p></div>
+        <div class='card'><h3>Состояние интеграции</h3><p>{escape(integration_level).replace('\n', '<br/>')}</p></div>
         <div class='card'><h3>Слои опыта</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(experience_layers)[:6])}</ul></div>
         <div class='swot-grid'>
             <div class='card'><h3>Сильные стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_items) or '<li>Данных недостаточно.</li>'}</ul></div>
@@ -599,10 +741,14 @@ def html_to_pdf(html: str, output_path: Path) -> None:
 
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
-                    page = browser.new_page()
+                    page = browser.new_page(viewport={"width": 1280, "height": 1800})
                     page.set_default_timeout(45000)
-                    page.goto(temp_html_path.as_uri(), wait_until="networkidle")
-                    page.evaluate("() => document.fonts.ready")
+                    page.goto(temp_html_path.as_uri(), wait_until="domcontentloaded")
+                    page.wait_for_load_state("networkidle")
+                    page.wait_for_function(
+                        "() => !document.fonts || document.fonts.status === 'loaded'",
+                        timeout=12000,
+                    )
                     page.emulate_media(media="screen")
                     page.pdf(
                         path=str(output_path),
@@ -618,7 +764,7 @@ def html_to_pdf(html: str, output_path: Path) -> None:
         except Exception as exc:
             errors.append(f"playwright: {exc}")
             if engine == "playwright":
-                raise RuntimeError("Playwright PDF engine failed. Check playwright package and installed browser.")
+                raise RuntimeError(f"Playwright PDF engine failed. Details: {exc}")
             # Fallback engine below keeps report generation available even without Playwright browsers.
             pass
 
@@ -633,7 +779,7 @@ def html_to_pdf(html: str, output_path: Path) -> None:
     except Exception as exc:
         errors.append(f"xhtml2pdf-import: {exc}")
         if engine == "xhtml2pdf":
-            raise RuntimeError("xhtml2pdf engine unavailable") from exc
+            raise RuntimeError(f"xhtml2pdf engine unavailable: {exc}") from exc
         plain_text = _html_to_plain_text(html)
         _render_plain_text_pdf(plain_text, output_path)
         return
@@ -661,14 +807,50 @@ def html_to_pdf(html: str, output_path: Path) -> None:
             return str((Path(rel).parent / uri).resolve())
         return str(Path(uri).resolve())
 
+    # xhtml2pdf is sensitive to custom @font-face declarations in some Windows envs.
+    html_for_xhtml = re.sub(r"@font-face\s*\{[^}]*\}", "", html, flags=re.IGNORECASE | re.DOTALL)
+    html_for_xhtml = html_for_xhtml.replace("'CareerUnicode', ", "")
+
     with output_path.open("wb") as fh:
-        status = pisa.CreatePDF(src=html, dest=fh, encoding="utf-8", link_callback=_link_callback)
+        status = pisa.CreatePDF(src=html_for_xhtml, dest=fh, encoding="utf-8", link_callback=_link_callback)
     if status.err:
         errors.append("xhtml2pdf: Failed to convert HTML to PDF")
         if engine == "xhtml2pdf":
-            raise RuntimeError("Failed to convert HTML to PDF")
+            joined = " | ".join(errors) if errors else "unknown"
+            raise RuntimeError(f"Failed to convert HTML to PDF: {joined}")
         plain_text = _html_to_plain_text(html)
         _render_plain_text_pdf(plain_text, output_path)
+
+
+def generate_pdf_from_html_file_with_error(html_path: Path) -> tuple[Path | None, str]:
+    try:
+        html = html_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, f"html_read_error: {exc}"
+    pdf_path = html_path.with_suffix(".pdf")
+    try:
+        html_to_pdf(html, pdf_path)
+    except Exception as exc:
+        return None, f"pdf_render_error: {exc}"
+    return pdf_path, ""
+
+
+def generate_plain_pdf_from_html_file_with_error(html_path: Path) -> tuple[Path | None, str]:
+    """Force plain-text PDF generation path for diagnostics.
+
+    This bypasses HTML engines and renders readable text PDF via reportlab.
+    """
+    try:
+        html = html_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return None, f"html_read_error: {exc}"
+    pdf_path = html_path.with_name(f"{html_path.stem}.plain.pdf")
+    try:
+        plain_text = _html_to_plain_text(html)
+        _render_plain_text_pdf(plain_text, pdf_path)
+    except Exception as exc:
+        return None, f"plain_pdf_render_error: {exc}"
+    return pdf_path, ""
 
 
 def generate_pdf_report(report: dict, output_dir: str, user_name: str = "") -> Path:
@@ -678,21 +860,26 @@ def generate_pdf_report(report: dict, output_dir: str, user_name: str = "") -> P
     return pdf_path
 
 
-def generate_report_files(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, Path]:
+def generate_html_report_file(report: dict, output_dir: str, user_name: str = "") -> Path:
     meta = build_meta(report, user_name=user_name)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", meta.user_name)[:40] or "user"
     base_dir = Path(output_dir)
     html_path = base_dir / f"career_report_{safe_name}_{ts}.html"
-    pdf_path = base_dir / f"career_report_{safe_name}_{ts}.pdf"
-
     html = render_report_html(report, meta)
     base_dir.mkdir(parents=True, exist_ok=True)
     html_path.write_text(html, encoding="utf-8")
-    try:
-        html_to_pdf(html, pdf_path)
-    except Exception:
-        return None, html_path
+    return html_path
+
+
+def generate_pdf_from_html_file(html_path: Path) -> Path | None:
+    pdf_path, _error = generate_pdf_from_html_file_with_error(html_path)
+    return pdf_path
+
+
+def generate_report_files(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, Path]:
+    html_path = generate_html_report_file(report, output_dir=output_dir, user_name=user_name)
+    pdf_path = generate_pdf_from_html_file(html_path)
     return pdf_path, html_path
 
 
