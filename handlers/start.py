@@ -1,7 +1,8 @@
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+import uuid
 
 from keyboards import (
     ALL_PACE_OPTIONS,
@@ -12,6 +13,7 @@ from keyboards import (
     PACE_NORMAL,
     PACE_SUPPORT,
     PACE_VOICE,
+    result_actions_keyboard,
     VOICE_PACE_FAST,
     VOICE_PACE_NORMAL,
     VOICE_PACE_SUPPORT,
@@ -23,8 +25,33 @@ from keyboards import (
 from localization import t
 from states import CareerFlow
 from utils.analytics import ensure_public_user_id, log_behavior_event
+from utils.persistence import create_session, load_recovery_bundle, save_profile_version
 
 router = Router()
+
+
+def _is_final_like_state(state_name: str) -> bool:
+    low = str(state_name or "").strip().lower()
+    return any(token in low for token in ["final_ready", "pdf_ready", "showing_details", "route_selection", "step_tracking"])
+
+
+def _recover_target_state(state_name: str):
+    raw = str(state_name or "").strip().lower()
+    if "selecting_pace" in raw:
+        return CareerFlow.SELECTING_PACE
+    if "confirming_story" in raw:
+        return CareerFlow.CONFIRMING_STORY
+    if "waiting_cv" in raw or "waiting_for_resume" in raw:
+        return CareerFlow.WAITING_CV
+    if "interview" in raw or "waiting_for_answers" in raw:
+        return CareerFlow.INTERVIEW
+    if "route_selection" in raw:
+        return CareerFlow.ROUTE_SELECTION
+    if "final_ready" in raw or "pdf_ready" in raw:
+        return CareerFlow.FINAL_READY
+    if "waiting_story" in raw:
+        return CareerFlow.waiting_for_story
+    return CareerFlow.waiting_for_story
 
 
 def _extract_start_source(message_text: str) -> str:
@@ -92,8 +119,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         message.from_user.id if message.from_user else message.chat.id,
         source_tag=source_tag,
     )
+    session_id = str(uuid.uuid4())
     await state.update_data(
         public_user_id=public_user_id,
+        session_id=session_id,
         source_tag=source_tag,
         language=LANG_RU,
         lang=LANG_RU,
@@ -110,12 +139,35 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         detail_preference="balanced",
         preferred_input="unknown",
     )
+    create_session(
+        session_id,
+        public_user_id,
+        source_tag=source_tag,
+        language=LANG_RU,
+        user_mode="calm_steps",
+        state_name="SELECTING_PACE",
+    )
+    save_profile_version(
+        public_user_id,
+        "session_started",
+        {
+            "language": LANG_RU,
+            "user_mode": "calm_steps",
+            "max_questions": 10,
+            "support_level": "medium",
+            "pace": "normal",
+            "detail_preference": "balanced",
+            "source_tag": source_tag,
+        },
+        session_id=session_id,
+    )
     await log_behavior_event(
         public_user_id=public_user_id,
         event="session_started",
         state_name="SELECTING_PACE",
         language=LANG_RU,
         meta={"source_tag": source_tag} if source_tag else {},
+        session_id=session_id,
     )
     await state.set_state(CareerFlow.SELECTING_PACE)
     await message.answer(t(LANG_RU, "start_intro"))
@@ -178,6 +230,7 @@ async def choose_pace(message: Message, state: FSMContext) -> None:
         action=choice,
         user_mode=str(mode_settings["user_mode"]),
         language=LANG_RU,
+        session_id=str(data.get("session_id") or "").strip(),
     )
     await state.set_state(CareerFlow.waiting_for_story)
     await message.answer(t(LANG_RU, key))
@@ -237,6 +290,7 @@ async def choose_voice_pace(message: Message, state: FSMContext) -> None:
         action=choice,
         user_mode=str(mode_settings["user_mode"]),
         language=LANG_RU,
+        session_id=str(data.get("session_id") or "").strip(),
     )
     await state.set_state(CareerFlow.waiting_for_story)
     await message.answer(t(LANG_RU, key))
@@ -257,3 +311,65 @@ async def choose_language_fallback(message: Message) -> None:
 async def dont_know_start(message: Message, state: FSMContext) -> None:
     await state.update_data(answer_length="short", preferred_input="buttons", pace="slow", detail_preference="brief")
     await message.answer(t(LANG_RU, "short_story_prompt"), reply_markup=short_story_keyboard())
+
+
+@router.message(StateFilter(None), F.text)
+async def recover_without_fsm_state(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+
+    public_user_id = ensure_public_user_id(message.from_user.id if message.from_user else message.chat.id)
+    bundle = load_recovery_bundle(public_user_id)
+    session_row = bundle.get("session") if isinstance(bundle.get("session"), dict) else {}
+    profile_row = bundle.get("profile") if isinstance(bundle.get("profile"), dict) else {}
+    report_row = bundle.get("report") if isinstance(bundle.get("report"), dict) else {}
+
+    if not session_row:
+        await state.set_state(CareerFlow.SELECTING_PACE)
+        await message.answer(t(LANG_RU, "start_intro"))
+        await message.answer(t(LANG_RU, "pace_prompt"), reply_markup=pace_keyboard())
+        return
+
+    recovered_state_name = str(session_row.get("state_name") or "")
+    recovered_state = _recover_target_state(recovered_state_name)
+    session_id = str(session_row.get("session_id") or "") or str(uuid.uuid4())
+
+    profile_payload = profile_row.get("profile") if isinstance(profile_row.get("profile"), dict) else {}
+    user_mode = str(profile_payload.get("user_mode") or session_row.get("user_mode") or "calm_steps")
+    language = str(profile_payload.get("language") or session_row.get("language") or LANG_RU)
+
+    await state.update_data(
+        public_user_id=public_user_id,
+        session_id=session_id,
+        language=language,
+        lang=language,
+        user_mode=user_mode,
+        max_questions=5 if user_mode == "fast" else (15 if user_mode == "deep_route" else 10),
+        support_level=profile_payload.get("support_level", "medium"),
+        support_need=profile_payload.get("support_need", "medium"),
+        pace=profile_payload.get("pace", "normal"),
+        detail_preference=profile_payload.get("detail_preference", "balanced"),
+        interaction_profile=profile_payload if isinstance(profile_payload, dict) else {},
+    )
+
+    if _is_final_like_state(recovered_state_name) and isinstance(report_row.get("report"), dict) and report_row.get("report"):
+        await state.set_state(CareerFlow.FINAL_READY)
+        await state.update_data(
+            final_report=report_row.get("report"),
+            final_report_generated=True,
+            report_generation_id=str(report_row.get("report_generation_id") or ""),
+            html_report_path=str(report_row.get("html_report_path") or ""),
+            pdf_report_path=str(report_row.get("pdf_report_path") or ""),
+        )
+        await message.answer(
+            "Восстановил ваш прогресс после перезапуска. Готова последняя версия карты и следующий шаг.",
+            reply_markup=result_actions_keyboard(),
+        )
+        return
+
+    await state.set_state(recovered_state)
+    await message.answer(
+        "Восстановил ваш прогресс после перезапуска. Можно продолжить с того же места.",
+        reply_markup=input_method_keyboard(),
+    )

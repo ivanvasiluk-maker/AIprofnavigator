@@ -228,6 +228,8 @@ def build_telegram_summary(report: dict) -> str:
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
     today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+    weekly = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
+    development = report.get("development_map", {}) if isinstance(report.get("development_map"), dict) else {}
     not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
     not_reset_block = "\n".join(f"- {item}" for item in _list_items(not_reset)[:4])
     energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
@@ -248,22 +250,51 @@ def build_telegram_summary(report: dict) -> str:
     integration_level = _integration_human_message(report.get("integration_level"))
     story_echo = _build_story_echo(report)
     professional_core = _professional_core_summary(report)
+    market = report.get("market_analysis", []) if isinstance(report.get("market_analysis"), list) else []
+    resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
+    resume_status = "есть" if resume_analysis else "нет"
+    route_lines: list[str] = []
+    for idx, item in enumerate(market[:3], start=1):
+        if not isinstance(item, dict):
+            continue
+        route_lines.append(
+            f"{idx}. {_safe_text(item.get('profession'))}: {_safe_text(item.get('salary_range'))}; {_safe_text(item.get('fit_percent'))}%"
+        )
+    route_block = "\n".join(f"- {item}" for item in route_lines) if route_lines else "- данных недостаточно"
+    weekly_block = "\n".join(f"- День {item.get('day', '-')}: {_safe_text(item.get('task'))}" for item in weekly[:4] if isinstance(item, dict)) or "- данных недостаточно"
+    first_month = development.get("first_month", []) if isinstance(development.get("first_month"), list) else []
+    month_block = "\n".join(
+        f"- Неделя {row.get('week', '-')}: {_safe_text(row.get('focus'))} — {_safe_text(row.get('output'))}"
+        for row in first_month[:4]
+        if isinstance(row, dict)
+    ) or "- данных недостаточно"
 
     summary = [
         story_echo,
         "",
         "Ваш Career GPS",
         "",
-        f"Ваше профессиональное ядро:\n{professional_core}",
+        f"1. Что я услышал:\n{story_echo}",
+        f"2. Профессиональное ядро:\n{professional_core}",
         f"Кто вы сейчас:\n{_safe_text(digital_human.get('current_state'))}",
         f"Что не обнулилось:\n{not_reset_block}",
+        f"Ваше профессиональное ядро:\n{professional_core}",
+        f"3. Сильные стороны и опоры:\n{energy_block}",
+        f"4. Ограничения и неизвестные:\n{weaknesses_block}\n\nЧто уточнить:\n{unknowns_block}",
+        f"5. Устойчивость в период изменений:\n{resource_level}",
+        f"Ресурс и рабочий темп:\n{resource_level}",
+        f"6. Интеграция в новой стране:\n{integration_level}",
+        f"Состояние интеграции:\n{integration_level}",
+        f"7. Сравнение маршрутов:\n{route_block}",
+        f"8. Выбранный маршрут и первый шаг:\n{_safe_text(decision.get('recommended_main_path'))}\n{_safe_text(today.get('action'))}",
+        f"9. План на 30 дней:\n{weekly_block}\n{month_block}",
+        f"10. Анализ резюме:\nАнализ CV: {resume_status}",
+        f"11. Что может быть не так:\n{weaknesses_block}",
         f"Источники энергии:\n{energy_block}",
         f"Карьерные приоритеты:\n{priorities_block}",
         f"STAR-компетенции:\n{competency_block}",
-        f"Что мешает сейчас:\n{weaknesses_block}",
-        f"Что пока неизвестно:\n{unknowns_block}",
-        f"Ресурс и рабочий темп:\n{resource_level}",
-        f"Состояние интеграции:\n{integration_level}",
+        f"Что делать самому:\n{_safe_text(today.get('action'))}",
+        f"Что подумать со специалистом:\n{_safe_text(decision.get('why_this_path'))}",
         f"Главный риск:\n{_safe_text(digital_human.get('main_risk'))}",
         f"Рекомендуемый маршрут:\n{_safe_text(decision.get('recommended_main_path'))}",
         f"Почему он предложен:\n{_safe_text(decision.get('why_this_path'))}",
@@ -308,6 +339,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
     career_priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
     competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
+    resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
     resource_level = _resource_human_message(report.get("resource_level"))
     integration_level = _integration_human_message(report.get("integration_level"))
     closing_message = _safe_text(report.get("closing_message"), "Сконцентрируйтесь на ближайшем работающем шаге и проверьте его на рынке.")
@@ -354,10 +386,10 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         for req in _list_items(item.get("requirements"))[:4]:
             if req not in market_questions and req != "-":
                 market_questions.append(req)
-    scenario_labels = ["Быстрый сценарий", "Средний сценарий", "Идеальный сценарий"]
+    scenario_labels = ["Быстрый доход", "Основной маршрут", "Долгосрочное развитие"]
 
     possibilities = []
-    labels = ["Возможность 1", "Возможность 2", "Возможность 3"]
+    labels = ["Быстрый доход", "Основной маршрут", "Долгосрочное развитие"]
     for idx, item in enumerate(market[:3]):
         if not isinstance(item, dict):
             continue
@@ -477,6 +509,19 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         "Провести 3 тестовых интервью-скрипта и зафиксировать обратную связь.",
     ]
 
+    resume_good = _list_items(resume_analysis.get("what_is_good"))[:6]
+    resume_missing = _list_items(resume_analysis.get("what_is_missing"))[:6]
+    resume_conflicts = _list_items(resume_analysis.get("inconsistencies"))[:6]
+    resume_professions = _list_items(resume_analysis.get("professions"))[:6]
+    resume_periods = _list_items(resume_analysis.get("periods"))[:6]
+    resume_tasks = _list_items(resume_analysis.get("tasks"))[:6]
+    resume_education = _list_items(resume_analysis.get("education"))[:6]
+    resume_languages = _list_items(resume_analysis.get("languages"))[:6]
+    resume_certificates = _list_items(resume_analysis.get("certificates"))[:6]
+    resume_questions = _list_items(resume_analysis.get("clarifying_questions"))[:6]
+    has_resume_module = bool(resume_analysis)
+    story_echo = _build_story_echo(report)
+
     unicode_font = _resolve_unicode_font_path()
     font_face_css = ""
     body_font_stack = "'Arial', 'Helvetica', 'DejaVu Sans', sans-serif"
@@ -540,10 +585,11 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     </div>
   </section>
 
-  <section class='page'>
-    <h2>Профиль ситуации</h2>
+    <section class='page'>
+        <h2>1. Что я услышал</h2>
     <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
         <div class='card'><h3>Ваше профессиональное ядро</h3><p>{escape(_professional_core_summary(report))}</p></div>
+        <div class='card'><h3>Профиль ситуации</h3><p>{escape(story_echo)}</p></div>
     <div class='card'><h3>Ваш главный актив</h3><p>{escape(_safe_text(digital_human.get('main_asset')))}</p></div>
     <div class='card'><h3>Скрытые активы</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(digital_human.get('hidden_strengths'))[:6])}</ul></div>
     <div class='card'><h3>Главный риск</h3><p>{escape(_safe_text(digital_human.get('main_risk')))}</p></div>
@@ -563,8 +609,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         </div>
   </section>
 
-  <section class='page'>
-    <h2>Анализ возможностей</h2>
+    <section class='page'>
+        <h2>7. Сравнение маршрутов</h2>
+          <div class='muted'>Анализ возможностей</div>
     {''.join(possibilities) if possibilities else '<p class="muted">Данных недостаточно.</p>'}
         <div class='card'><h3>Что рынок будет проверять</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in market_questions[:10]) or '<li>Данных недостаточно.</li>'}</ul></div>
         <h2>Рекомендованные роли</h2>
@@ -602,14 +649,15 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     </section>
 
     <section class='page'>
-        <h2>Маршрут</h2>
+        <h2>8. Выбранный маршрут и первый шаг</h2>
+          <div class='muted'>План действий</div>
     <div class='card'><h3>Главное решение системы</h3><p>{escape(_safe_text(decision.get('recommended_main_path')))}</p></div>
         <div class='card'><h3>Запасной маршрут</h3><p>{escape(_safe_text(decision.get('backup_path')))}</p></div>
         <div class='card'><h3>Почему именно оно</h3><p>{escape(_safe_text(decision.get('why_this_path')))}</p></div>
         <div class='card'><h3>Что не делать сейчас</h3><p>{escape(_safe_text(decision.get('avoid_for_now')))}</p></div>
         <div class='card'><h3>Как проверить гипотезу</h3><ul>{''.join(f'<li>{escape(step)}</li>' for step in hypothesis_steps)}</ul></div>
 
-        <h2>План действий</h2>
+        <h2>9. План на 30 дней</h2>
     <div class='card'>
       <h3>Сегодня</h3>
       <p><b>Действие:</b> {escape(_safe_text(today.get('action')))}</p>
@@ -622,15 +670,46 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Недельный ритм (7 дней)</h3><ul>{''.join(f"<li>День {escape(str(item.get('day', '-')))}: {escape(_safe_text(item.get('task')))}</li>" for item in weekly[:7] if isinstance(item, dict)) or '<li>Данных недостаточно.</li>'}</ul></div>
     </section>
 
+    <section class='page'>
+        <h2>10. Анализ резюме</h2>
+        {
+            (
+                "<div class='card'><h3>Профессии и периоды</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_professions + resume_periods)
+                + "</ul></div>"
+                + "<div class='card'><h3>Задачи и достижения</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_tasks + resume_good)
+                + "</ul></div>"
+                + "<div class='card'><h3>Образование, языки, сертификаты</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_education + resume_languages + resume_certificates)
+                + "</ul></div>"
+                "<div class='card'><h3>Сильные стороны CV</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_good)
+                + "</ul></div>"
+                + "<div class='card'><h3>Что недосказано для маршрута</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_missing)
+                + "</ul></div>"
+                + "<div class='card'><h3>Несостыковки для уточнения</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_conflicts)
+                + "</ul></div>"
+                + "<div class='card'><h3>Вопросы для уточнения</h3><ul>"
+                + ''.join(f"<li>{escape(x)}</li>" for x in resume_questions)
+                + "</ul></div>"
+            )
+            if has_resume_module
+            else "<div class='card'><h3>Резюме не загружено</h3><p>Загрузите CV для отдельного анализа и адаптации под выбранный маршрут.</p></div>"
+        }
+    </section>
+
         <section class='page last'>
-        <h2>Заключение NextYou</h2>
+        <h2>11. Что может быть не так в моём выводе</h2>
         <div class='closing-grid'>
             <div class='closing-card'>
-                <div class='closing-title'>Что уже получается у вас</div>
+                <div class='closing-title'>Что делать самому</div>
                 <ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_for_closing) or '<li>Есть устойчивые сильные стороны, на которые можно опереться.</li>'}</ul>
             </div>
             <div class='closing-card'>
-                <div class='closing-title'>Поведенческие сигналы</div>
+                <div class='closing-title'>Что обсудить со специалистом</div>
                 <ul>{''.join(f'<li>{escape(x)}</li>' for x in weekly_signals) or '<li>Вы уже можете делать короткие шаги при понятной структуре.</li>'}</ul>
             </div>
         </div>
@@ -647,7 +726,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         </div>
 
         <div class='system-note'>
-            <b>Ключевая разница:</b> мы продаем не набор навыков, который можно найти отдельно, а систему, которая исследует ваш реальный прогресс и выдает нужный навык в нужный момент.
+            <b>Честно о выводе:</b> карта меняется при новых данных о языке, документах, резюме, приоритетах, контактах или рынке. Самому стоит делать короткий проверяемый шаг; со специалистом лучше обсуждать противоречия, долгосрочный выбор и адаптацию CV.
         </div>
 
         <div class='card'><h3>Финальная фиксация</h3><p>{escape(closing_message)}</p></div>

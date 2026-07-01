@@ -5,6 +5,7 @@ import io
 import os
 import re
 import tempfile
+import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 
@@ -40,6 +41,12 @@ from keyboards import (
     ALL_RESULT_ACTIONS,
     RESULT_ANALYZE_FEARS,
     RESULT_BACK_TO_MENU,
+    RESULT_START_FIRST_STEP,
+    RESULT_FIX_FACT_OR_PRIORITY,
+    RESULT_UPLOAD_OR_EDIT_RESUME,
+    RESULT_ANALYZE_MARKET,
+    RESULT_SPECIALIST_EXPLICIT,
+    RESULT_GROUP_EXPLICIT,
     RESULT_CLARIFY,
     RESULT_DETAILS,
     RESULT_DO_STEPS,
@@ -66,8 +73,15 @@ from keyboards import (
     ROUTE_CHOICE_PRIVATE,
     ROUTE_CHOICE_RETRAIN,
     ROUTE_CHOICE_HELP,
+    ROUTE_CHOICE_CLOSE,
+    ROUTE_CHOICE_OTHER,
+    ROUTE_CHOICE_NO_LOGIC,
     STEP_BARRIERS,
     STEP_DONE,
+    STEP_DONE_USER,
+    STEP_TOO_HARD,
+    STEP_MAKE_EASIER,
+    STEP_OTHER_STEP,
     STEP_NEXT_DAY,
     STEP_NOT_DONE,
     STEP_OPEN_TODAY,
@@ -122,6 +136,7 @@ from localization import t
 from openai_client import ai_client
 from states import CareerFlow
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
+from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
 from utils.reporting import build_telegram_summary, generate_pdf_report
 from utils.reporting import generate_html_report_file, generate_pdf_from_html_file_with_error
 
@@ -274,6 +289,7 @@ async def _track_event(
         user_mode=user_mode,
         language=lang,
         meta=event_meta,
+        session_id=str(data.get("session_id") or "").strip(),
     )
     for alias in _canonical_event_aliases(event, action):
         alias_meta = dict(event_meta)
@@ -286,6 +302,7 @@ async def _track_event(
             user_mode=user_mode,
             language=lang,
             meta=alias_meta,
+            session_id=str(data.get("session_id") or "").strip(),
         )
     await state.update_data(
         public_user_id=public_user_id,
@@ -293,6 +310,30 @@ async def _track_event(
         state_entered_at=state_entered_at_iso,
         last_event_at=now_iso,
     )
+    session_id = str(data.get("session_id") or "").strip()
+    if session_id:
+        touch_session(
+            session_id,
+            state_name=state_name,
+            user_mode=user_mode,
+            language=lang,
+        )
+    if state_changed:
+        snapshot = {
+            "state_name": state_name,
+            "language": lang,
+            "user_mode": user_mode,
+            "story_text": str(data.get("story_text") or "")[:4000],
+            "qa_index": int(data.get("qa_index") or 0),
+            "final_report_generated": bool(data.get("final_report_generated")),
+            "report_generation_id": str(data.get("report_generation_id") or ""),
+        }
+        save_profile_version(
+            public_user_id,
+            "state_sync",
+            snapshot,
+            session_id=session_id,
+        )
 
 
 def _build_system_offer_text(data: dict) -> str:
@@ -456,19 +497,35 @@ def _adaptive_question_count(story_text: str, profile: dict, analysis: dict) -> 
 
 
 def _question_count_for_mode(mode: str, configured_value: object = None) -> int:
+    mode_key = str(mode or "calm_steps")
+
+    # Hard boundaries from MVP TZ.
+    bounds = {
+        "fast": (5, 5),
+        "calm_steps": (8, 10),
+        "deep_route": (12, 15),
+        "support": (12, 15),
+    }
+    min_q, max_q = bounds.get(mode_key, (8, 10))
+
     try:
         configured = int(configured_value or 0)
     except Exception:
         configured = 0
+
+    # If state/config provides a value, clamp it into allowed mode range.
     if configured > 0:
-        return configured
+        return max(min_q, min(max_q, configured))
+
+    # Defaults stay inside mode boundaries.
     defaults = {
         "fast": 5,
         "calm_steps": 8,
-        "deep_route": 12,
-        "support": 12,
+        "deep_route": 15,
+        "support": 15,
     }
-    return defaults.get(str(mode or "calm_steps"), 8)
+    default_value = defaults.get(mode_key, 10)
+    return max(min_q, min(max_q, default_value))
 
 
 def _join_items(items: list[str], limit: int = 6) -> str:
@@ -538,6 +595,51 @@ def _expected_answer_type(row: dict[str, object]) -> str:
     if isinstance(opts, list) and any(str(item).strip() for item in opts):
         return "single_select"
     return "free_text"
+
+
+def _question_source(row: dict[str, object], mode: str, index: int) -> str:
+    raw = str(row.get("source") or "").strip()
+    if raw:
+        return raw
+    if row.get("multi_key") == "psych":
+        return "state_and_resource"
+    if row.get("multi_key") in {"social", "integration"}:
+        return "integration"
+    if row.get("multi_key") == "energy":
+        return "resource"
+    if row.get("multi_key") == "priorities":
+        return "priorities"
+
+    mode_key = str(mode or "calm_steps")
+    if mode_key == "fast":
+        return "story_screening"
+    if mode_key == "deep_route":
+        if index in {0, 3}:
+            return "professional_profile"
+        if index == 2:
+            return "constraints"
+        if index == 4:
+            return "action_capacity"
+        return "route_branch"
+
+    if index == 0:
+        return "professional_profile"
+    if index in {1, 5}:
+        return "priorities"
+    if index in {2, 4}:
+        return "constraints"
+    if index in {3, 6}:
+        return "integration"
+    return "route_branch"
+
+
+def _question_validity_status(row: dict[str, object]) -> str:
+    raw = str(row.get("validity_status") or row.get("status") or "").strip().lower()
+    if raw in {"confirmed", "needs_confirmation", "needs_review", "provisional"}:
+        return raw
+    if row.get("multi_key") or _expected_answer_type(row) in {"single_select", "multi_select"}:
+        return "needs_confirmation"
+    return "confirmed"
 
 
 def _extract_docx_text(raw_bytes: bytes) -> str:
@@ -657,27 +759,38 @@ def format_story_snapshot(analysis: dict, lang: str) -> str:
 def _story_confirmation_text(analysis: dict, question_count: int) -> str:
     lines = ["Вот что я понял из вашей истории.", ""]
 
-    current_identity = str(analysis.get("current_identity") or analysis.get("story_summary") or "").strip()
-    if current_identity:
-        lines.append(current_identity)
-
-    bullets: list[str] = []
-    for source in [analysis.get("experience_snapshot", []), analysis.get("skills", []), analysis.get("constraints", []), analysis.get("goals", [])]:
+    facts: list[str] = []
+    for source in [analysis.get("experience_snapshot", []), analysis.get("skills", []), analysis.get("goals", [])]:
         if not isinstance(source, list):
             continue
         for item in source:
             text = str(item or "").strip()
-            if text and text not in bullets:
-                bullets.append(text)
-            if len(bullets) >= 4:
+            if text and text not in facts:
+                facts.append(text)
+            if len(facts) >= 4:
                 break
-        if len(bullets) >= 4:
+        if len(facts) >= 4:
             break
 
-    if bullets:
-        lines.append("")
-        lines.extend(f"- {item}" for item in bullets[:4])
+    if not facts:
+        current_identity = str(analysis.get("current_identity") or analysis.get("story_summary") or "").strip()
+        if current_identity:
+            facts.append(current_identity)
 
+    goals = analysis.get("goals", []) if isinstance(analysis.get("goals"), list) else []
+    constraints = analysis.get("constraints", []) if isinstance(analysis.get("constraints"), list) else []
+    skills = analysis.get("skills", []) if isinstance(analysis.get("skills"), list) else []
+
+    main_request = str(goals[0]).strip() if goals else "Пока недостаточно данных, чтобы точно выделить главный запрос."
+    main_constraint = str(constraints[0]).strip() if constraints else "Пока недостаточно данных, чтобы точно выделить ограничение."
+    main_resource = str(skills[0]).strip() if skills else "Пока недостаточно данных, чтобы точно выделить ресурс."
+
+    lines.append("Коротко по фактам:")
+    lines.extend(f"- {item}" for item in facts[:4])
+    lines.append("")
+    lines.append(f"Главный запрос: {main_request}")
+    lines.append(f"Ресурс: {main_resource}")
+    lines.append(f"Ограничение: {main_constraint}")
     lines.append("")
     if question_count == 1:
         lines.append("Дальше задам 1 уточняющий вопрос и затем покажу маршруты.")
@@ -1300,6 +1413,8 @@ def _set_mvp_questions(
                     "allowed_button_map": allowed_button_map,
                     "expected_answer_type": str(row.get("expected_answer_type") or _expected_answer_type(row)),
                     "semantic_intent": str(row.get("semantic_intent") or _question_semantic_intent(question_text)),
+                    "source": _question_source(row, mode_key, idx - 1),
+                    "validity_status": _question_validity_status(row),
                 }
             )
         updated["follow_up_questions"] = normalized_fast[:effective_limit]
@@ -1390,6 +1505,8 @@ def _set_mvp_questions(
             "allowed_button_map": allowed_button_map,
             "expected_answer_type": str(row.get("expected_answer_type") or _expected_answer_type(row)),
             "semantic_intent": str(row.get("semantic_intent") or _question_semantic_intent(question_text)),
+            "source": _question_source(row, mode_key, idx - 1),
+            "validity_status": _question_validity_status(row),
         }
         if row.get("multi_key"):
             normalized_row["multi_key"] = str(row.get("multi_key"))
@@ -1506,6 +1623,8 @@ def format_cv_route_review(resume_analysis: dict, report: dict, lang: str) -> st
     best = market[0] if market and isinstance(market[0], dict) else {}
     strengths = _list_block(resume_analysis.get("what_is_good", []) if isinstance(resume_analysis, dict) else [])
     gaps = _list_block(resume_analysis.get("what_is_missing", []) if isinstance(resume_analysis, dict) else [])
+    inconsistencies = _list_block(resume_analysis.get("inconsistencies", []) if isinstance(resume_analysis, dict) else [])
+    questions = _list_block(resume_analysis.get("clarifying_questions", []) if isinstance(resume_analysis, dict) else [])
     requirements = _list_block(best.get("requirements", []) if isinstance(best, dict) else [])
 
     bullet_examples = [
@@ -1529,6 +1648,8 @@ def format_cv_route_review(resume_analysis: dict, report: dict, lang: str) -> st
                 f"{t(lang, 'cv_review_route')}:\n{decision.get('recommended_main_path') or '-'}",
                 f"{t(lang, 'cv_review_strengths')}:\n{strengths}",
                 f"{t(lang, 'cv_review_gaps')}:\n{gaps}",
+                f"Несостыковки:\n{inconsistencies}",
+                f"Вопросы для уточнения:\n{questions}",
                 f"{t(lang, 'cv_review_keywords')}:\n{requirements}",
                 f"{t(lang, 'cv_review_bullets')}:\n{bullets_block}",
                 f"{t(lang, 'cv_review_48h')}:\n{plan_48h}",
@@ -1539,8 +1660,19 @@ def format_cv_route_review(resume_analysis: dict, report: dict, lang: str) -> st
 
 
 def format_resume_analysis(resume_analysis: dict, lang: str) -> str:
-    good = resume_analysis.get("what_is_good", []) if isinstance(resume_analysis, dict) else []
-    missing = resume_analysis.get("what_is_missing", []) if isinstance(resume_analysis, dict) else []
+    source = resume_analysis if isinstance(resume_analysis, dict) else {}
+    professions = _list_block(source.get("professions", []))
+    periods = _list_block(source.get("periods", []))
+    tasks = _list_block(source.get("tasks", []))
+    education = _list_block(source.get("education", []))
+    languages = _list_block(source.get("languages", []))
+    certificates = _list_block(source.get("certificates", []))
+    achievements = _list_block(source.get("achievements", []))
+    skills = _list_block(source.get("skills", []))
+    inconsistencies = _list_block(source.get("inconsistencies", []))
+    clarifying_questions = _list_block(source.get("clarifying_questions", []))
+    good = source.get("what_is_good", [])
+    missing = source.get("what_is_missing", [])
     good_block = _list_block(good)
     missing_block = _list_block(missing)
     if good_block == "-":
@@ -1550,8 +1682,14 @@ def format_resume_analysis(resume_analysis: dict, lang: str) -> str:
     return _clip(
         "\n\n".join(
             [
+                f"Профессии и периоды:\n{professions}\n{periods}",
+                f"Задачи и достижения:\n{tasks}\n{achievements}",
+                f"Образование, языки, сертификаты:\n{education}\n{languages}\n{certificates}",
+                f"Навыки:\n{skills}",
                 f"{t(lang, 'resume_good_label')}:\n{good_block}",
                 f"{t(lang, 'resume_missing_label')}:\n{missing_block}",
+                f"Несостыковки:\n{inconsistencies}",
+                f"Вопросы для уточнения:\n{clarifying_questions}",
             ]
         )
     )
@@ -1752,6 +1890,23 @@ def _today_task_from_report(report: dict) -> str:
     return "Сделайте первый шаг по маршруту сегодня."
 
 
+def _optional_support_step_from_report(report: dict) -> str:
+    action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+
+    # Preferred explicit field from model output.
+    direct = str(action_plan.get("optional_support_step") or "").strip()
+    if direct:
+        return direct
+
+    # Backward-compatible aliases.
+    legacy = str(today.get("optional_support") or today.get("support_step") or "").strip()
+    if legacy:
+        return legacy
+
+    return ""
+
+
 def _build_execution_steps(report: dict) -> list[dict[str, str]]:
     steps: list[dict[str, str]] = []
     weekly_plan = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
@@ -1791,6 +1946,8 @@ def _build_execution_steps(report: dict) -> list[dict[str, str]]:
         if len(steps) >= 14:
             break
 
+    optional_support = _optional_support_step_from_report(report)
+
     if not steps:
         steps.append(
             {
@@ -1800,8 +1957,13 @@ def _build_execution_steps(report: dict) -> list[dict[str, str]]:
                 "time": "15 минут",
                 "result": "Первое действие запущено.",
                 "why": "Так карта превращается в реальное движение.",
+                "support_optional": optional_support,
             }
         )
+    else:
+        # Product rule: one primary action per day, plus at most one optional support step.
+        steps[0]["support_optional"] = optional_support
+
     return steps[:14]
 
 
@@ -1815,6 +1977,8 @@ def _execution_step_text(step: dict[str, str], progress: dict[str, dict[str, str
         barrier = str(row.get("barrier") or "").strip()
         if barrier:
             barrier_note = f"\n\nГде застрял(а):\n{barrier}"
+    support_optional = str(step.get("support_optional") or "").strip()
+    optional_block = f"\n\nНеобязательная поддержка:\n{support_optional}" if support_optional else ""
     return (
         f"День {day}\n\n"
         f"Фокус:\n{step.get('focus', '-')}\n\n"
@@ -1822,7 +1986,7 @@ def _execution_step_text(step: dict[str, str], progress: dict[str, dict[str, str
         f"Время:\n{step.get('time', '-')}\n\n"
         f"Ожидаемый результат:\n{step.get('result', '-')}\n\n"
         f"Зачем это делать:\n{step.get('why', '-')}\n\n"
-        f"Статус: {status}{barrier_note}"
+        f"Статус: {status}{optional_block}{barrier_note}"
     )
 
 
@@ -2017,6 +2181,11 @@ def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
             "speed": _route_speed_label(str(main_rec.get("entry_timeline") or "")),
             "risk": _route_risk_label(_join_items(main_rec.get("risks", []), 3)),
             "need": _join_items(main_rec.get("pros", []), 2) or _join_items(main_rec.get("risks", []), 2) or "резюме, отклики",
+            "why": str(decision.get("why_this_path") or main_rec.get("why_fit") or "Опирается на уже подтвержденный профессиональный капитал.").strip(),
+            "good": _join_items(main_rec.get("pros", []), 4) or "Быстрый старт с текущими навыками.",
+            "obstacle": _join_items(main_rec.get("risks", []), 4) or "Нужна проверка требований рынка.",
+            "first_step": str(report.get("action_plan", {}).get("today", {}).get("action") or "Собрать 10 вакансий и проверить совпадения по требованиям.").strip(),
+            "uncertainty": "низкая" if main_rec else "средняя",
         }
     )
 
@@ -2030,6 +2199,11 @@ def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
                 "speed": _route_speed_label(str(backup_rec.get("entry_timeline") or "")),
                 "risk": _route_risk_label(_join_items(backup_rec.get("risks", []), 3)),
                 "need": _join_items(backup_rec.get("pros", []), 2) or "резюме, отклики",
+                "why": str(backup_rec.get("why_fit") or "Хороший запасной трек, если основной маршрут слишком рискован.").strip(),
+                "good": _join_items(backup_rec.get("pros", []), 4) or "Ниже порог входа, если нужен более простой старт.",
+                "obstacle": _join_items(backup_rec.get("risks", []), 4) or "Может потребовать компромисса по роли или доходу.",
+                "first_step": str(backup_rec.get("first_step") or "Сравнить 5 вакансий по требованиям и сроку входа.").strip(),
+                "uncertainty": "средняя" if backup_rec else "высокая",
             }
         )
 
@@ -2052,6 +2226,11 @@ def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
                 "speed": "медленнее",
                 "risk": "средний",
                 "need": "язык, время, деньги",
+                "why": "Это долгосрочный трек для роста квалификации или переобучения, если быстрый вход не перекрывает потребности.",
+                "good": "Потенциал более сильного роста и расширения карьерных опций.",
+                "obstacle": "Потребует времени, ресурса и подтверждения готовности к обучению.",
+                "first_step": "Проверить, можно ли начать с малого теста рынка без полной смены траектории.",
+                "uncertainty": "средняя",
             }
         )
 
@@ -2059,23 +2238,22 @@ def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
 
 
 def _format_route_comparison(rows: list[dict[str, str]]) -> str:
-    lines = [
-        "Маршрут | Потенциал дохода | Скорость | Риск | Что нужно",
-        "--- | --- | --- | --- | ---",
-    ]
-    for row in rows:
-        lines.append(
-            " | ".join(
+    blocks: list[str] = ["Сравнение маршрутов"]
+    for idx, row in enumerate(rows, start=1):
+        blocks.append(
+            "\n".join(
                 [
-                    row.get("route", "-"),
-                    row.get("income", "-"),
-                    row.get("speed", "-"),
-                    row.get("risk", "-"),
-                    row.get("need", "-"),
+                    f"{idx}. {row.get('route', '-')}",
+                    f"Почему предложен: {row.get('why', 'Данных недостаточно')}",
+                    f"Что хорошего: {row.get('good', 'Данных недостаточно')}",
+                    f"Что может помешать: {row.get('obstacle', 'Данных недостаточно')}",
+                    f"Что нужно для первого шага: {row.get('first_step', 'Данных недостаточно')}",
+                    f"Неопределённость: {row.get('uncertainty', 'средняя')}",
+                    f"Потенциал дохода: {row.get('income', '-')}; скорость: {row.get('speed', '-')}; риск: {row.get('risk', '-')}; нужно: {row.get('need', '-')}",
                 ]
             )
         )
-    return "\n".join(lines)
+    return "\n\n".join(blocks)
 
 
 def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str, str]]) -> str:
@@ -2108,6 +2286,8 @@ def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str
 
 
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
+    data = await state.get_data()
+    report_generation_id = str(data.get("report_generation_id") or "").strip()
     await state.set_state(CareerFlow.FINAL_READY)
     await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
@@ -2166,6 +2346,27 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         execution_progress={},
         current_execution_day=0,
     )
+    if report_generation_id:
+        update_report_files(
+            report_generation_id,
+            html_report_path=html_report_path,
+            pdf_report_path=pdf_report_path,
+        )
+
+
+def _shorten_first_step_for_overload(report: dict) -> None:
+    action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+    step = str(today.get("action") or "").strip()
+    if not step:
+        return
+    lowered = step.lower()
+    if any(token in lowered for token in ["не знаю", "страш", "нет сил", "сложно", "боюсь"]):
+        today["action"] = "Открыть 3 вакансии и выбрать 1 черновик отклика"
+        today["timebox"] = "5 минут"
+        today["result"] = "Один черновик или одно сообщение"
+        action_plan["today"] = today
+        report["action_plan"] = action_plan
 
 
 async def _present_route_selection(message: Message, state: FSMContext, lang: str, report: dict) -> None:
@@ -2403,6 +2604,23 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
 
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
+    report_generation_id = str(data.get("report_generation_id") or "").strip()
+    if report_generation_id:
+        stored = get_report_by_generation_id(report_generation_id)
+        stored_report = (stored or {}).get("report") if isinstance(stored, dict) else {}
+        if isinstance(stored_report, dict) and stored_report:
+            chunks = report_chunks(stored_report, lang)
+            await state.update_data(
+                final_report=stored_report,
+                report_chunks=chunks,
+                post_result_stage="ready",
+                final_report_generated=True,
+                report_generation_id=report_generation_id,
+            )
+            await _track_event(message, state, "report_reused_idempotent", meta={"report_generation_id": report_generation_id})
+            await _present_route_selection(message, state, lang, stored_report)
+            return
+
     story_text = (data.get("story_text") or "").strip()
     story_analysis = data.get("story_analysis") or {}
     answers_text = (data.get("answers_text") or "").strip()
@@ -2455,6 +2673,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             answers_text = (answers_text + "\n\nПричины ключевых выборов:\n" + "\n".join(reason_lines)).strip()
     user_mode = str(data.get("user_mode") or "calm_steps")
     decision_layers = _build_decision_layers(data, story_analysis, answers_text)
+    report_generation_id = report_generation_id or str(uuid.uuid4())
+    await state.update_data(report_generation_id=report_generation_id)
 
     await state.set_state(CareerFlow.GENERATING_REPORT)
     if user_mode in {"support", "deep_route"}:
@@ -2477,6 +2697,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             selected_career_priorities=career_priorities,
             language=lang,
         )
+        if isinstance(resume_analysis, dict) and resume_analysis:
+            report["resume_analysis"] = resume_analysis
     except Exception as exc:
         await _track_event(message, state, "report_failed", meta={"error": type(exc).__name__})
         raise
@@ -2486,6 +2708,29 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         report_chunks=chunks,
         post_result_stage="ready",
         final_report_generated=True,
+        report_generation_id=report_generation_id,
+    )
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    session_id = str(data.get("session_id") or "").strip()
+    save_report_version(
+        report_generation_id,
+        public_user_id,
+        report,
+        session_id=session_id,
+    )
+    save_profile_version(
+        public_user_id,
+        "report_generated",
+        {
+            "user_mode": user_mode,
+            "answers_text": answers_text,
+            "selected_barriers": selected_barriers,
+            "selected_fears": selected_fears,
+            "selected_psych_markers": selected_psych_markers,
+            "selected_career_priorities": career_priorities,
+            "selected_energy_sources": energy_sources,
+        },
+        session_id=session_id,
     )
     await _track_event(message, state, "report_generated", meta={"has_income_signal": _has_income_signal(report)})
     await _present_route_selection(message, state, lang, report)
@@ -2614,7 +2859,12 @@ async def handle_story_confirmation_actions(message: Message, state: FSMContext)
 
     if action == STORY_CONFIRM_OK:
         await state.update_data(awaiting_story_correction=False)
-        await _start_questions_module(message, state, lang)
+        user_mode = str(data.get("user_mode") or "calm_steps")
+        await state.set_state(CareerFlow.ASK_CV)
+        if user_mode in {"deep_route", "support"}:
+            await message.answer(t(lang, "resume_offer_deep"), reply_markup=resume_choice_keyboard())
+        else:
+            await message.answer(t(lang, "resume_offer"), reply_markup=resume_choice_keyboard())
         return
 
     if action == STORY_CONFIRM_FIX:
@@ -3389,8 +3639,39 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
     rows = data.get("route_compare_rows") if isinstance(data.get("route_compare_rows"), list) else _build_route_comparison_rows(report)
     action = (message.text or "").strip()
 
-    if action == ROUTE_CHOICE_HELP:
+    if action in {ROUTE_CHOICE_HELP, ROUTE_CHOICE_NO_LOGIC}:
         await message.answer(t(lang, "route_choice_help"), reply_markup=route_choice_keyboard())
+        return
+
+    if action == ROUTE_CHOICE_OTHER:
+        alternate = rows[1] if len(rows) > 1 else (rows[0] if rows else {})
+        if alternate:
+            await message.answer(_format_route_comparison([alternate]), reply_markup=route_choice_keyboard())
+        else:
+            await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+        await _track_event(message, state, "route_other_requested", meta={"route_count": len(rows)})
+        return
+
+    if action == ROUTE_CHOICE_CLOSE:
+        selected_route = _apply_route_choice_to_report(report, ROUTE_CHOICE_STABLE, rows)
+        chunks = report_chunks(report, lang)
+        await state.update_data(
+            final_report=report,
+            report_chunks=chunks,
+            final_report_generated=True,
+            user_route_choice=action,
+            route_compare_rows=rows,
+        )
+        await _track_event(
+            message,
+            state,
+            "route_selected",
+            action=action,
+            meta={"selected_route": selected_route or ""},
+        )
+        await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=result_actions_keyboard())
+        await _send_final_map_bundle(message, state, lang, report)
+        return
 
     selected_route = _apply_route_choice_to_report(report, action, rows)
     chunks = report_chunks(report, lang)
@@ -3452,7 +3733,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "map_validation_disagree_prompt"), reply_markup=input_method_keyboard())
         return
 
-    if action in {RESULT_SELF_EXPLORE, RESULT_OPEN_FULL_REPORT}:
+    if action in {RESULT_SELF_EXPLORE, RESULT_OPEN_FULL_REPORT, RESULT_ANALYZE_MARKET}:
         await state.set_state(CareerFlow.SHOWING_DETAILS)
         await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
         return
@@ -3469,12 +3750,26 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "step_tracking_current_day", day=current_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
         return
 
-    if action in {RESULT_CLARIFY, PDF_FALLBACK_CLARIFY}:
+    if action in {RESULT_CLARIFY, PDF_FALLBACK_CLARIFY, RESULT_FIX_FACT_OR_PRIORITY}:
         await state.set_state(CareerFlow.REPORT_CLARIFICATION)
         await message.answer(t(lang, "report_clarify_prompt"), reply_markup=input_method_keyboard())
         return
 
-    if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST}:
+    if action in {RESULT_FIX_CV, RESULT_UPLOAD_OR_EDIT_RESUME}:
+        await state.set_state(CareerFlow.CV_REVIEW_WAITING_FILE)
+        await message.answer(t(lang, "offer_resume_reply"), reply_markup=resume_wait_keyboard())
+        return
+
+    if action == RESULT_KEYWORDS:
+        await state.set_state(CareerFlow.SHOWING_DETAILS)
+        report = data.get("final_report") or {}
+        chunks = data.get("report_chunks") or report_chunks(report, lang)
+        await message.answer(t(lang, "show_keywords_reply"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("market", "-"), reply_markup=self_exploration_keyboard())
+        await message.answer(chunks.get("translation", "-"), reply_markup=self_exploration_keyboard())
+        return
+
+    if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT}:
         await _track_event(message, state, "specialist_clicked", action=action)
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "specialist_contact_intro"), reply_markup=result_actions_keyboard())
@@ -3487,7 +3782,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
             await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
         return
 
-    if action == RESULT_SUPPORT_GROUP:
+    if action in {RESULT_SUPPORT_GROUP, RESULT_GROUP_EXPLICIT}:
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "support_group_contact_intro"), reply_markup=result_actions_keyboard())
         if settings.support_group_telegram_url:
@@ -3498,6 +3793,21 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         else:
             await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
         return
+
+    if action == RESULT_START_FIRST_STEP:
+        report = data.get("final_report") or {}
+        _shorten_first_step_for_overload(report)
+        steps = _build_execution_steps(report)
+        progress = data.get("execution_progress") or {}
+        current_day = int(data.get("current_execution_day", 0))
+        if current_day >= len(steps):
+            current_day = max(0, len(steps) - 1)
+        if steps:
+            await state.update_data(final_report=report, execution_steps=steps, execution_progress=progress, current_execution_day=current_day)
+            await state.set_state(CareerFlow.STEP_TRACKING)
+            await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
+            await message.answer(_execution_step_text(steps[current_day], progress), reply_markup=step_tracking_keyboard())
+            return
 
     await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
 
@@ -3556,6 +3866,14 @@ async def handle_step_tracking_actions(message: Message, state: FSMContext) -> N
     progress = data.get("execution_progress") or {}
     current_day = int(data.get("current_execution_day", 0))
     action = (message.text or "").strip()
+    if action == STEP_DONE_USER:
+        action = STEP_DONE
+    elif action == STEP_TOO_HARD:
+        action = STEP_NOT_DONE
+    elif action == STEP_MAKE_EASIER:
+        action = STEP_BARRIERS
+    elif action == STEP_OTHER_STEP:
+        action = STEP_NEXT_DAY
     await _track_event(message, state, "step_action", action=action)
 
     if action == RESULT_BACK_TO_MENU:

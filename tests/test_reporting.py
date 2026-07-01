@@ -86,6 +86,18 @@ class ReportingUtilsTests(unittest.TestCase):
                     "requirements": ["Excel", "Документы", "Польский B1"],
                 }
             ],
+            "resume_analysis": {
+                "professions": ["Администратор"],
+                "periods": ["2018-2024"],
+                "tasks": ["Документооборот"],
+                "education": ["Высшее"],
+                "languages": ["Польский B1"],
+                "certificates": ["Excel"],
+                "what_is_good": ["Есть релевантный опыт"],
+                "what_is_missing": ["Нужны цифры"],
+                "inconsistencies": ["Не хватает точных периодов"],
+                "clarifying_questions": ["Уточните точные даты работы"],
+            },
             "action_plan": {
                 "today": {"action": "Собрать 10 вакансий", "timebox": "15 минут", "result": "Список требований"},
                 "this_week": ["5 откликов"],
@@ -108,6 +120,9 @@ class ReportingUtilsTests(unittest.TestCase):
         self.assertIn("Сейчас ресурс устойчивый", html)
         self.assertIn("Состояние интеграции", html)
         self.assertIn("Интеграция пока частичная", html)
+        self.assertIn("Профессии и периоды", html)
+        self.assertIn("Образование, языки, сертификаты", html)
+        self.assertIn("Вопросы для уточнения", html)
 
     def test_offer_text_contains_zero_price(self) -> None:
         offer = build_offer_text()

@@ -5,3 +5,4 @@ xhtml2pdf
 fastapi
 uvicorn
 playwright
+aiohttp

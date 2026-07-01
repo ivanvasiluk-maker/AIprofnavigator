@@ -10,6 +10,7 @@ from typing import Any
 from urllib import error, request
 
 from config import settings
+from utils.persistence import get_recent_events, get_recent_events_all, get_user, record_event, upsert_user
 
 _registry_lock = threading.Lock()
 
@@ -66,6 +67,12 @@ def ensure_public_user_id(telegram_user_id: int | str, source_tag: str = "") -> 
         users = registry.setdefault("users", {})
         row = users.get(key)
         if isinstance(row, dict) and str(row.get("public_user_id", "")).strip():
+            upsert_user(
+                str(row["public_user_id"]),
+                key,
+                source_tag=source_clean,
+                language="ru",
+            )
             if source_clean and not str(row.get("first_source", "")).strip():
                 row["first_source"] = source_clean
                 row["updated_at"] = _utc_now().isoformat()
@@ -79,6 +86,12 @@ def ensure_public_user_id(telegram_user_id: int | str, source_tag: str = "") -> 
             "first_source": source_clean,
         }
         _write_json(_registry_path(), registry)
+        upsert_user(
+            public_user_id,
+            key,
+            source_tag=source_clean,
+            language="ru",
+        )
         return public_user_id
 
 
@@ -94,6 +107,17 @@ def _user_row_by_public_id(public_user_id: str) -> dict[str, Any] | None:
 
 
 def days_since_first_seen(public_user_id: str) -> int:
+    db_user = get_user(public_user_id)
+    created_raw_db = str((db_user or {}).get("first_seen_at", "")).strip()
+    if created_raw_db:
+        try:
+            created_db = datetime.fromisoformat(created_raw_db)
+            if created_db.tzinfo is None:
+                created_db = created_db.replace(tzinfo=timezone.utc)
+            return max(0, (_utc_now().date() - created_db.date()).days)
+        except Exception:
+            pass
+
     row = _user_row_by_public_id(public_user_id)
     created_raw = str((row or {}).get("created_at", "")).strip()
     if not created_raw:
@@ -142,6 +166,7 @@ def log_behavior_event_sync(
     user_mode: str = "",
     language: str = "ru",
     meta: dict[str, Any] | None = None,
+    session_id: str = "",
 ) -> None:
     payload: dict[str, Any] = {
         "timestamp": _utc_now().isoformat(),
@@ -155,6 +180,17 @@ def log_behavior_event_sync(
         "meta": meta or {},
     }
     _append_local_event(payload)
+    record_event(
+        public_user_id=public_user_id,
+        event=(event or "unknown").strip(),
+        state_name=(state_name or "").strip(),
+        action=(action or "").strip(),
+        user_mode=(user_mode or "").strip(),
+        language=(language or "ru").strip(),
+        meta=meta or {},
+        session_id=(session_id or "").strip(),
+        timestamp=str(payload.get("timestamp") or ""),
+    )
     _send_to_google_sheets(payload)
 
 
@@ -167,6 +203,7 @@ async def log_behavior_event(
     user_mode: str = "",
     language: str = "ru",
     meta: dict[str, Any] | None = None,
+    session_id: str = "",
 ) -> None:
     await asyncio.to_thread(
         log_behavior_event_sync,
@@ -177,6 +214,7 @@ async def log_behavior_event(
         user_mode=user_mode,
         language=language,
         meta=meta,
+        session_id=session_id,
     )
 
 
@@ -186,6 +224,57 @@ def behavior_insights(public_user_id: str, lookback_days: int = 7) -> list[str]:
 
 
 def behavior_offer_snapshot(public_user_id: str, lookback_days: int = 7) -> dict[str, Any]:
+    rows = get_recent_events(public_user_id, lookback_days=lookback_days)
+    if rows:
+        action_counters = Counter()
+        event_counters = Counter()
+        state_counters = Counter()
+        total_events = 0
+
+        for row in rows:
+            total_events += 1
+            action = str(row.get("action", "")).strip()
+            event = str(row.get("event", "")).strip()
+            state_name = str(row.get("state", "")).strip()
+            if action:
+                action_counters[action] += 1
+            if event:
+                event_counters[event] += 1
+            if state_name:
+                state_counters[state_name] += 1
+
+        insights: list[str] = []
+        for action, count in action_counters.most_common(3):
+            insights.append(f"Вы чаще всего выбирали: {action} ({count} раз).")
+
+        reports = int(event_counters.get("report_generated", 0))
+        today_steps = int(event_counters.get("today_step_opened", 0))
+        details = int(event_counters.get("details_opened", 0))
+
+        if reports:
+            insights.append("Вы уже доходили до полной карты и это хороший признак устойчивого действия.")
+        if today_steps:
+            insights.append("Вы регулярно возвращаетесь к первому шагу, значит умеете запускать движение без перегруза.")
+        if details:
+            insights.append("Вы открываете подробный разбор, значит принимаете решения на фактах, а не на эмоции момента.")
+        if total_events >= 6:
+            insights.append("У вас уже сформирован рабочий ритм: вы не просто читаете карту, а взаимодействуете с ней по шагам.")
+
+        top_states = [state for state, _count in state_counters.most_common(3)]
+
+        return {
+            "insights": insights[:5],
+            "top_actions": action_counters.most_common(3),
+            "top_states": top_states,
+            "stats": {
+                "total_events": total_events,
+                "report_generated": reports,
+                "today_step_opened": today_steps,
+                "details_opened": details,
+            },
+        }
+
+    # Legacy fallback path: local jsonl file.
     path = _events_log_path()
     if not path.exists():
         return {
@@ -264,8 +353,8 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
     The function focuses on canonical events used in PATCH 17 and returns
     percentages for the first `sample_limit` unique users.
     """
-    path = _events_log_path()
-    if not path.exists():
+    rows = get_recent_events_all(lookback_days=60, limit=250000)
+    if not rows:
         return {
             "sample_users": 0,
             "reached_map_percent": 0.0,
@@ -280,13 +369,7 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
     user_order: list[str] = []
     by_user: dict[str, dict[str, Any]] = {}
 
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        try:
-            row = json.loads(raw)
-        except Exception:
-            continue
+    for row in rows:
         uid = str(row.get("public_user_id", "")).strip()
         if not uid:
             continue

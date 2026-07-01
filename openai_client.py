@@ -386,11 +386,30 @@ FINAL_REPORT_SCHEMA = {
             "type": "object",
             "properties": {
                 "explicit_facts": {"type": "array", "items": {"type": "string"}},
+                "resume_facts": {"type": "array", "items": {"type": "string"}},
                 "inferences": {"type": "array", "items": {"type": "string"}},
                 "unknowns": {"type": "array", "items": {"type": "string"}},
                 "contradictions": {"type": "array", "items": {"type": "string"}},
+                "career_profile": {"type": "object", "additionalProperties": True},
+                "constraints": {"type": "object", "additionalProperties": True},
+                "psychological_state": {"type": "object", "additionalProperties": True},
+                "action_capacity": {"type": "object", "additionalProperties": True},
+                "integration": {"type": "object", "additionalProperties": True},
+                "route_preferences": {"type": "object", "additionalProperties": True},
             },
-            "required": ["explicit_facts", "inferences", "unknowns", "contradictions"],
+            "required": [
+                "explicit_facts",
+                "resume_facts",
+                "inferences",
+                "unknowns",
+                "contradictions",
+                "career_profile",
+                "constraints",
+                "psychological_state",
+                "action_capacity",
+                "integration",
+                "route_preferences",
+            ],
             "additionalProperties": False,
         },
         "closing_message": {"type": "string"},
@@ -426,14 +445,36 @@ RESUME_ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
         "professions": {"type": "array", "items": {"type": "string"}},
+        "periods": {"type": "array", "items": {"type": "string"}},
+        "tasks": {"type": "array", "items": {"type": "string"}},
+        "education": {"type": "array", "items": {"type": "string"}},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "certificates": {"type": "array", "items": {"type": "string"}},
         "achievements": {"type": "array", "items": {"type": "string"}},
         "skills": {"type": "array", "items": {"type": "string"}},
         "gaps": {"type": "array", "items": {"type": "string"}},
+        "inconsistencies": {"type": "array", "items": {"type": "string"}},
+        "clarifying_questions": {"type": "array", "items": {"type": "string"}},
         "career_level": {"type": "string"},
         "what_is_good": {"type": "array", "items": {"type": "string"}},
         "what_is_missing": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["professions", "achievements", "skills", "gaps", "career_level", "what_is_good", "what_is_missing"],
+    "required": [
+        "professions",
+        "periods",
+        "tasks",
+        "education",
+        "languages",
+        "certificates",
+        "achievements",
+        "skills",
+        "gaps",
+        "inconsistencies",
+        "clarifying_questions",
+        "career_level",
+        "what_is_good",
+        "what_is_missing",
+    ],
     "additionalProperties": False,
 }
 
@@ -525,9 +566,16 @@ STORY_ANALYSIS_FALLBACK_BE = {
 
 RESUME_ANALYSIS_FALLBACK = {
     "professions": ["Sales Manager", "Account Manager"],
+    "periods": ["2018-2024"],
+    "tasks": ["ведение клиентов", "переговоры", "работа с CRM"],
+    "education": ["Данных недостаточно"],
+    "languages": ["русский", "польский: данных недостаточно", "английский: данных недостаточно"],
+    "certificates": ["Данных недостаточно"],
     "achievements": ["Выполнение KPI", "Рост клиентского удержания"],
     "skills": ["коммуникация", "переговоры", "организация процессов"],
     "gaps": ["не хватает цифр по достижениям", "нет адаптации под локальный рынок"],
+    "inconsistencies": ["Данных недостаточно для проверки несостыковок"],
+    "clarifying_questions": ["Какие были точные периоды работы по каждой роли?"],
     "career_level": "middle",
     "what_is_good": [
         "Есть релевантный профессиональный опыт",
@@ -885,14 +933,57 @@ FINAL_REPORT_FALLBACK = {
         "explicit_facts": [
             "Пока доступен только общий миграционный контекст и базовый карьерный запрос.",
         ],
+        "resume_facts": [],
         "inferences": [
             "Похоже, пользователю нужен короткий и структурный маршрут к первому доходу.",
         ],
         "unknowns": [
-            "Пока не хватает данных, чтобы понять, насколько пользователь знаком с местным рынком и какие документы уже есть. Это можно уточнить позже.",
-            "Пока не хватает данных, чтобы оценить наличие профессиональных контактов и степень социальной интеграции. Это можно уточнить позже.",
+            "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах.",
+            "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах.",
         ],
         "contradictions": [],
+        "career_profile": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
+        "constraints": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
+        "psychological_state": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
+        "action_capacity": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
+        "integration": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
+        "route_preferences": {
+            "from_story": [],
+            "from_answers": [],
+            "from_resume": [],
+            "inferred": [],
+            "unknown": [],
+        },
     },
     "closing_message": "У вас уже есть материал для перехода. Следующая задача не искать идеальный путь, а собрать первый работающий маршрут и проверить его на рынке за неделю.",
 }
@@ -1163,7 +1254,7 @@ class CareerOpenAIClient:
         language: str = "ru",
     ) -> dict[str, Any]:
         language = "be" if language == "be" else "ru"
-        facts_only = self._build_facts_only(story, story_analysis, answers)
+        facts_only = self._build_facts_only(story, story_analysis, answers, decision_layers, resume_analysis)
         prompt = FINAL_REPORT_PROMPT.format(
             story=story,
             analysis_json=json.dumps(story_analysis or {}, ensure_ascii=False),
@@ -1196,7 +1287,11 @@ class CareerOpenAIClient:
 
         normalized_facts = self._normalize_facts_only(
             report.get("facts_only"),
-            base=self._build_facts_only(story_text, story_analysis, answers_text) if facts_only is None else facts_only,
+            base=(
+                self._build_facts_only(story_text, story_analysis, answers_text, decision_layers, None)
+                if facts_only is None
+                else facts_only
+            ),
         )
         report["facts_only"] = normalized_facts
 
@@ -1292,6 +1387,9 @@ class CareerOpenAIClient:
         decision_layers: dict[str, list[str]],
     ) -> None:
         report["decision_layers"] = decision_layers
+        facts_only_payload = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+        contradictions = facts_only_payload.get("contradictions", []) if isinstance(facts_only_payload, dict) else []
+        has_contradictions = isinstance(contradictions, list) and any(str(item).strip() for item in contradictions)
         overload = self._contains_emotional_overload(decision_layers, answers_text)
         has_driver = self._has_route_change_driver(decision_layers, answers_text)
 
@@ -1334,58 +1432,157 @@ class CareerOpenAIClient:
                     if not backup:
                         decision["backup_path"] = "Локальный найм по текущему профилю как стабилизирующий трек"
 
-            if overload and not has_driver:
+            if overload and (not has_driver or has_contradictions):
                 preferred_titles = self._preferred_polish_roles(story_analysis)
                 if preferred_titles and decision:
                     decision["recommended_main_path"] = f"{preferred_titles[0]} / {preferred_titles[1]}"
 
-    def _build_facts_only(self, story_text: str, story_analysis: dict[str, Any], answers_text: str) -> dict[str, list[str]]:
+    def _build_facts_only(
+        self,
+        story_text: str,
+        story_analysis: dict[str, Any],
+        answers_text: str,
+        decision_layers: dict[str, Any] | None = None,
+        resume_analysis: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         explicit_facts: list[str] = []
+        resume_facts: list[str] = []
 
         def _append_unique(target: list[str], value: str) -> None:
             cleaned = str(value or "").strip()
             if cleaned and cleaned not in target:
                 target.append(cleaned)
 
+        def _make_layer() -> dict[str, list[str]]:
+            return {
+                "from_story": [],
+                "from_answers": [],
+                "from_resume": [],
+                "inferred": [],
+                "unknown": [],
+            }
+
+        source_layers: dict[str, dict[str, list[str]]] = {
+            "career_profile": _make_layer(),
+            "constraints": _make_layer(),
+            "psychological_state": _make_layer(),
+            "action_capacity": _make_layer(),
+            "integration": _make_layer(),
+            "route_preferences": _make_layer(),
+        }
+
+        def _append_layer(layer: str, bucket: str, value: str) -> None:
+            cleaned = str(value or "").strip()
+            if not cleaned:
+                return
+            target = source_layers.get(layer, {}).get(bucket)
+            if isinstance(target, list) and cleaned not in target:
+                target.append(cleaned)
+
         for value in [story_analysis.get("current_identity"), story_analysis.get("story_summary")]:
             _append_unique(explicit_facts, value)
+            _append_layer("career_profile", "from_story", str(value or ""))
 
         for key in ("experience_snapshot", "skills", "constraints", "goals"):
             items = story_analysis.get(key)
             if isinstance(items, list):
                 for item in items:
                     _append_unique(explicit_facts, item)
+                    if key in {"experience_snapshot", "skills"}:
+                        _append_layer("career_profile", "from_story", str(item))
+                    elif key == "constraints":
+                        _append_layer("constraints", "from_story", str(item))
+                    elif key == "goals":
+                        _append_layer("route_preferences", "from_story", str(item))
 
         for raw_line in str(answers_text or "").splitlines():
             line = raw_line.strip().strip("-•")
             if len(line) >= 3:
                 _append_unique(explicit_facts, f"Ответ пользователя: {line}")
+                lowered = line.lower()
+                if any(token in lowered for token in ["срок", "документ", "деньг", "доход", "огранич"]):
+                    _append_layer("constraints", "from_answers", line)
+                if any(token in lowered for token in ["устал", "трев", "ресурс", "выгор", "сил"]):
+                    _append_layer("psychological_state", "from_answers", line)
+                if any(token in lowered for token in ["время", "час", "действ", "делать", "каждый день"]):
+                    _append_layer("action_capacity", "from_answers", line)
+                if any(token in lowered for token in ["язык", "рынок", "польша", "контакт", "сообще", "интеграц"]):
+                    _append_layer("integration", "from_answers", line)
+                if any(token in lowered for token in ["хочу", "предпоч", "направлен", "роль", "маршрут"]):
+                    _append_layer("route_preferences", "from_answers", line)
+
+        if isinstance(resume_analysis, dict):
+            for key in ("professions", "achievements", "skills", "what_is_good"):
+                items = resume_analysis.get(key)
+                if isinstance(items, list):
+                    for item in items:
+                        text = str(item or "").strip()
+                        if text:
+                            _append_unique(resume_facts, text)
+                            _append_layer("career_profile", "from_resume", text)
+            for key in ("gaps", "what_is_missing"):
+                items = resume_analysis.get(key)
+                if isinstance(items, list):
+                    for item in items:
+                        text = str(item or "").strip()
+                        if text:
+                            _append_unique(resume_facts, text)
+                            _append_layer("constraints", "from_resume", text)
+
+        if isinstance(decision_layers, dict):
+            mapping = {
+                "career_profile": "career_profile",
+                "constraints": "constraints",
+                "psychological_state": "psychological_state",
+                "action_capacity": "action_capacity",
+            }
+            for src, dst in mapping.items():
+                values = decision_layers.get(src)
+                if isinstance(values, list):
+                    for value in values:
+                        _append_layer(dst, "from_answers", str(value))
 
         blob = " ".join([str(story_text or ""), str(answers_text or ""), " ".join(explicit_facts)]).lower()
 
         inferences: list[str] = []
         if any(token in blob for token in ["клиент", "общ", "коммуника", "договар", "переговор"]):
-            inferences.append("Похоже, у вас есть опыт коммуникации и взаимодействия с людьми в рабочих задачах.")
+            inference = "Похоже, у вас есть опыт коммуникации и взаимодействия с людьми в рабочих задачах."
+            inferences.append(inference)
+            _append_layer("career_profile", "inferred", inference)
         if any(token in blob for token in ["задач", "срок", "организ", "координа"]):
-            inferences.append("Похоже, у вас есть опыт самостоятельного ведения небольших задач.")
+            inference = "Похоже, у вас есть опыт самостоятельного ведения небольших задач."
+            inferences.append(inference)
+            _append_layer("action_capacity", "inferred", inference)
         if any(token in blob for token in ["клиент", "договор", "переговор", "заказ"]):
-            inferences.append(
-                "Вероятно, вам может подойти маршрут с частными заказами, потому что вы уже договаривались с клиентами."
-            )
+            inference = "Вероятно, вам может подойти маршрут с частными заказами, потому что вы уже договаривались с клиентами."
+            inferences.append(inference)
+            _append_layer("route_preferences", "inferred", inference)
+
+        allowed_inference_prefixes = ("Похоже", "Вероятно", "Можно предположить")
+        inferences = [item for item in inferences if item.startswith(allowed_inference_prefixes)]
 
         unknowns: list[str] = []
         if not any(token in blob for token in ["рынок", "ваканс", "рынка труда"]):
-            unknowns.append(
-                "Пока не хватает данных, чтобы понять, насколько вы знакомы с местным рынком и какие документы уже есть. Это можно уточнить позже."
-            )
+            unknown = "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах."
+            unknowns.append(unknown)
+            _append_layer("integration", "unknown", unknown)
         if not any(token in blob for token in ["контакт", "сообще", "нетворк", "знаком"]):
-            unknowns.append(
-                "Пока не хватает данных, чтобы оценить наличие профессиональных контактов и опорного окружения. Это можно уточнить позже."
-            )
+            unknown = "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах."
+            unknowns.append(unknown)
+            _append_layer("integration", "unknown", unknown)
         if not any(token in blob for token in ["учиться", "обуч", "переуч", "курс"]):
-            unknowns.append(
-                "Пока не хватает данных, чтобы понять готовность к переобучению и объем времени на обучение. Это можно уточнить позже."
-            )
+            unknown = "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах."
+            unknowns.append(unknown)
+            _append_layer("action_capacity", "unknown", unknown)
+
+        for layer_name, payload in source_layers.items():
+            # Keep at least one unknown marker in each layer if no direct evidence exists.
+            if not payload["from_story"] and not payload["from_answers"] and not payload["from_resume"]:
+                _append_layer(
+                    layer_name,
+                    "unknown",
+                    "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах.",
+                )
 
         contradictions: list[str] = []
         if ("2-4 недели" in blob or "2–4 недели" in blob) and ("3-6 месяцев" in blob or "3–6 месяцев" in blob or "траекторию год" in blob):
@@ -1396,17 +1593,25 @@ class CareerOpenAIClient:
         return self._normalize_facts_only(
             {
                 "explicit_facts": explicit_facts,
+                "resume_facts": resume_facts,
                 "inferences": inferences,
                 "unknowns": unknowns,
                 "contradictions": contradictions,
+                "career_profile": source_layers["career_profile"],
+                "constraints": source_layers["constraints"],
+                "psychological_state": source_layers["psychological_state"],
+                "action_capacity": source_layers["action_capacity"],
+                "integration": source_layers["integration"],
+                "route_preferences": source_layers["route_preferences"],
             }
         )
 
-    def _normalize_facts_only(self, payload: Any, base: dict[str, Any] | None = None) -> dict[str, list[str]]:
+    def _normalize_facts_only(self, payload: Any, base: dict[str, Any] | None = None) -> dict[str, Any]:
         source = payload if isinstance(payload, dict) else {}
         seed = base if isinstance(base, dict) else {}
-        normalized: dict[str, list[str]] = {}
-        for key in ("explicit_facts", "inferences", "unknowns", "contradictions"):
+        normalized: dict[str, Any] = {}
+
+        for key in ("explicit_facts", "resume_facts", "inferences", "unknowns", "contradictions"):
             merged: list[str] = []
             for candidate in [
                 *(source.get(key, []) if isinstance(source.get(key), list) else []),
@@ -1416,6 +1621,44 @@ class CareerOpenAIClient:
                 if text and text not in merged:
                     merged.append(text)
             normalized[key] = merged
+
+        default_unknown = "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах."
+        allowed_inference_prefixes = ("Похоже", "Вероятно", "Можно предположить")
+        normalized["inferences"] = [
+            item for item in normalized["inferences"] if str(item).startswith(allowed_inference_prefixes)
+        ]
+
+        def _normalize_layer(layer_key: str) -> dict[str, list[str]]:
+            layer_source = source.get(layer_key) if isinstance(source.get(layer_key), dict) else {}
+            layer_seed = seed.get(layer_key) if isinstance(seed.get(layer_key), dict) else {}
+            layer: dict[str, list[str]] = {}
+            for bucket in ("from_story", "from_answers", "from_resume", "inferred", "unknown"):
+                merged: list[str] = []
+                for candidate in [
+                    *(layer_source.get(bucket, []) if isinstance(layer_source.get(bucket), list) else []),
+                    *(layer_seed.get(bucket, []) if isinstance(layer_seed.get(bucket), list) else []),
+                ]:
+                    text = str(candidate or "").strip()
+                    if text and text not in merged:
+                        merged.append(text)
+                layer[bucket] = merged
+            if not layer["unknown"] and not layer["from_story"] and not layer["from_answers"] and not layer["from_resume"]:
+                layer["unknown"] = [default_unknown]
+            return layer
+
+        for layer_key in (
+            "career_profile",
+            "constraints",
+            "psychological_state",
+            "action_capacity",
+            "integration",
+            "route_preferences",
+        ):
+            normalized[layer_key] = _normalize_layer(layer_key)
+
+        if not normalized["unknowns"]:
+            normalized["unknowns"] = [default_unknown]
+
         return normalized
 
     def _ensure_resource_level(self, report: dict[str, Any], answers_text: str = "") -> None:
@@ -1622,7 +1865,7 @@ class CareerOpenAIClient:
             merged_not_reset = ["Пока не хватает данных, чтобы выделить переносимые навыки, которые точно не обнулились. Это можно уточнить позже."]
         report["what_not_reset"] = merged_not_reset[:8]
 
-    def _sanitize_unconfirmed_claims(self, report: dict[str, Any], facts_only: dict[str, list[str]]) -> None:
+    def _sanitize_unconfirmed_claims(self, report: dict[str, Any], facts_only: dict[str, Any]) -> None:
         allowed_blob = " ".join(
             facts_only.get("explicit_facts", [])
             + facts_only.get("inferences", [])

@@ -114,6 +114,12 @@ RESULT_CLARIFY = "✍️ Немного уточнить"
 RESULT_SPECIALIST = "🧭 Продолжить со специалистом"
 RESULT_SUPPORT_GROUP = "👥 В группу поддержки поиска работы"
 RESULT_BACK_TO_MENU = "↩️ К выбору сценария"
+RESULT_START_FIRST_STEP = "🧭 Начать первый шаг"
+RESULT_FIX_FACT_OR_PRIORITY = "✍️ Исправить факт или приоритет"
+RESULT_UPLOAD_OR_EDIT_RESUME = "📄 Загрузить / доработать резюме"
+RESULT_ANALYZE_MARKET = "🔎 Разобрать рынок и вакансии"
+RESULT_SPECIALIST_EXPLICIT = "👤 Разобрать со специалистом"
+RESULT_GROUP_EXPLICIT = "👥 Найти группу / сообщество"
 PDF_FALLBACK_STEPS = "🧭 Продолжить по шагам"
 PDF_FALLBACK_CLARIFY = "✍️ Уточнить карту"
 PDF_FALLBACK_SPECIALIST = "👤 Разобрать со специалистом"
@@ -122,6 +128,10 @@ STEP_DONE = "✅ Сделал"
 STEP_NOT_DONE = "❌ Не сделал"
 STEP_BARRIERS = "🧩 Какие есть барьеры"
 STEP_NEXT_DAY = "➡️ Следующий день"
+STEP_DONE_USER = "Сделал"
+STEP_TOO_HARD = "Слишком сложно"
+STEP_MAKE_EASIER = "Сделать проще"
+STEP_OTHER_STEP = "Другой шаг"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 ANSWER_RETRY = "✍️ Ответить заново"
@@ -162,6 +172,9 @@ ROUTE_CHOICE_STABLE = "🧱 Сначала стабильная работа"
 ROUTE_CHOICE_PRIVATE = "🔨 Хочу постепенно выйти на частные заказы"
 ROUTE_CHOICE_RETRAIN = "🎓 Рассматриваю переобучение"
 ROUTE_CHOICE_HELP = "🧭 Пока не знаю — помоги выбрать"
+ROUTE_CHOICE_CLOSE = "Этот маршрут ближе"
+ROUTE_CHOICE_OTHER = "Показать другой"
+ROUTE_CHOICE_NO_LOGIC = "Не согласен с логикой"
 
 CAREER_SWITCH_REASON_DISLIKE = "Не нравится сама сфера"
 CAREER_SWITCH_REASON_MONEY = "Кажется, что здесь мало денег"
@@ -199,6 +212,15 @@ ALL_INPUT_VOICE = {INPUT_VOICE}
 ALL_INPUT_DONT_KNOW = {INPUT_DONT_KNOW}
 ALL_PACE_OPTIONS = {PACE_FAST, PACE_NORMAL, PACE_SUPPORT, PACE_VOICE}
 ALL_ROUTE_OPTIONS = {ROUTE_FIND_JOB, ROUTE_SWITCH_FIELD, ROUTE_REPACK_EXPERIENCE, ROUTE_UNKNOWN}
+ALL_ROUTE_CHOICE_ACTIONS = {
+    ROUTE_CHOICE_STABLE,
+    ROUTE_CHOICE_PRIVATE,
+    ROUTE_CHOICE_RETRAIN,
+    ROUTE_CHOICE_HELP,
+    ROUTE_CHOICE_CLOSE,
+    ROUTE_CHOICE_OTHER,
+    ROUTE_CHOICE_NO_LOGIC,
+}
 ALL_VOICE_PACE_OPTIONS = {VOICE_PACE_FAST, VOICE_PACE_NORMAL, VOICE_PACE_SUPPORT}
 ALL_SHORT_STORY_OPTIONS = {SHORT_NEED_JOB, SHORT_NO_DIRECTION, SHORT_LANGUAGE, SHORT_FEAR, SHORT_TIRED, SHORT_RESUME}
 ALL_SUPPORT_OPTIONS = set(SUPPORT_OPTIONS)
@@ -216,9 +238,17 @@ ALL_RESULT_ACTIONS = {
     PDF_FALLBACK_STEPS,
     RESULT_CLARIFY,
     PDF_FALLBACK_CLARIFY,
+    RESULT_FIX_CV,
+    RESULT_KEYWORDS,
     RESULT_SPECIALIST,
     PDF_FALLBACK_SPECIALIST,
     RESULT_SUPPORT_GROUP,
+    RESULT_START_FIRST_STEP,
+    RESULT_FIX_FACT_OR_PRIORITY,
+    RESULT_UPLOAD_OR_EDIT_RESUME,
+    RESULT_ANALYZE_MARKET,
+    RESULT_SPECIALIST_EXPLICIT,
+    RESULT_GROUP_EXPLICIT,
     MAP_CHECK_TRUE,
     MAP_CHECK_FIX_FACT,
     MAP_CHECK_CHANGE_PRIORITY,
@@ -238,6 +268,10 @@ ALL_STEP_TRACKING_ACTIONS = {
     STEP_NOT_DONE,
     STEP_BARRIERS,
     STEP_NEXT_DAY,
+    STEP_DONE_USER,
+    STEP_TOO_HARD,
+    STEP_MAKE_EASIER,
+    STEP_OTHER_STEP,
     RESULT_BACK_TO_MENU,
 }
 ALL_ANSWER_REVIEW_ACTIONS = {
@@ -270,6 +304,9 @@ ALL_ROUTE_CHOICE_ACTIONS = {
     ROUTE_CHOICE_PRIVATE,
     ROUTE_CHOICE_RETRAIN,
     ROUTE_CHOICE_HELP,
+    ROUTE_CHOICE_CLOSE,
+    ROUTE_CHOICE_OTHER,
+    ROUTE_CHOICE_NO_LOGIC,
 }
 ALL_CAREER_SWITCH_REASON_OPTIONS = set(CAREER_SWITCH_REASON_OPTIONS)
 
@@ -470,9 +507,16 @@ def skiller_reason_keyboard() -> ReplyKeyboardMarkup:
 def result_actions_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=RESULT_SELF_EXPLORE)],
+            [KeyboardButton(text=RESULT_START_FIRST_STEP)],
+            [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
+            [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
+            [KeyboardButton(text=RESULT_ANALYZE_MARKET)],
+            [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
+            [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
             [KeyboardButton(text=RESULT_DO_STEPS)],
             [KeyboardButton(text=RESULT_CLARIFY)],
+            [KeyboardButton(text=RESULT_FIX_CV)],
+            [KeyboardButton(text=RESULT_KEYWORDS)],
             [KeyboardButton(text=RESULT_SPECIALIST)],
             [KeyboardButton(text=RESULT_SUPPORT_GROUP)],
             [KeyboardButton(text=RESTART)],
@@ -511,6 +555,12 @@ def self_exploration_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=RESULT_DETAILS)],
             [KeyboardButton(text=RESULT_FIX_CV), KeyboardButton(text=RESULT_KEYWORDS)],
             [KeyboardButton(text=RESULT_REBUILD), KeyboardButton(text=RESULT_CLARIFY)],
+            [KeyboardButton(text=RESULT_START_FIRST_STEP)],
+            [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
+            [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
+            [KeyboardButton(text=RESULT_ANALYZE_MARKET)],
+            [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
+            [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
             [KeyboardButton(text=RESULT_BACK_TO_MENU)],
         ],
         resize_keyboard=True,
@@ -521,9 +571,10 @@ def step_tracking_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=STEP_OPEN_TODAY)],
+            [KeyboardButton(text=STEP_DONE_USER), KeyboardButton(text=STEP_TOO_HARD)],
+            [KeyboardButton(text=STEP_MAKE_EASIER), KeyboardButton(text=STEP_OTHER_STEP)],
             [KeyboardButton(text=STEP_DONE), KeyboardButton(text=STEP_NOT_DONE)],
-            [KeyboardButton(text=STEP_BARRIERS)],
-            [KeyboardButton(text=STEP_NEXT_DAY)],
+            [KeyboardButton(text=STEP_BARRIERS), KeyboardButton(text=STEP_NEXT_DAY)],
             [KeyboardButton(text=RESULT_BACK_TO_MENU)],
         ],
         resize_keyboard=True,
@@ -572,10 +623,11 @@ def support_mode_keyboard() -> ReplyKeyboardMarkup:
 def route_choice_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=ROUTE_CHOICE_CLOSE), KeyboardButton(text=ROUTE_CHOICE_OTHER)],
+            [KeyboardButton(text=ROUTE_CHOICE_HELP), KeyboardButton(text=ROUTE_CHOICE_NO_LOGIC)],
             [KeyboardButton(text=ROUTE_CHOICE_STABLE)],
             [KeyboardButton(text=ROUTE_CHOICE_PRIVATE)],
             [KeyboardButton(text=ROUTE_CHOICE_RETRAIN)],
-            [KeyboardButton(text=ROUTE_CHOICE_HELP)],
         ],
         resize_keyboard=True,
     )

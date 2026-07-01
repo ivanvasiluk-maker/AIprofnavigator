@@ -73,7 +73,17 @@ class CareerGpsRenderTests(unittest.TestCase):
     def test_question_count_for_mode_is_fixed_by_default(self) -> None:
         self.assertEqual(_question_count_for_mode("fast"), 5)
         self.assertEqual(_question_count_for_mode("calm_steps"), 8)
-        self.assertEqual(_question_count_for_mode("deep_route"), 12)
+        self.assertEqual(_question_count_for_mode("deep_route"), 15)
+
+    def test_question_count_for_mode_is_clamped_by_tz_bounds(self) -> None:
+        self.assertEqual(_question_count_for_mode("fast", 1), 5)
+        self.assertEqual(_question_count_for_mode("fast", 9), 5)
+
+        self.assertEqual(_question_count_for_mode("calm_steps", 6), 8)
+        self.assertEqual(_question_count_for_mode("calm_steps", 12), 10)
+
+        self.assertEqual(_question_count_for_mode("deep_route", 10), 12)
+        self.assertEqual(_question_count_for_mode("deep_route", 20), 15)
 
     def test_resume_pdf_is_decoded_for_analysis(self) -> None:
         buffer = BytesIO()
@@ -473,6 +483,8 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("allowed_button_ids", first)
         self.assertIn("expected_answer_type", first)
         self.assertIn("semantic_intent", first)
+        self.assertIn("source", first)
+        self.assertIn("validity_status", first)
 
     def test_route_choice_is_joint_not_bot_assigned(self) -> None:
         report = {
