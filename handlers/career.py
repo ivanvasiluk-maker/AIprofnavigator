@@ -1155,14 +1155,21 @@ def _segment_questions(segment: str) -> list[dict[str, object]]:
 
 def _mandatory_psych_social_questions() -> list[dict[str, object]]:
     return [
+        # 1. Psychological barriers — multi-select, expanded
         {
             "question": "Что сейчас сильнее всего мешает вам начать или двигаться дальше? Можно выбрать до 5 пунктов.",
             "options": [
                 "😰 Страх отказа",
-                "🧩 Хаос в голове",
-                "⏳ Прокрастинация",
-                "🔁 Сомнения и откаты",
+                "🪞 Стыд — боюсь выглядеть глупо",
+                "🧩 Хаос в голове, непонятно с чего начать",
+                "⏳ Откладываю и прокрастинирую",
+                "🔁 Постоянные сомнения и откаты",
                 "🪫 Усталость / выгорание",
+                "🫥 Ощущение, что мой опыт никому не нужен",
+                "🚷 Страх провала на виду у других",
+                "😶 Паралич — понимаю что надо, но не делаю",
+                "💸 Финансовый стресс давит на решения",
+                "😞 Слишком мало сил даже на мелкие шаги",
                 _INTERVIEW_PSYCH_DONE,
             ],
             "multi_key": "psych",
@@ -1170,21 +1177,65 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
             "max_select": 5,
             "force_options_keyboard": True,
         },
+        # 2. Emotional state right now — multi-select (NEW)
+        {
+            "question": "Как вы сейчас чувствуете себя в карьерной ситуации? Выберите всё, что подходит.",
+            "options": [
+                "✅ Чувствую себя уверенно, есть план",
+                "↕️ Двигаюсь, но бывают просадки",
+                "🐢 Тяжело держать темп, нужен щадящий режим",
+                "🌀 Слишком много неопределённости, сложно начать",
+                "😔 Тревожусь: как вообще это сделать",
+                "🔥 Есть мотивация, но нет чёткого направления",
+                "😶‍🌫️ Оцепенение — знаю что надо, но не могу",
+                "✅ Самочувствие: готово",
+            ],
+            "multi_key": "psych_state",
+            "done_text": "✅ Самочувствие: готово",
+            "max_select": 3,
+            "force_options_keyboard": True,
+        },
+        # 3. Social support & context — multi-select, expanded
         {
             "question": "Что из этого сейчас про вас? Можно выбрать несколько пунктов.",
             "options": [
-                "👨‍👩‍👧 Есть семья/партнер рядом",
-                "👥 Есть друзья/контакты",
-                "🌫 Почти нет поддержки",
+                "👨‍👩‍👧 Есть семья или партнёр рядом",
+                "👥 Есть друзья или коллеги",
+                "💼 Есть профессиональные контакты",
+                "🌫 Почти нет поддержки, в основном один/одна",
                 "🧭 Новая миграция (0-6 месяцев)",
                 "🏠 Стадия стабилизации (6+ месяцев)",
+                "🗣 Языковой барьер мешает общаться",
+                "😔 Чувствую социальную изоляцию",
+                "⚖️ Сильный финансовый стресс",
+                "🏃 Сложно планировать — дети или уход за близкими",
                 _INTERVIEW_SOCIAL_DONE,
             ],
             "multi_key": "social",
             "done_text": _INTERVIEW_SOCIAL_DONE,
-            "max_select": 5,
+            "max_select": 6,
             "force_options_keyboard": True,
         },
+        # 4. Coping strategies — multi-select (NEW)
+        {
+            "question": "Что обычно помогает вам справляться со стрессом и неопределённостью? Выберите до 4 вариантов.",
+            "options": [
+                "📋 Когда есть чёткий список задач",
+                "👤 Когда есть кто-то рядом для поддержки",
+                "🏃 Физическая активность",
+                "🔎 Когда понимаю конкретный следующий шаг",
+                "⏱ Короткие задачи по 5-15 минут",
+                "✍️ Письмо, дневник или рефлексия",
+                "🧘 Отдых и восстановление",
+                "🤝 Понятная внешняя помощь или структура",
+                "✅ Стратегии: готово",
+            ],
+            "multi_key": "coping",
+            "done_text": "✅ Стратегии: готово",
+            "max_select": 4,
+            "force_options_keyboard": True,
+        },
+        # 5. Energy sources — multi-select, expanded
         {
             "question": "Что даёт вам больше всего энергии в работе? Можно выбрать до 5 вариантов.",
             "options": [
@@ -1195,10 +1246,11 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
                 "Управление",
                 "Творчество",
                 "Анализ",
-                "Техника",
+                "Техника / работа руками",
                 "Исследования",
                 "Продажи",
                 "Проведение мероприятий",
+                "Системная работа за компьютером",
                 _INTERVIEW_ENERGY_DONE,
             ],
             "multi_key": "energy",
@@ -1206,31 +1258,7 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
             "max_select": 5,
             "force_options_keyboard": True,
         },
-        {
-            "question": "Как вы сейчас чувствуете себя в этой карьерной ситуации?",
-            "options": [
-                "Чувствую себя уверенно, есть план",
-                "Двигаюсь, но бывают просадки и сомнения",
-                "Тяжело держать темп, нужен щадящий режим",
-                "Сложно начать — слишком много неопределённости",
-            ],
-        },
-        {
-            "question": "Что сейчас даётся вам сложнее всего?",
-            "options": [],
-        },
-        {
-            "question": "Что обычно помогает вам справляться со стрессом и неопределённостью?",
-            "options": [],
-        },
-        {
-            "question": "Есть ли сейчас люди, на поддержку которых вы реально можете опереться?",
-            "options": [
-                "Да, семья или партнёр рядом",
-                "Да, есть друзья или коллеги",
-                "Почти нет — в основном справляюсь сам(а)",
-            ],
-        },
+        # 6. Time in country — single factual choice
         {
             "question": "Сколько времени вы уже живёте в этой стране?",
             "options": [
@@ -1240,22 +1268,26 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
                 "Больше 2 лет",
             ],
         },
+        # 7. Integration — multi-select, expanded
         {
-            "question": "Что из этого уже есть у вас в новой стране? Можно выбрать до 4 пунктов.",
+            "question": "Что из этого уже есть у вас в новой стране? Можно выбрать до 5 пунктов.",
             "options": [
                 "Использую местный язык в быту",
-                "Есть местные знакомые/друзья",
+                "Использую язык на работе или в поиске работы",
+                "Есть местные знакомые или друзья",
                 "Есть профессиональные контакты",
-                "Участвую в сообществах",
+                "Участвую в сообществах или группах",
                 "Понимаю, как устроен рынок труда",
-                "Живу в стране больше 12 месяцев",
+                "Открыл(а) счёт / наладил(а) базовый быт",
+                "Знаком(а) с правами работника в этой стране",
                 _INTERVIEW_INTEGRATION_DONE,
             ],
             "multi_key": "integration",
             "done_text": _INTERVIEW_INTEGRATION_DONE,
-            "max_select": 4,
+            "max_select": 5,
             "force_options_keyboard": True,
         },
+        # 8. Career priorities — multi-select (existing, unchanged)
         {
             "question": "Что для вас сейчас важнее всего в карьере? Можно выбрать до 4 пунктов.",
             "options": [
@@ -1415,6 +1447,15 @@ def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text
 
     for marker in data.get("selected_psych_markers", []) if isinstance(data.get("selected_psych_markers"), list) else []:
         _append_unique(psychological_state, str(marker))
+
+    for state_item in data.get("selected_psych_state", []) if isinstance(data.get("selected_psych_state"), list) else []:
+        _append_unique(psychological_state, f"Эмоциональное состояние: {state_item}")
+
+    for coping_item in data.get("selected_coping", []) if isinstance(data.get("selected_coping"), list) else []:
+        _append_unique(action_capacity, f"Стратегия совладания: {coping_item}")
+
+    for social_item in data.get("selected_social_state", []) if isinstance(data.get("selected_social_state"), list) else []:
+        _append_unique(psychological_state, f"Соцконтекст: {social_item}")
 
     choice_reasons = data.get("selected_choice_reasons") if isinstance(data.get("selected_choice_reasons"), dict) else {}
     for choice, reason in choice_reasons.items():
@@ -2625,6 +2666,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         answers_text="",
         quick_report_after_questions=quick_report_after_questions,
         selected_psych_markers=[],
+        selected_psych_state=[],
+        selected_coping=[],
         selected_barriers=[],
         selected_fears=[],
         selected_social_state=[],
@@ -2632,6 +2675,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         selected_energy_sources=[],
         selected_career_priorities=[],
         psych_selected=[],
+        psych_state_selected=[],
+        coping_selected=[],
         social_selected=[],
         integration_selected=[],
         energy_selected=[],
@@ -2697,12 +2742,12 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     answers_text = (data.get("answers_text") or "").strip()
     social_state = data.get("selected_social_state") or []
     if isinstance(social_state, list) and social_state:
-        social_block = "\n".join(f"- {item}" for item in social_state[:5] if str(item).strip())
+        social_block = "\n".join(f"- {item}" for item in social_state[:6] if str(item).strip())
         if social_block:
             answers_text = (answers_text + "\n\nСоциальная поддержка и миграционный статус:\n" + social_block).strip()
     integration_state = data.get("selected_integration_state") or []
     if isinstance(integration_state, list) and integration_state:
-        integration_state_block = "\n".join(f"- {item}" for item in integration_state[:4] if str(item).strip())
+        integration_state_block = "\n".join(f"- {item}" for item in integration_state[:5] if str(item).strip())
         if integration_state_block:
             answers_text = (answers_text + "\n\nИнтеграция пользователя:\n" + integration_state_block).strip()
     # Derive integration_level from time in country if mentioned in answers
@@ -2721,6 +2766,17 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         priorities_block = "\n".join(f"- {item}" for item in career_priorities[:4] if str(item).strip())
         if priorities_block:
             answers_text = (answers_text + "\n\nКарьерные приоритеты пользователя:\n" + priorities_block).strip()
+    # NEW: emotional state and coping strategies
+    selected_psych_state = data.get("selected_psych_state") or []
+    if isinstance(selected_psych_state, list) and selected_psych_state:
+        psych_state_block = "\n".join(f"- {item}" for item in selected_psych_state[:3] if str(item).strip())
+        if psych_state_block:
+            answers_text = (answers_text + "\n\nЭмоциональное состояние сейчас:\n" + psych_state_block).strip()
+    selected_coping = data.get("selected_coping") or []
+    if isinstance(selected_coping, list) and selected_coping:
+        coping_block = "\n".join(f"- {item}" for item in selected_coping[:4] if str(item).strip())
+        if coping_block:
+            answers_text = (answers_text + "\n\nЧто помогает справляться:\n" + coping_block).strip()
     resume_analysis = data.get("resume_analysis") or {}
     selected_barriers = data.get("selected_barriers") or []
     selected_fears = data.get("selected_fears") or []
@@ -3156,10 +3212,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_psych_markers"] = selected_values[:5]
                     update_payload["selected_barriers"] = selected_values[:5]
                     update_payload["selected_fears"] = selected_values[:5]
+                if multi_key == "psych_state":
+                    update_payload["selected_psych_state"] = selected_values[:3]
+                if multi_key == "coping":
+                    update_payload["selected_coping"] = selected_values[:4]
                 if multi_key == "social":
-                    update_payload["selected_social_state"] = selected_values[:5]
+                    update_payload["selected_social_state"] = selected_values[:6]
                 if multi_key == "integration":
-                    update_payload["selected_integration_state"] = selected_values[:4]
+                    update_payload["selected_integration_state"] = selected_values[:5]
                 if multi_key == "energy":
                     update_payload["selected_energy_sources"] = selected_values[:5]
                 if multi_key == "priorities":
@@ -3199,10 +3259,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_psych_markers"] = selected_values[:5]
                     update_payload["selected_barriers"] = selected_values[:5]
                     update_payload["selected_fears"] = selected_values[:5]
+                if multi_key == "psych_state":
+                    update_payload["selected_psych_state"] = selected_values[:3]
+                if multi_key == "coping":
+                    update_payload["selected_coping"] = selected_values[:4]
                 if multi_key == "social":
-                    update_payload["selected_social_state"] = selected_values[:5]
+                    update_payload["selected_social_state"] = selected_values[:6]
                 if multi_key == "integration":
-                    update_payload["selected_integration_state"] = selected_values[:4]
+                    update_payload["selected_integration_state"] = selected_values[:5]
                 if multi_key == "energy":
                     update_payload["selected_energy_sources"] = selected_values[:5]
                 if multi_key == "priorities":
@@ -3490,11 +3554,17 @@ async def restart_flow(message: Message, state: FSMContext) -> None:
         selected_barriers=[],
         selected_fears=[],
         selected_psych_markers=[],
+        selected_psych_state=[],
+        selected_coping=[],
         selected_social_state=[],
+        selected_integration_state=[],
         selected_energy_sources=[],
         selected_career_priorities=[],
         psych_selected=[],
+        psych_state_selected=[],
+        coping_selected=[],
         social_selected=[],
+        integration_selected=[],
         energy_selected=[],
         priorities_selected=[],
         report_chunks={},
