@@ -52,6 +52,7 @@ from keyboards import (
     RESULT_DETAILS,
     RESULT_DO_STEPS,
     RESULT_DOWNLOAD_PDF,
+    RESULT_DOWNLOAD_DOCX,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_OPEN_FULL_REPORT,
@@ -2409,6 +2410,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
 
     pdf_report_path = ""
     html_report_path = ""
+    docx_report_path = ""
     try:
         user_name = " ".join(
             part
@@ -2430,7 +2432,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 t(lang, "web_report_ready"),
                 reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
             )
-        await message.answer(t(lang, "pdf_generation_started"), reply_markup=result_actions_keyboard())
+        await message.answer(t(lang, "pdf_generation_started"), reply_markup=result_actions_keyboard(include_pdf_download=True, include_docx_download=True))
 
         _cancel_pdf_task(message.chat.id)
         _PDF_READY_BY_CHAT.pop(message.chat.id, None)
@@ -2443,6 +2445,11 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 report_generation_id=report_generation_id,
             )
         )
+        # Generate DOCX in background as well
+        from utils.reporting import generate_docx_report_file
+        docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+        if docx_path:
+            docx_report_path = str(docx_path)
     except Exception:
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
@@ -2454,6 +2461,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         chat_id=message.chat.id,
         pdf_report_path=pdf_report_path,
         html_report_path=html_report_path,
+        docx_report_path=docx_report_path,
         execution_steps=_build_execution_steps(report),
         execution_progress={},
         current_execution_day=0,
@@ -2463,6 +2471,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
             report_generation_id,
             html_report_path=html_report_path,
             pdf_report_path=pdf_report_path,
+            docx_report_path=docx_report_path,
         )
 
 
@@ -3976,6 +3985,19 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
             )
             return
         await message.answer(t(lang, "pdf_pending"), reply_markup=result_actions_keyboard())
+        return
+
+    if action == RESULT_DOWNLOAD_DOCX:
+        current_data = await state.get_data()
+        docx_path = str(current_data.get("docx_report_path") or "").strip()
+        if docx_path and Path(docx_path).exists():
+            await message.answer_document(
+                FSInputFile(docx_path),
+                caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
+                reply_markup=result_actions_keyboard(include_pdf_download=True, include_docx_download=True),
+            )
+            return
+        await message.answer(t(lang, "docx_pending") or "DOCX готовится, попробуйте позже", reply_markup=result_actions_keyboard(include_pdf_download=True, include_docx_download=True))
         return
 
     await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())

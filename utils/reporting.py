@@ -378,27 +378,27 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
     resource_level = _resource_human_message(report.get("resource_level"))
     integration_level = _integration_human_message(report.get("integration_level"))
-    closing_message = _safe_text(report.get("closing_message"), "Сконцентрируйтесь на ближайшем работающем шаге и проверьте его на рынке.")
-    strengths_for_closing = _list_items(digital_human.get("hidden_strengths"))[:3]
-    main_asset = _safe_text(digital_human.get("main_asset"), "")
-    if main_asset != "-" and main_asset not in strengths_for_closing:
-        strengths_for_closing = [main_asset] + strengths_for_closing
-    strengths_for_closing = strengths_for_closing[:3]
+    closing_message = _safe_text(
+        report.get("closing_message"),
+        "Это работа, а не испытание. Один проверяемый шаг — и карта начнёт двигаться.",
+    )
+    strengths_for_closing = list(dict.fromkeys(
+        [item for item in _list_items(not_reset)[:3] if item != "-"] +
+        [item for item in _list_items(digital_human.get("hidden_strengths"))[:3] if item != "-"]
+    ))[:4]
+    first_step_today = _safe_text(
+        (report.get("action_plan") or {}).get("today", {}).get("action") if isinstance((report.get("action_plan") or {}).get("today"), dict) else None,
+        "Собрать 10 вакансий по выбранному маршруту и выписать повторяющиеся требования.",
+    )
+    next_step_week = _safe_text(
+        ((report.get("action_plan") or {}).get("this_week") or [""])[0] if isinstance((report.get("action_plan") or {}).get("this_week"), list) else "",
+        "Подготовить CV под выбранный маршрут и отправить 3-5 тестовых отклика.",
+    )
+    specialist_hints, _ = _psych_social_recommendation(report)
     weekly_signals = [
         _safe_text(item.get("task"))
         for item in weekly[:3]
         if isinstance(item, dict)
-    ]
-    free_features = [
-        "1-2 запуска карты в кризисной точке",
-        "Базовые упражнения без глубокой обратной связи",
-        "Статичная карта без еженедельной адаптации",
-    ]
-    paid_features = [
-        "Еженедельный анализ ваших действий и узких мест",
-        "Адаптивная карта: меняем маршрут по фактическому прогрессу",
-        "Новый стек навыков и рабочий фокус под текущую неделю",
-        "Система сопровождения, которая удерживает дисциплину до результата",
     ]
     strengths_items = list(dict.fromkeys(_list_items(not_reset)[:4] + _list_items(digital_human.get("hidden_strengths"))[:4]))[:6]
     barriers_obj = digital_human.get("barriers") if isinstance(digital_human.get("barriers"), dict) else {}
@@ -601,13 +601,14 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         .closing-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
         .closing-card {{ border: 1px solid #bae6fd; border-radius: 10px; padding: 12px; background: #f8fafc; }}
         .closing-title {{ font-size: 15px; color: #0f172a; margin-bottom: 6px; }}
-        .offer-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
-            .swot-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
-        .offer-card {{ border: 1px solid #dbeafe; border-radius: 10px; padding: 12px; background: #f8fafc; }}
-        .offer-card.free {{ border-color: #d1d5db; background: #fcfcfc; }}
-        .offer-card.paid {{ border-color: #93c5fd; background: #eff6ff; }}
-        .offer-title {{ font-size: 15px; color: #0f172a; margin-bottom: 6px; }}
+        .swot-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
         .system-note {{ border-left: 4px solid #0f766e; padding: 10px 12px; background: #f0fdfa; border-radius: 8px; margin-top: 10px; }}
+        .final-conclusion {{ background: linear-gradient(135deg, #f0fdfa 0%, #eff6ff 100%); border: 2px solid #0f766e; border-radius: 14px; padding: 20px 22px; margin-top: 16px; page-break-inside: avoid; }}
+        .final-conclusion-title {{ font-size: 17px; font-weight: bold; color: #0f172a; margin-bottom: 10px; border-bottom: 1px solid #99f6e4; padding-bottom: 6px; }}
+        .final-conclusion-text {{ font-size: 13px; line-height: 1.7; color: #1f2937; white-space: pre-line; }}
+        .action-box {{ border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 10px; padding: 14px 16px; margin-top: 12px; }}
+        .action-box-title {{ font-size: 13px; font-weight: bold; color: #166534; margin-bottom: 6px; }}
+        .honest-note {{ border-left: 4px solid #f59e0b; padding: 10px 14px; background: #fffbeb; border-radius: 8px; margin-top: 12px; font-size: 12px; color: #78350f; }}
   </style>
 </head>
 <body>
@@ -762,34 +763,52 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 
         <section class='page last'>
         <h2>11. Что может быть не так в моём выводе</h2>
-        <div class='closing-grid'>
-            <div class='closing-card'>
-                <div class='closing-title'>Что делать самому</div>
-                <ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_for_closing) or '<li>Есть устойчивые сильные стороны, на которые можно опереться.</li>'}</ul>
-            </div>
-            <div class='closing-card'>
-                <div class='closing-title'>Что обсудить со специалистом</div>
-                <ul>{''.join(f'<li>{escape(x)}</li>' for x in weekly_signals) or '<li>Вы уже можете делать короткие шаги при понятной структуре.</li>'}</ul>
-            </div>
-        </div>
-
-        <div class='offer-grid'>
-            <div class='offer-card free'>
-                <div class='offer-title'>Бесплатная версия</div>
-                <ul>{''.join(f'<li>{escape(item)}</li>' for item in free_features)}</ul>
-            </div>
-            <div class='offer-card paid'>
-                <div class='offer-title'>Платная версия: система сопровождения</div>
-                <ul>{''.join(f'<li>{escape(item)}</li>' for item in paid_features)}</ul>
-            </div>
-        </div>
 
         <div class='system-note'>
-            <b>Честно о выводе:</b> карта меняется при новых данных о языке, документах, резюме, приоритетах, контактах или рынке. Самому стоит делать короткий проверяемый шаг; со специалистом лучше обсуждать противоречия, долгосрочный выбор и адаптацию CV.
+            <b>На чём основан этот вывод:</b> история, ответы на вопросы и данные резюме (если загружено).
+            Карта меняется при новых фактах о языке, документах, приоритетах, контактах или рынке.
+            Если что-то не совпадает — исправьте через кнопки ниже.
         </div>
-        <div class='card'><h3>Проверка карты кнопками</h3><ul><li>✅ Всё похоже на правду</li><li>✍️ Исправить факт</li><li>🧭 Изменить приоритет</li><li>❓ Не согласен с маршрутом</li></ul></div>
 
-        <div class='card'><h3>Финальная фиксация</h3><p>{escape(closing_message)}</p></div>
+        <div class='closing-grid' style='margin-top:12px;'>
+            <div class='closing-card'>
+                <div class='closing-title'>✅ Что не обнулилось — ваша опора</div>
+                <ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_for_closing) or '<li>Есть устойчивые сильные стороны. Уточните в беседе со специалистом.</li>'}</ul>
+            </div>
+            <div class='closing-card'>
+                <div class='closing-title'>⚠️ Что может изменить карту</div>
+                <ul>{''.join(f'<li>{escape(x)}</li>' for x in unknowns) or '<li>Критичных неизвестных сейчас нет.</li>'}</ul>
+            </div>
+        </div>
+
+        <div class='action-box' style='margin-top:14px;'>
+            <div class='action-box-title'>🎯 Первый шаг — сделайте сегодня (до 15 минут)</div>
+            <p style='margin:4px 0;'>{escape(first_step_today)}</p>
+            <div class='action-box-title' style='margin-top:8px;'>📅 На эту неделю</div>
+            <p style='margin:4px 0;'>{escape(next_step_week)}</p>
+        </div>
+
+        <div class='honest-note'>
+            <b>Честно о рекомендациях специалиста:</b>
+            {''.join(f' {escape(x)}' for x in specialist_hints[:2]) or ' Если маршрут понятен, но нет движения — разбор со специалистом ускоряет выход.'}
+            Это не медицинская рекомендация — только карьерная и адаптационная опора.
+        </div>
+
+        <div class='card' style='margin-top:14px;'>
+            <h3>🔎 Проверьте карту</h3>
+            <ul>
+                <li>✅ Всё похоже на правду → продолжайте по шагам</li>
+                <li>✍️ Исправить факт → карта обновится</li>
+                <li>🧭 Изменить приоритет → маршрут перестроится</li>
+                <li>❓ Не согласен с маршрутом → объясните, что не так</li>
+            </ul>
+        </div>
+
+        <div class='final-conclusion' style='margin-top:18px;'>
+            <div class='final-conclusion-title'>💬 Заключение</div>
+            <div class='final-conclusion-text'>{escape(closing_message)}</div>
+        </div>
+
   </section>
 </body>
 </html>
@@ -993,7 +1012,7 @@ def generate_plain_pdf_from_html_file_with_error(html_path: Path) -> tuple[Path 
 
 
 def generate_pdf_report(report: dict, output_dir: str, user_name: str = "") -> Path:
-    pdf_path, _ = generate_report_files(report, output_dir=output_dir, user_name=user_name)
+    pdf_path, _, _ = generate_report_files(report, output_dir=output_dir, user_name=user_name)
     if pdf_path is None:
         raise RuntimeError("PDF generation failed")
     return pdf_path
@@ -1011,15 +1030,172 @@ def generate_html_report_file(report: dict, output_dir: str, user_name: str = ""
     return html_path
 
 
+def generate_docx_report_file(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, str]:
+    """Generate a DOCX version of the report. Returns (path, error_string)."""
+    try:
+        from docx import Document
+        from docx.shared import Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except Exception as exc:
+        return None, f"python-docx unavailable: {exc}"
+
+    meta = build_meta(report, user_name=user_name)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", meta.user_name)[:40] or "user"
+    base_dir = Path(output_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    docx_path = base_dir / f"career_report_{safe_name}_{ts}.docx"
+
+    digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
+    decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
+    action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+    market = report.get("market_analysis", []) if isinstance(report.get("market_analysis"), list) else []
+    not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
+    resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
+    development = report.get("development_map", {}) if isinstance(report.get("development_map"), dict) else {}
+    first_month = development.get("first_month", []) if isinstance(development.get("first_month"), list) else []
+    closing_message = _safe_text(
+        report.get("closing_message"),
+        "Это работа, а не испытание. Один проверяемый шаг — и карта начнёт двигаться.",
+    )
+    self_help_pts, specialist_pts = _psych_social_recommendation(report)
+    unknowns = _unknowns_list(report)
+
+    def _teal(r: int = 15, g: int = 118, b: int = 110) -> RGBColor:
+        return RGBColor(r, g, b)
+
+    def _add_heading(doc: "Document", text: str, level: int = 1) -> None:
+        p = doc.add_heading(text, level=level)
+        run = p.runs[0] if p.runs else p.add_run(text)
+        run.font.color.rgb = _teal()
+
+    def _add_bullet(doc: "Document", text: str, bold_prefix: str = "") -> None:
+        p = doc.add_paragraph(style="List Bullet")
+        if bold_prefix:
+            run = p.add_run(bold_prefix)
+            run.bold = True
+        p.add_run(_safe_text(text))
+
+    def _add_kv(doc: "Document", key: str, value: str) -> None:
+        p = doc.add_paragraph()
+        run = p.add_run(f"{key}: ")
+        run.bold = True
+        p.add_run(_safe_text(value))
+
+    try:
+        doc = Document()
+        style = doc.styles["Normal"]
+        style.font.name = "Arial"
+        style.font.size = Pt(11)
+
+        # Cover
+        title = doc.add_heading("NextYou Career GPS Report", 0)
+        title.runs[0].font.color.rgb = _teal()
+        doc.add_paragraph(f"Имя: {meta.user_name}  |  Страна: {meta.country}  |  Дата: {meta.created_at}  |  Режим: {meta.mode}")
+        doc.add_paragraph("")
+
+        # 1. Что я услышал
+        _add_heading(doc, "1. Что я услышал", 1)
+        _add_kv(doc, "Кто вы сейчас", _safe_text(digital_human.get("current_state")))
+        _add_kv(doc, "Главный актив", _safe_text(digital_human.get("main_asset")))
+        doc.add_paragraph("")
+
+        # 2. Профессиональное ядро
+        _add_heading(doc, "2. Профессиональное ядро", 1)
+        doc.add_paragraph(_professional_core_summary(report))
+        _add_heading(doc, "Что не обнулилось", 2)
+        for item in _list_items(not_reset)[:8]:
+            _add_bullet(doc, item)
+        doc.add_paragraph("")
+
+        # 3. Сравнение маршрутов
+        _add_heading(doc, "3. Сравнение маршрутов", 1)
+        labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
+        for idx, item in enumerate(market[:3]):
+            if not isinstance(item, dict):
+                continue
+            label = labels[idx] if idx < len(labels) else f"Вариант {idx+1}"
+            _add_heading(doc, f"{label}: {_safe_text(item.get('profession'))}", 2)
+            _add_kv(doc, "Соответствие", f"{item.get('fit_percent', '-')}%")
+            _add_kv(doc, "Доход", _safe_text(item.get("salary_range")))
+            _add_kv(doc, "Скорость входа", _safe_text(item.get("entry_speed")))
+            _add_kv(doc, "Требования", ", ".join(_list_items(item.get("requirements"))[:5]))
+        doc.add_paragraph("")
+
+        # 4. Выбранный маршрут и первый шаг
+        _add_heading(doc, "4. Выбранный маршрут и первый шаг", 1)
+        _add_kv(doc, "Маршрут", _safe_text(decision.get("recommended_main_path")))
+        _add_kv(doc, "Почему", _safe_text(decision.get("why_this_path")))
+        _add_kv(doc, "Запасной", _safe_text(decision.get("backup_path")))
+        _add_kv(doc, "Первый шаг", _safe_text(today.get("action")))
+        _add_kv(doc, "Время", _safe_text(today.get("timebox")))
+        doc.add_paragraph("")
+
+        # 5. План на 30 дней
+        _add_heading(doc, "5. План на 30 дней", 1)
+        for week in first_month[:4]:
+            if not isinstance(week, dict):
+                continue
+            _add_heading(doc, f"Неделя {week.get('week', '-')}: {_safe_text(week.get('focus'))}", 2)
+            for task in _list_items(week.get("tasks", []))[:4]:
+                _add_bullet(doc, task)
+            doc.add_paragraph(f"Результат недели: {_safe_text(week.get('output'))}")
+        doc.add_paragraph("")
+
+        # 6. Анализ резюме
+        _add_heading(doc, "6. Анализ резюме", 1)
+        if resume_analysis:
+            for item in _list_items(resume_analysis.get("what_is_good"))[:5]:
+                _add_bullet(doc, item, "✅ ")
+            for item in _list_items(resume_analysis.get("what_is_missing"))[:5]:
+                _add_bullet(doc, item, "⚠️ ")
+        else:
+            doc.add_paragraph("Резюме не загружено. Загрузите CV для отдельного анализа под маршрут.")
+        doc.add_paragraph("")
+
+        # 7. Заключение (STAR section)
+        _add_heading(doc, "7. Что может быть не так. Заключение", 1)
+        doc.add_paragraph(
+            "Карта меняется при новых данных о языке, документах, резюме, приоритетах или рынке."
+        )
+        if unknowns:
+            _add_heading(doc, "Что нужно уточнить:", 2)
+            for u in unknowns:
+                _add_bullet(doc, u)
+        _add_heading(doc, "Что делать самому:", 2)
+        for pt in self_help_pts:
+            _add_bullet(doc, pt)
+        _add_heading(doc, "Когда полезен специалист:", 2)
+        for pt in specialist_pts:
+            _add_bullet(doc, pt)
+        doc.add_paragraph("")
+
+        # Closing
+        closing_p = doc.add_paragraph()
+        closing_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        run = closing_p.add_run("💬 Заключение")
+        run.bold = True
+        run.font.size = Pt(13)
+        run.font.color.rgb = _teal()
+        doc.add_paragraph(closing_message)
+
+        doc.save(str(docx_path))
+        return docx_path, ""
+    except Exception as exc:
+        return None, f"docx_render_error: {exc}"
+
+
 def generate_pdf_from_html_file(html_path: Path) -> Path | None:
     pdf_path, _error = generate_pdf_from_html_file_with_error(html_path)
     return pdf_path
 
 
-def generate_report_files(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, Path]:
+def generate_report_files(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, Path, Path | None]:
     html_path = generate_html_report_file(report, output_dir=output_dir, user_name=user_name)
     pdf_path = generate_pdf_from_html_file(html_path)
-    return pdf_path, html_path
+    docx_path, _ = generate_docx_report_file(report, output_dir=output_dir, user_name=user_name)
+    return pdf_path, html_path, docx_path
 
 
 def generate_report_payload(user_id: str, report: dict, base_url: str, output_dir: str, user_name: str = "") -> dict[str, str]:

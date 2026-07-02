@@ -134,6 +134,7 @@ STEP_MAKE_EASIER = "Сделать проще"
 STEP_OTHER_STEP = "Другой шаг"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
+RESULT_DOWNLOAD_DOCX = "📝 Скачать DOCX"
 ANSWER_RETRY = "✍️ Ответить заново"
 ANSWER_SKIP = "⏭️ Пропустить этот вопрос"
 ANSWER_KEEP = "✅ Оставить как есть"
@@ -236,6 +237,7 @@ ALL_RESULT_ACTIONS = {
     RESULT_SELF_EXPLORE,
     RESULT_DO_STEPS,
     RESULT_DOWNLOAD_PDF,
+    RESULT_DOWNLOAD_DOCX,
     PDF_FALLBACK_STEPS,
     RESULT_CLARIFY,
     PDF_FALLBACK_CLARIFY,
@@ -505,7 +507,7 @@ def skiller_reason_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def result_actions_keyboard(*, include_pdf_download: bool = False) -> ReplyKeyboardMarkup:
+def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_download: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=RESULT_START_FIRST_STEP)],
         [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
@@ -514,8 +516,13 @@ def result_actions_keyboard(*, include_pdf_download: bool = False) -> ReplyKeybo
         [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
         [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
     ]
-    if include_pdf_download:
-        rows.append([KeyboardButton(text=RESULT_DOWNLOAD_PDF)])
+    if include_pdf_download or include_docx_download:
+        download_row = []
+        if include_pdf_download:
+            download_row.append(KeyboardButton(text=RESULT_DOWNLOAD_PDF))
+        if include_docx_download:
+            download_row.append(KeyboardButton(text=RESULT_DOWNLOAD_DOCX))
+        rows.append(download_row)
     rows.extend(
         [
             [KeyboardButton(text=RESULT_DO_STEPS)],
