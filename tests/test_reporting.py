@@ -109,17 +109,32 @@ class ReportingUtilsTests(unittest.TestCase):
         html = render_report_html(report, meta)
 
         self.assertIn("Career GPS Report", html)
-        self.assertIn("Профиль ситуации", html)
-        self.assertIn("Ваше профессиональное ядро", html)
-        self.assertIn("Анализ возможностей", html)
-        self.assertIn("План действий", html)
+        # Section 1
+        self.assertIn("Что я услышал", html)
+        self.assertIn("Ключевые факты из истории и резюме", html)
+        # Section 2
+        self.assertIn("Профессиональное ядро", html)
+        self.assertIn("Что не обнулилось после миграции", html)
+        # Section 3
+        self.assertIn("Сильные стороны и опоры", html)
         self.assertIn("Источники энергии", html)
         self.assertIn("Карьерные приоритеты", html)
-        self.assertIn("STAR-компетенции", html)
+        self.assertIn("Подтверждённые компетенции", html)
+        # Section 4
+        self.assertIn("Ограничения и неизвестные", html)
+        self.assertIn("SWOT: Strengths", html)
+        # Section 5
+        self.assertIn("Устойчивость в период изменений", html)
         self.assertIn("Ресурс и рабочий темп", html)
         self.assertIn("Сейчас ресурс устойчивый", html)
+        # Section 6
+        self.assertIn("Интеграция в новой стране", html)
         self.assertIn("Состояние интеграции", html)
         self.assertIn("Интеграция пока частичная", html)
+        # Section 7
+        self.assertIn("Сравнение маршрутов", html)
+        self.assertIn("Три сценария", html)
+        # Section 10
         self.assertIn("Профессии и периоды", html)
         self.assertIn("Образование, языки, сертификаты", html)
         self.assertIn("Вопросы для уточнения", html)

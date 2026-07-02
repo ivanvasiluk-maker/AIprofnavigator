@@ -223,6 +223,42 @@ def _build_story_echo(report: dict) -> str:
     )
 
 
+def _unknowns_list(report: dict) -> list[str]:
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()]
+    return unknowns[:6]
+
+
+def _psych_social_recommendation(report: dict) -> tuple[list[str], list[str]]:
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    barriers = digital_human.get("barriers") if isinstance(digital_human.get("barriers"), dict) else {}
+    social_integration = report.get("social_integration") if isinstance(report.get("social_integration"), dict) else {}
+
+    internal = _list_items(barriers.get("internal"))[:3]
+    external = _list_items(barriers.get("external"))[:3]
+    fears = _list_items((digital_human.get("psychological_profile") or {}).get("dominant_fears"))[:3]
+    communities = _list_items(social_integration.get("communities"))[:3]
+
+    self_help: list[str] = []
+    if any(item != "-" for item in internal):
+        self_help.append("Действовать через микрошаг 5-15 минут в день, без попытки решить всё сразу.")
+    if any(item != "-" for item in external):
+        self_help.append("Разделить барьеры на управляемые (сегодня) и внешние (план на неделю).")
+    if any(item != "-" for item in communities):
+        self_help.append("Добавить один социальный контакт в неделю: сообщество, чат или профильный канал.")
+    if not self_help:
+        self_help.append("Пока данных мало: начните с одного короткого действия и зафиксируйте результат.")
+
+    specialist: list[str] = []
+    signal_blob = " ".join([" ".join(fears), " ".join(internal)]).lower().replace("ё", "е")
+    if any(token in signal_blob for token in ["страх", "пан", "стыд", "не могу", "нет сил", "хаос", "трев"]):
+        specialist.append("Если перегруз и тревога держатся неделями, полезно разобрать это с психологом/консультантом по адаптации.")
+    specialist.append("Если маршрут понятен, но нет движения, полезен разбор со специалистом: барьер, темп, корректировка шага.")
+    specialist.append("Это не медицинское заключение: рекомендация нужна только для опоры и ускорения адаптации.")
+
+    return self_help[:3], specialist[:3]
+
+
 def build_telegram_summary(report: dict) -> str:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
@@ -386,7 +422,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         for req in _list_items(item.get("requirements"))[:4]:
             if req not in market_questions and req != "-":
                 market_questions.append(req)
-    scenario_labels = ["Быстрый доход", "Основной маршрут", "Долгосрочное развитие"]
+    unknowns = _unknowns_list(report)
+    self_help_points, specialist_points = _psych_social_recommendation(report)
+    scenario_labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
 
     possibilities = []
     labels = ["Быстрый доход", "Основной маршрут", "Долгосрочное развитие"]
@@ -587,26 +625,46 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 
     <section class='page'>
         <h2>1. Что я услышал</h2>
-    <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
-        <div class='card'><h3>Ваше профессиональное ядро</h3><p>{escape(_professional_core_summary(report))}</p></div>
-        <div class='card'><h3>Профиль ситуации</h3><p>{escape(story_echo)}</p></div>
-    <div class='card'><h3>Ваш главный актив</h3><p>{escape(_safe_text(digital_human.get('main_asset')))}</p></div>
-    <div class='card'><h3>Скрытые активы</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(digital_human.get('hidden_strengths'))[:6])}</ul></div>
-    <div class='card'><h3>Главный риск</h3><p>{escape(_safe_text(digital_human.get('main_risk')))}</p></div>
-    <div class='card'><h3>Главный страх</h3><p>{escape(_safe_text(digital_human.get('main_fear')))}</p></div>
-        <div class='card'><h3>Что не обнулилось</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(not_reset)[:8])}</ul></div>
+        <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
+        <div class='card'><h3>Ключевые факты из истории и резюме</h3><p>{escape(story_echo)}</p></div>
+
+        <h2>2. Профессиональное ядро</h2>
+        <div class='card'><h3>Ваш профессиональный капитал</h3><p>{escape(_professional_core_summary(report))}</p></div>
+        <div class='card'><h3>Что не обнулилось после миграции</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(not_reset)[:8])}</ul></div>
+        <div class='card'><h3>Слои опыта</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(experience_layers)[:6])}</ul></div>
+
+        <h2>3. Сильные стороны и опоры</h2>
+        <div class='card'><h3>Подтверждённые сильные стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_items) or '<li>Данных недостаточно.</li>'}</ul></div>
         <div class='card'><h3>Источники энергии</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(energy_sources)[:6])}</ul></div>
         <div class='card'><h3>Карьерные приоритеты</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(career_priorities)[:6])}</ul></div>
-        <div class='card'><h3>STAR-компетенции</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(competency_signals)[:6])}</ul></div>
-        <div class='card'><h3>Ресурс и рабочий темп</h3><p>{escape(resource_level).replace('\n', '<br/>')}</p></div>
-        <div class='card'><h3>Состояние интеграции</h3><p>{escape(integration_level).replace('\n', '<br/>')}</p></div>
-        <div class='card'><h3>Слои опыта</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(experience_layers)[:6])}</ul></div>
+        <div class='card'><h3>Подтверждённые компетенции</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(competency_signals)[:6])}</ul></div>
+
+        <h2>4. Ограничения и неизвестные</h2>
+        <div class='card'><h3>Ограничения</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in weaknesses_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+        <div class='card'><h3>Что нужно уточнить</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in unknowns) or '<li>Критичных неизвестных сейчас нет.</li>'}</ul></div>
         <div class='swot-grid'>
-            <div class='card'><h3>Сильные стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_items) or '<li>Данных недостаточно.</li>'}</ul></div>
-            <div class='card'><h3>Слабые стороны</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in weaknesses_items) or '<li>Данных недостаточно.</li>'}</ul></div>
-            <div class='card'><h3>Что вы можете не видеть</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in blind_spots) or '<li>Данных недостаточно.</li>'}</ul></div>
-            <div class='card'><h3>Что ещё важно учесть</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in important_consider) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>SWOT: Strengths</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in strengths_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>SWOT: Weaknesses</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in weaknesses_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>SWOT: Blind Spots</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in blind_spots) or '<li>Данных недостаточно.</li>'}</ul></div>
+            <div class='card'><h3>SWOT: Important to Consider</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in important_consider) or '<li>Данных недостаточно.</li>'}</ul></div>
         </div>
+        <div class='card'>
+            <h3>Психологический и социальный анализ (без медицинских выводов)</h3>
+            <p><b>Что можно делать самому:</b></p>
+            <ul>{''.join(f'<li>{escape(x)}</li>' for x in self_help_points)}</ul>
+            <p><b>Когда полезен специалист:</b></p>
+            <ul>{''.join(f'<li>{escape(x)}</li>' for x in specialist_points)}</ul>
+        </div>
+
+        <h2>5. Устойчивость в период изменений</h2>
+        <div class='card'><h3>Ресурс и рабочий темп</h3><p>{escape(resource_level).replace('\n', '<br/>')}</p></div>
+        <div class='card'><h3>Главный риск</h3><p>{escape(_safe_text(digital_human.get('main_risk')))}</p></div>
+        <div class='card'><h3>Главный страх</h3><p>{escape(_safe_text(digital_human.get('main_fear')))}</p></div>
+
+        <h2>6. Интеграция в новой стране</h2>
+        <div class='card'><h3>Состояние интеграции</h3><p>{escape(integration_level).replace('\n', '<br/>')}</p></div>
+        <div class='card'><h3>Ваш главный актив</h3><p>{escape(_safe_text(digital_human.get('main_asset')))}</p></div>
+        <div class='card'><h3>Скрытые активы</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(digital_human.get('hidden_strengths'))[:6])}</ul></div>
   </section>
 
     <section class='page'>
@@ -616,7 +674,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Что рынок будет проверять</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in market_questions[:10]) or '<li>Данных недостаточно.</li>'}</ul></div>
         <h2>Рекомендованные роли</h2>
         {''.join(recommendations_html) if recommendations_html else '<p class="muted">Данных недостаточно.</p>'}
-        <h2>Реальные решения</h2>
+        <h2>Три сценария: пессимистичный, базовый, оптимистичный</h2>
         {''.join(solutions_html) if solutions_html else '<p class="muted">Данных недостаточно.</p>'}
   </section>
 
@@ -656,6 +714,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Почему именно оно</h3><p>{escape(_safe_text(decision.get('why_this_path')))}</p></div>
         <div class='card'><h3>Что не делать сейчас</h3><p>{escape(_safe_text(decision.get('avoid_for_now')))}</p></div>
         <div class='card'><h3>Как проверить гипотезу</h3><ul>{''.join(f'<li>{escape(step)}</li>' for step in hypothesis_steps)}</ul></div>
+        <div class='card'><h3>Кнопки после отчёта</h3><ul><li>🧭 Начать первый шаг</li><li>✍️ Исправить факт или приоритет</li><li>📄 Загрузить / доработать резюме</li><li>🔎 Разобрать рынок и вакансии</li><li>👤 Разобрать со специалистом</li><li>👥 Найти группу / сообщество</li></ul></div>
 
         <h2>9. План на 30 дней</h2>
     <div class='card'>
@@ -697,7 +756,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
                 + "</ul></div>"
             )
             if has_resume_module
-            else "<div class='card'><h3>Резюме не загружено</h3><p>Загрузите CV для отдельного анализа и адаптации под выбранный маршрут.</p></div>"
+            else "<div class='card'><h3>Резюме не загружено</h3><p>Загрузите CV для отдельного анализа и адаптации под выбранный маршрут.</p><p><b>Кнопка:</b> «Загрузить резюме для анализа»</p></div>"
         }
     </section>
 
@@ -728,6 +787,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='system-note'>
             <b>Честно о выводе:</b> карта меняется при новых данных о языке, документах, резюме, приоритетах, контактах или рынке. Самому стоит делать короткий проверяемый шаг; со специалистом лучше обсуждать противоречия, долгосрочный выбор и адаптацию CV.
         </div>
+        <div class='card'><h3>Проверка карты кнопками</h3><ul><li>✅ Всё похоже на правду</li><li>✍️ Исправить факт</li><li>🧭 Изменить приоритет</li><li>❓ Не согласен с маршрутом</li></ul></div>
 
         <div class='card'><h3>Финальная фиксация</h3><p>{escape(closing_message)}</p></div>
   </section>

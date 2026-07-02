@@ -8,6 +8,7 @@ import tempfile
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -50,6 +51,7 @@ from keyboards import (
     RESULT_CLARIFY,
     RESULT_DETAILS,
     RESULT_DO_STEPS,
+    RESULT_DOWNLOAD_PDF,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_OPEN_FULL_REPORT,
@@ -142,6 +144,8 @@ from utils.reporting import generate_html_report_file, generate_pdf_from_html_fi
 
 router = Router()
 _REMINDER_TASKS: dict[int, asyncio.Task] = {}
+_PDF_TASKS: dict[int, asyncio.Task] = {}
+_PDF_READY_BY_CHAT: dict[int, str] = {}
 
 _BARRIER_DONE_ALIASES = {
     "все",
@@ -187,6 +191,73 @@ def _schedule_reminder(bot, chat_id: int, language: str, delay_seconds: int = 17
     _REMINDER_TASKS[chat_id] = asyncio.create_task(_run_reminder(bot, chat_id, language, delay_seconds))
     due_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
     return due_at.isoformat()
+
+
+def _cancel_pdf_task(chat_id: int) -> None:
+    task = _PDF_TASKS.pop(chat_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
+def _report_public_url(path: Path) -> str:
+    base = str(settings.report_base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/{path.name}"
+
+
+def _resolve_pdf_report_path(data: dict) -> str:
+    direct = str(data.get("pdf_report_path") or "").strip()
+    if direct and Path(direct).exists():
+        return direct
+
+    report_generation_id = str(data.get("report_generation_id") or "").strip()
+    if report_generation_id:
+        persisted = get_report_by_generation_id(report_generation_id) or {}
+        persisted_path = str(persisted.get("pdf_report_path") or "").strip()
+        if persisted_path and Path(persisted_path).exists():
+            return persisted_path
+
+    try:
+        chat_id = int(data.get("chat_id") or 0)
+    except Exception:
+        chat_id = 0
+    return _PDF_READY_BY_CHAT.get(chat_id, "")
+
+
+async def _run_pdf_generation_background(
+    *,
+    bot,
+    chat_id: int,
+    lang: str,
+    html_path: Path,
+    report_generation_id: str,
+) -> None:
+    try:
+        try:
+            pdf_path, pdf_error = await asyncio.to_thread(generate_pdf_from_html_file_with_error, html_path)
+        except Exception as exc:
+            pdf_path, pdf_error = None, str(exc)
+
+        if pdf_path is not None and pdf_path.exists():
+            pdf_path_str = str(pdf_path)
+            _PDF_READY_BY_CHAT[chat_id] = pdf_path_str
+            if report_generation_id:
+                update_report_files(report_generation_id, pdf_report_path=pdf_path_str)
+            await bot.send_message(
+                chat_id,
+                t(lang, "pdf_ready_download"),
+                reply_markup=result_actions_keyboard(include_pdf_download=True),
+            )
+            return
+
+        await bot.send_message(chat_id, t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
+        if report_generation_id:
+            update_report_files(report_generation_id, pdf_report_path="")
+        if pdf_error:
+            print(f"[pdf-bg] chat_id={chat_id} error={pdf_error}", flush=True)
+    finally:
+        _PDF_TASKS.pop(chat_id, None)
 
 
 def _user_language(data: dict) -> str:
@@ -2310,28 +2381,27 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         # Required flow: HTML report is always prepared first.
         html_path = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
         html_report_path = str(html_path)
+        html_url = _report_public_url(html_path)
 
         await _track_event(message, state, "html_ready", meta={"path": html_path.name})
-        await state.set_state(CareerFlow.PDF_GENERATING)
-        pdf_path, pdf_error = generate_pdf_from_html_file_with_error(html_path)
+        if html_url:
+            await message.answer(
+                t(lang, "web_report_ready"),
+                reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
+            )
+        await message.answer(t(lang, "pdf_generation_started"), reply_markup=result_actions_keyboard())
 
-        if pdf_path is not None:
-            pdf_report_path = str(pdf_path)
-            await _track_event(message, state, "pdf_ready", meta={"engine": settings.report_pdf_engine})
-            await state.set_state(CareerFlow.PDF_READY)
-            await message.answer_document(
-                FSInputFile(str(pdf_path)),
-                caption=t(lang, "pdf_send_caption"),
-                reply_markup=result_actions_keyboard(),
+        _cancel_pdf_task(message.chat.id)
+        _PDF_READY_BY_CHAT.pop(message.chat.id, None)
+        _PDF_TASKS[message.chat.id] = asyncio.create_task(
+            _run_pdf_generation_background(
+                bot=message.bot,
+                chat_id=message.chat.id,
+                lang=lang,
+                html_path=html_path,
+                report_generation_id=report_generation_id,
             )
-        else:
-            await _track_event(
-                message,
-                state,
-                "pdf_fallback_html",
-                meta={"engine": settings.report_pdf_engine, "reason": str(pdf_error or "unknown")[:240]},
-            )
-            await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
+        )
     except Exception:
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
@@ -2340,6 +2410,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     today_task = _today_task_from_report(report)
     await state.update_data(
         skiller_today_task=today_task,
+        chat_id=message.chat.id,
         pdf_report_path=pdf_report_path,
         html_report_path=html_report_path,
         execution_steps=_build_execution_steps(report),
@@ -3733,7 +3804,20 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "map_validation_disagree_prompt"), reply_markup=input_method_keyboard())
         return
 
-    if action in {RESULT_SELF_EXPLORE, RESULT_OPEN_FULL_REPORT, RESULT_ANALYZE_MARKET}:
+    if action == RESULT_OPEN_FULL_REPORT:
+        html_path = str(data.get("html_report_path") or "").strip()
+        if html_path and Path(html_path).exists():
+            html_url = _report_public_url(Path(html_path))
+            if html_url:
+                await message.answer(
+                    t(lang, "web_report_ready"),
+                    reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
+                )
+                return
+        await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+        return
+
+    if action in {RESULT_SELF_EXPLORE, RESULT_ANALYZE_MARKET}:
         await state.set_state(CareerFlow.SHOWING_DETAILS)
         await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
         return
@@ -3808,6 +3892,52 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
             await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
             await message.answer(_execution_step_text(steps[current_day], progress), reply_markup=step_tracking_keyboard())
             return
+
+    if action == RESULT_DOWNLOAD_PDF:
+        current_data = await state.get_data()
+        current_data["chat_id"] = message.chat.id
+        pdf_path = _resolve_pdf_report_path(current_data)
+        if pdf_path and Path(pdf_path).exists():
+            await state.update_data(pdf_report_path=pdf_path, chat_id=message.chat.id)
+            await message.answer_document(
+                FSInputFile(pdf_path),
+                caption=t(lang, "pdf_send_caption"),
+                reply_markup=result_actions_keyboard(include_pdf_download=True),
+            )
+            return
+        await message.answer(t(lang, "pdf_pending"), reply_markup=result_actions_keyboard())
+        return
+
+    await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+
+
+@router.message(CareerFlow.waiting_for_post_result_action, F.text)
+async def handle_post_result_text_fallback(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    text = str(message.text or "").strip().lower().replace("ё", "е")
+
+    overload_tokens = ["не знаю", "страш", "нет сил", "слишком сложно", "сложно", "перегруз", "устал"]
+    if any(token in text for token in overload_tokens):
+        report = data.get("final_report") or {}
+        action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+        today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+        today["action"] = "Откройте заметки и напишите 3 типа работ, которые у вас реально получаются лучше всего."
+        today["timebox"] = "5 минут"
+        today["result"] = "Есть список из 3 вариантов, с которых можно начать без перегруза."
+        action_plan["today"] = today
+        report["action_plan"] = action_plan
+        steps = _build_execution_steps(report)
+        await state.update_data(
+            final_report=report,
+            execution_steps=steps,
+            current_execution_day=0,
+        )
+        await state.set_state(CareerFlow.STEP_TRACKING)
+        await message.answer(t(lang, "post_result_overload_reduce"), reply_markup=step_tracking_keyboard())
+        if steps:
+            await message.answer(_execution_step_text(steps[0], data.get("execution_progress") or {}), reply_markup=step_tracking_keyboard())
+        return
 
     await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
 

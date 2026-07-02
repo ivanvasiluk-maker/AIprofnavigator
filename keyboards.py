@@ -235,6 +235,7 @@ ALL_RESULT_ACTIONS = {
     RESULT_OPEN_FULL_REPORT,
     RESULT_SELF_EXPLORE,
     RESULT_DO_STEPS,
+    RESULT_DOWNLOAD_PDF,
     PDF_FALLBACK_STEPS,
     RESULT_CLARIFY,
     PDF_FALLBACK_CLARIFY,
@@ -504,15 +505,19 @@ def skiller_reason_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def result_actions_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=RESULT_START_FIRST_STEP)],
-            [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
-            [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
-            [KeyboardButton(text=RESULT_ANALYZE_MARKET)],
-            [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
-            [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
+def result_actions_keyboard(*, include_pdf_download: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text=RESULT_START_FIRST_STEP)],
+        [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
+        [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
+        [KeyboardButton(text=RESULT_ANALYZE_MARKET)],
+        [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
+        [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
+    ]
+    if include_pdf_download:
+        rows.append([KeyboardButton(text=RESULT_DOWNLOAD_PDF)])
+    rows.extend(
+        [
             [KeyboardButton(text=RESULT_DO_STEPS)],
             [KeyboardButton(text=RESULT_CLARIFY)],
             [KeyboardButton(text=RESULT_FIX_CV)],
@@ -520,9 +525,9 @@ def result_actions_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=RESULT_SPECIALIST)],
             [KeyboardButton(text=RESULT_SUPPORT_GROUP)],
             [KeyboardButton(text=RESTART)],
-        ],
-        resize_keyboard=True,
+        ]
     )
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def pdf_fallback_keyboard() -> ReplyKeyboardMarkup:
