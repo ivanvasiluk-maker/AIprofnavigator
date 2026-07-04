@@ -46,7 +46,7 @@ try:
     }
     meta = build_meta(test_report, user_name="TestUser")
     html = render_report_html(test_report, meta)
-    assert "Career GPS" in html or "NextYou" in html, "HTML should contain report header"
+    assert "NextYou" in html, "HTML should contain report header"
     print(f"   ✓ HTML rendering works ({len(html)} chars)")
 except Exception as e:
     print(f"   ✗ Reporting error: {e}")

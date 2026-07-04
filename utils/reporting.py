@@ -308,7 +308,7 @@ def build_telegram_summary(report: dict) -> str:
     summary = [
         story_echo,
         "",
-        "Ваш Career GPS",
+        "Ваш NextYou отчёт",
         "",
         f"1. Что я услышал:\n{story_echo}",
         f"2. Профессиональное ядро:\n{professional_core}",
@@ -614,7 +614,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 <body>
   <section class='page'>
         <div class='brand'>NextYou</div>
-        <h1>NextYou Career GPS Report</h1>
+        <h1>NextYou Report</h1>
     <h2>Персональная карта карьерного перехода</h2>
     <div class='meta'>
       <p><b>Имя пользователя:</b> {escape(meta.user_name)}</p>
@@ -1090,7 +1090,7 @@ def generate_docx_report_file(report: dict, output_dir: str, user_name: str = ""
         style.font.size = Pt(11)
 
         # Cover
-        title = doc.add_heading("NextYou Career GPS Report", 0)
+        title = doc.add_heading("NextYou Report", 0)
         title.runs[0].font.color.rgb = _teal()
         doc.add_paragraph(f"Имя: {meta.user_name}  |  Страна: {meta.country}  |  Дата: {meta.created_at}  |  Режим: {meta.mode}")
         doc.add_paragraph("")

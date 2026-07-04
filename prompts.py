@@ -1,5 +1,5 @@
 SYSTEM_PROMPT = """
-Ты — карьерный AI-навигатор Career GPS.
+Ты — карьерный AI-навигатор NextYou.
 
 Задача: собрать персональную карту развития по четырём направлениям
 (профиль, психоэмоциональное состояние, социальная поддержка, социальная интеграция)
@@ -112,7 +112,7 @@ language: {language}
 
 
 FINAL_REPORT_PROMPT = """
-Этап: финальный отчёт Career GPS.
+Этап: финальный отчёт NextYou.
 language: {language}
 user_segment: {user_segment}
 user_segment_label: {user_segment_label}

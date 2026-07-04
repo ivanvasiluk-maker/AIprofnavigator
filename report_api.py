@@ -23,7 +23,7 @@ class ReportGenerateResponse(BaseModel):
     pdf_url: str
 
 
-app = FastAPI(title="Career GPS Report API")
+app = FastAPI(title="NextYou Report API")
 
 reports_dir = Path(settings.report_output_dir)
 reports_dir.mkdir(parents=True, exist_ok=True)

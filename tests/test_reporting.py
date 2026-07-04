@@ -37,11 +37,11 @@ class ReportingUtilsTests(unittest.TestCase):
 
         summary = build_telegram_summary(report)
         self.assertIn("Что я услышал в вашей истории", summary)
-        self.assertLess(summary.index("Что я услышал в вашей истории"), summary.index("Ваш Career GPS"))
+        self.assertLess(summary.index("Что я услышал в вашей истории"), summary.index("Ваш NextYou отчёт"))
         self.assertIn("Главная проблема", summary)
         self.assertIn("Ресурс", summary)
         self.assertIn("Ограничение", summary)
-        self.assertIn("Ваш Career GPS", summary)
+        self.assertIn("Ваш NextYou отчёт", summary)
         self.assertIn("Ваше профессиональное ядро", summary)
         self.assertIn("Вы не начинаете с нуля", summary)
         self.assertIn("Кто вы сейчас", summary)
@@ -108,7 +108,7 @@ class ReportingUtilsTests(unittest.TestCase):
         meta = build_meta(report, user_name="Ivan")
         html = render_report_html(report, meta)
 
-        self.assertIn("Career GPS Report", html)
+        self.assertIn("NextYou Report", html)
         # Section 1
         self.assertIn("Что я услышал", html)
         self.assertIn("Ключевые факты из истории и резюме", html)

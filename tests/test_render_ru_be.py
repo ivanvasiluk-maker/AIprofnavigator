@@ -112,7 +112,7 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("CRM ownership", extracted)
 
     def test_russian_start_flow_text(self) -> None:
-        self.assertIn("Career GPS", t("ru", "start_intro"))
+        self.assertIn("NextYou", t("ru", "start_intro"))
         self.assertEqual(
             t("ru", "questions_cta"),
             "Отвечайте по одному. Если есть кнопки вариантов, можно нажать кнопку или ответить своим текстом/голосом.",
@@ -190,7 +190,7 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("Навыки", snapshot)
         self.assertIn("1. Какой минимальный доход нужен в месяц?", questions)
         self.assertIn("Если есть кнопки вариантов", questions)
-        self.assertIn("Career GPS", t("ru", "start_intro"))
+        self.assertIn("NextYou", t("ru", "start_intro"))
 
     def test_follow_up_questions_normalized_to_minimum(self) -> None:
         questions = ai_client._normalize_question_count([{"id": 1, "block": "financial_pressure", "question": "Один вопрос?", "type": "short_text", "options": []}], "ru")
