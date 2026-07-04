@@ -2735,10 +2735,55 @@ def format_final_report(report: dict, lang: str) -> list[str]:
 
 
 async def _start_barriers_module(message: Message, state: FSMContext, lang: str) -> None:
-    await state.update_data(selected_barriers=[], selected_fears=[], selected_psych_markers=[])
+    sequence = [BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE]
+    await state.update_data(
+        selected_barriers=[],
+        selected_fears=[],
+        selected_psych_markers=[],
+        barrier_group_sequence=sequence,
+        barrier_group_index=0,
+        barrier_current_group=sequence[0],
+    )
     await state.set_state(CareerFlow.SELECTING_BARRIERS)
-    await message.answer(t(lang, "step_barriers"), reply_markup=barriers_keyboard())
-    await message.answer(t(lang, "barriers_prompt"), reply_markup=barriers_keyboard())
+    await message.answer(t(lang, "step_barriers"), reply_markup=barriers_group_keyboard(sequence[0]))
+    await message.answer(t(lang, "barriers_prompt_internal"), reply_markup=barriers_group_keyboard(sequence[0]))
+
+
+def _barrier_options_for_group(group: str) -> list[str]:
+    if group == BARRIER_GROUP_INTERNAL:
+        return PSYCH_BARRIER_OPTIONS[:5]
+    if group == BARRIER_GROUP_BEHAVIOR:
+        return PSYCH_BARRIER_OPTIONS[5:10]
+    if group == BARRIER_GROUP_LIFE:
+        return PSYCH_BARRIER_OPTIONS[10:]
+    return list(PSYCH_BARRIER_OPTIONS)
+
+
+def _barrier_prompt_key(group: str) -> str:
+    if group == BARRIER_GROUP_INTERNAL:
+        return "barriers_prompt_internal"
+    if group == BARRIER_GROUP_BEHAVIOR:
+        return "barriers_prompt_behavior"
+    if group == BARRIER_GROUP_LIFE:
+        return "barriers_prompt_life"
+    return "barriers_prompt"
+
+
+async def _advance_barrier_group(message: Message, state: FSMContext) -> bool:
+    data = await state.get_data()
+    lang = _user_language(data)
+    sequence = list(data.get("barrier_group_sequence") or [BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE])
+    current_index = int(data.get("barrier_group_index", 0))
+    next_index = current_index + 1
+
+    if next_index >= len(sequence):
+        return False
+
+    next_group = sequence[next_index]
+    await state.update_data(barrier_group_index=next_index, barrier_current_group=next_group)
+    await message.answer(t(lang, "barriers_next_group"), reply_markup=barriers_group_keyboard(next_group))
+    await message.answer(t(lang, _barrier_prompt_key(next_group)), reply_markup=barriers_group_keyboard(next_group))
+    return True
 
 
 async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext, lang: str) -> bool:
@@ -3667,13 +3712,17 @@ async def handle_resume_document(message: Message, state: FSMContext) -> None:
 async def _save_barrier_choice(message: Message, state: FSMContext, choice: str) -> None:
     data = await state.get_data()
     lang = _user_language(data)
+    current_group = str(data.get("barrier_current_group") or BARRIER_GROUP_INTERNAL)
     selected = list(data.get("selected_psych_markers") or [])
     already_selected = choice in selected
     if not already_selected:
         selected.append(choice)
     await state.update_data(selected_psych_markers=selected, selected_barriers=selected)
     text_key = "barriers_already_selected" if already_selected else "barriers_selected"
-    await message.answer(t(lang, text_key, count=len(selected), items=_selection_to_text(selected)), reply_markup=barriers_keyboard())
+    await message.answer(
+        t(lang, text_key, count=len(selected), items=_selection_to_text(selected)),
+        reply_markup=barriers_group_keyboard(current_group),
+    )
 
 
 async def complete_barriers(message: Message, state: FSMContext) -> None:
@@ -3688,29 +3737,34 @@ async def complete_barriers(message: Message, state: FSMContext) -> None:
 
 @router.message(CareerFlow.waiting_for_barriers, F.text)
 async def barriers_fallback(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
     raw = (message.text or "").strip()
     low = raw.lower()
+    current_group = str(data.get("barrier_current_group") or BARRIER_GROUP_INTERNAL)
+    current_options = set(_barrier_options_for_group(current_group))
 
     if raw in ALL_PSYCH_GROUP_OPTIONS:
         if raw == PSYCH_SKIP:
             await complete_barriers(message, state)
             return
-        await message.answer(t(_user_language(await state.get_data()), "barriers_prompt"), reply_markup=barriers_group_keyboard(raw))
+        await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_group_keyboard(current_group))
         return
 
     if low in _BARRIER_DONE_ALIASES or low in _BARRIER_DONE_BY_LOWER:
+        moved = await _advance_barrier_group(message, state)
+        if moved:
+            return
         await complete_barriers(message, state)
         return
 
     if raw in ALL_RESULT_ACTIONS:
-        lang = _user_language(await state.get_data())
-        await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_keyboard())
+        await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_group_keyboard(current_group))
         return
 
     normalized_choice = _BARRIER_OPTION_BY_LOWER.get(low) or raw
-    if normalized_choice not in ALL_PSYCH_BARRIER_OPTIONS:
-        lang = _user_language(await state.get_data())
-        await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_keyboard())
+    if normalized_choice not in current_options:
+        await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_group_keyboard(current_group))
         return
     await _save_barrier_choice(message, state, normalized_choice)
 
