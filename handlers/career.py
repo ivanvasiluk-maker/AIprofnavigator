@@ -233,6 +233,21 @@ def _resolve_pdf_report_path(data: dict) -> str:
     return _PDF_READY_BY_CHAT.get(chat_id, "")
 
 
+def _resolve_html_report_path(data: dict) -> str:
+    direct = str(data.get("html_report_path") or "").strip()
+    if direct and Path(direct).exists():
+        return direct
+
+    report_generation_id = str(data.get("report_generation_id") or "").strip()
+    if report_generation_id:
+        persisted = get_report_by_generation_id(report_generation_id) or {}
+        persisted_path = str(persisted.get("html_report_path") or "").strip()
+        if persisted_path and Path(persisted_path).exists():
+            return persisted_path
+
+    return ""
+
+
 def _specialist_notify_target_chat_id() -> int | None:
     raw = str(settings.specialist_notify_chat_id or "").strip()
     if not raw:
@@ -4502,7 +4517,28 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         return
 
     if action == RESULT_OPEN_FULL_REPORT:
-        html_path = str(data.get("html_report_path") or "").strip()
+        html_path = _resolve_html_report_path(data)
+        if not html_path:
+            report = data.get("final_report") or {}
+            if isinstance(report, dict) and report:
+                user_name = " ".join(
+                    part
+                    for part in [
+                        (message.from_user.first_name if message.from_user else "") or "",
+                        (message.from_user.last_name if message.from_user else "") or "",
+                    ]
+                    if part
+                ).strip()
+                try:
+                    regenerated = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+                    html_path = str(regenerated)
+                    report_generation_id = str(data.get("report_generation_id") or "").strip()
+                    await state.update_data(html_report_path=html_path)
+                    if report_generation_id:
+                        update_report_files(report_generation_id, html_report_path=html_path)
+                except Exception:
+                    html_path = ""
+
         if html_path and Path(html_path).exists():
             html_url = _report_public_url(Path(html_path))
             if html_url:
