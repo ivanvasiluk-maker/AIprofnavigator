@@ -622,6 +622,79 @@ def _clip(text: str, limit: int = 3800) -> str:
     return clean[: max(0, limit - 1)].rstrip() + "…"
 
 
+def _split_for_telegram(text: str, limit: int = 3800) -> list[str]:
+    clean = str(text or "").replace("\r\n", "\n").strip()
+    if not clean:
+        return ["-"]
+    if len(clean) <= limit:
+        return [clean]
+
+    chunks: list[str] = []
+    current = ""
+    paragraphs = clean.split("\n\n")
+
+    for paragraph in paragraphs:
+        part = paragraph.strip()
+        if not part:
+            continue
+
+        candidate = f"{current}\n\n{part}" if current else part
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+            current = ""
+
+        if len(part) <= limit:
+            current = part
+            continue
+
+        # Split oversized paragraph by lines first.
+        line_acc = ""
+        for line in part.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            line_candidate = f"{line_acc}\n{line}" if line_acc else line
+            if len(line_candidate) <= limit:
+                line_acc = line_candidate
+                continue
+
+            if line_acc:
+                chunks.append(line_acc)
+                line_acc = ""
+
+            if len(line) <= limit:
+                line_acc = line
+                continue
+
+            # Hard split long single line.
+            start = 0
+            while start < len(line):
+                end = min(start + limit, len(line))
+                chunks.append(line[start:end])
+                start = end
+
+        if line_acc:
+            current = line_acc
+
+    if current:
+        chunks.append(current)
+
+    return chunks or ["-"]
+
+
+async def _answer_safe(message: Message, text: str, reply_markup=None) -> None:
+    chunks = _split_for_telegram(text)
+    for idx, chunk in enumerate(chunks):
+        if idx == 0 and reply_markup is not None:
+            await message.answer(chunk, reply_markup=reply_markup)
+        else:
+            await message.answer(chunk)
+
+
 def _list_block(items: list[str], bullet: str = "- ") -> str:
     cleaned = [str(item).strip() for item in items if str(item).strip()]
     if not cleaned:
@@ -2404,7 +2477,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     await state.set_state(CareerFlow.FINAL_READY)
     await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
-    await message.answer(build_telegram_summary(report), reply_markup=result_actions_keyboard())
+    await _answer_safe(message, build_telegram_summary(report), reply_markup=result_actions_keyboard())
     await message.answer(t(lang, "post_result_scenarios_intro"), reply_markup=result_actions_keyboard())
     await message.answer(t(lang, "map_validation_block"), reply_markup=map_validation_keyboard())
 
@@ -2496,7 +2569,7 @@ async def _present_route_selection(message: Message, state: FSMContext, lang: st
     await state.update_data(route_compare_rows=rows)
     await state.set_state(CareerFlow.ROUTE_SELECTION)
     await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
-    await message.answer(f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
+    await _answer_safe(message, f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
 
 
