@@ -2483,12 +2483,18 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     await state.set_state(CareerFlow.FINAL_READY)
     await message.answer(t(lang, "contract_anchor"), reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
-    await _answer_safe(message, build_telegram_summary(report), reply_markup=route_choice_keyboard())
-    await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+
+    closing_message = str(report.get("closing_message") or "").strip()
+    if closing_message:
+        short_closing = _clip(closing_message, 320)
+        await message.answer(f"Итог кратко:\n{short_closing}", reply_markup=route_choice_keyboard())
 
     pdf_report_path = ""
     html_report_path = ""
     docx_report_path = ""
+    rows = _build_route_comparison_rows(report)
+    compare_text = _format_route_comparison(rows)
+    await state.update_data(route_compare_rows=rows)
     try:
         user_name = " ".join(
             part
@@ -2532,6 +2538,10 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
                 reply_markup=route_choice_keyboard(),
             )
+
+        await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
+        await _answer_safe(message, f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
+        await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
     except Exception:
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
@@ -2951,7 +2961,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         session_id=session_id,
     )
     await _track_event(message, state, "report_generated", meta={"has_income_signal": _has_income_signal(report)})
-    await _present_route_selection(message, state, lang, report)
+    await _send_final_map_bundle(message, state, lang, report)
 
 
 def _question_reply_markup(analysis: dict, index: int):

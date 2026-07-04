@@ -350,7 +350,13 @@ def save_report_version(
         print(f"[persistence] save_report_version failed: {exc}", flush=True)
 
 
-def update_report_files(report_generation_id: str, *, html_report_path: str = "", pdf_report_path: str = "") -> None:
+def update_report_files(
+    report_generation_id: str,
+    *,
+    html_report_path: str = "",
+    pdf_report_path: str = "",
+    docx_report_path: str = "",
+) -> None:
     if not str(report_generation_id or "").strip():
         return
     try:
