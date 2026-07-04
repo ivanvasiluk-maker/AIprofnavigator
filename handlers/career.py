@@ -3307,10 +3307,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     await state.update_data(report_generation_id=report_generation_id)
 
     await state.set_state(CareerFlow.GENERATING_REPORT)
-    if user_mode in {"support", "deep_route"}:
-        await message.answer(t(lang, "support_before_map"))
-    await message.answer(t(lang, "step_report"))
-    await message.answer(t(lang, "processing_answers"))
+    await message.answer(t(lang, "report_generation_compact"), reply_markup=route_choice_keyboard())
     await _track_event(message, state, "report_started", meta={"mode": user_mode})
 
     try:
