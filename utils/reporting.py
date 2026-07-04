@@ -583,21 +583,30 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
   <meta charset='UTF-8' />
   <style>
         {font_face_css}
-    @page {{ size: A4; margin: 18mm; }}
-        body {{ font-family: {body_font_stack}; color: #1f2937; font-size: 12px; line-height: 1.45; }}
-    h1 {{ font-size: 26px; margin: 0 0 6px 0; color: #0f172a; }}
-    h2 {{ font-size: 18px; margin: 0 0 8px 0; color: #0f766e; }}
+    :root {{
+      --paper: #ffffff;
+      --ink: #1f2937;
+      --muted: #4b5563;
+      --accent: #0f766e;
+      --line: #d1d5db;
+    }}
+    @page {{ size: A4; margin: 16mm; }}
+        body {{ font-family: {body_font_stack}; color: var(--ink); font-size: 12px; line-height: 1.5; }}
+    h1 {{ font-size: 28px; margin: 0 0 4px 0; color: #0f172a; letter-spacing: 0.2px; }}
+    h2 {{ font-size: 18px; margin: 0 0 8px 0; color: var(--accent); border-left: 4px solid #8fd9cb; padding-left: 10px; }}
     h3 {{ font-size: 14px; margin: 0 0 6px 0; }}
     .page {{ page-break-after: always; }}
     .last {{ page-break-after: auto; }}
-    .meta {{ margin-top: 10px; }}
-    .meta p {{ margin: 4px 0; }}
-    .card {{ border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }}
+    .hero {{ border: 1px solid #cbe8e0; border-radius: 14px; background: linear-gradient(135deg, #f5fffc 0%, #eef7ff 100%); padding: 14px 16px; margin-bottom: 10px; }}
+    .subtitle {{ margin: 0; color: var(--muted); font-size: 13px; }}
+    .meta {{ margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; border-top: 1px dashed #b8d9d1; padding-top: 8px; }}
+    .meta p {{ margin: 2px 0; }}
+    .card {{ border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--paper); }}
         .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }}
     ul {{ margin: 6px 0 0 16px; padding: 0; }}
     li {{ margin: 2px 0; }}
-    .muted {{ color: #4b5563; }}
-        .brand {{ display: inline-block; font-size: 11px; color: #0f766e; border: 1px solid #99f6e4; background: #f0fdfa; border-radius: 999px; padding: 3px 10px; margin-bottom: 8px; }}
+    .muted {{ color: var(--muted); }}
+        .brand {{ display: inline-block; font-size: 11px; font-weight: bold; color: var(--accent); border: 1px solid #99f6e4; background: #f0fdfa; border-radius: 999px; padding: 3px 10px; margin-bottom: 8px; }}
         .closing-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }}
         .closing-card {{ border: 1px solid #bae6fd; border-radius: 10px; padding: 12px; background: #f8fafc; }}
         .closing-title {{ font-size: 15px; color: #0f172a; margin-bottom: 6px; }}
@@ -613,15 +622,17 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
 </head>
 <body>
   <section class='page'>
-        <div class='brand'>NextYou</div>
-        <h1>NextYou Report</h1>
-    <h2>Персональная карта карьерного перехода</h2>
-    <div class='meta'>
-      <p><b>Имя пользователя:</b> {escape(meta.user_name)}</p>
-      <p><b>Страна:</b> {escape(meta.country)}</p>
-      <p><b>Дата:</b> {escape(meta.created_at)}</p>
-      <p><b>Режим:</b> {escape(meta.mode)}</p>
-    </div>
+                <div class='hero'>
+                    <div class='brand'>NextYou</div>
+                    <h1>NextYou Report</h1>
+                    <p class='subtitle'>Персональная карта карьерного перехода</p>
+                    <div class='meta'>
+                        <p><b>Имя пользователя:</b> {escape(meta.user_name)}</p>
+                        <p><b>Страна:</b> {escape(meta.country)}</p>
+                        <p><b>Дата:</b> {escape(meta.created_at)}</p>
+                        <p><b>Режим:</b> {escape(meta.mode)}</p>
+                    </div>
+                </div>
   </section>
 
     <section class='page'>
