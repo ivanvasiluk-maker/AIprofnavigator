@@ -4484,6 +4484,7 @@ async def handle_route_selection_fallback(message: Message, state: FSMContext) -
 
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_RESULT_ACTIONS))
+@router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_RESULT_ACTIONS))
 async def handle_post_result_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
@@ -4588,16 +4589,11 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT}:
         await _track_event(message, state, "specialist_clicked", action=action)
+        request_id = _ensure_public_id(data, message)
+        await state.update_data(public_user_id=request_id)
         await _notify_specialist_request_owner(message, state, action)
         await state.set_state(CareerFlow.FINAL_READY)
-        await message.answer(t(lang, "specialist_contact_intro"), reply_markup=result_actions_keyboard())
-        if settings.specialist_telegram_url:
-            await message.answer(
-                settings.specialist_telegram_url,
-                reply_markup=telegram_link_keyboard("Написать в Telegram", settings.specialist_telegram_url),
-            )
-        else:
-            await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
+        await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=result_actions_keyboard())
         return
 
     if action in {RESULT_SUPPORT_GROUP, RESULT_GROUP_EXPLICIT}:

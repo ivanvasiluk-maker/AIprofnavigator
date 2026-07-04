@@ -923,7 +923,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "be": "",
     },
     "specialist_contact_intro": {
-        "ru": "Можете написать мне в Telegram, чтобы разобрать отчёт и следующий шаг.",
+        "ru": "Заявка на разбор принята (ID: {request_id}). Специалист свяжется с вами в этом чате.",
         "be": "",
     },
     "support_group_contact_intro": {

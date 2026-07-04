@@ -525,6 +525,7 @@ def skiller_reason_keyboard() -> ReplyKeyboardMarkup:
 
 def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_download: bool = False) -> ReplyKeyboardMarkup:
     rows = [
+        [KeyboardButton(text=RESULT_OPEN_FULL_REPORT)],
         [KeyboardButton(text=RESULT_START_FIRST_STEP)],
         [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
         [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
