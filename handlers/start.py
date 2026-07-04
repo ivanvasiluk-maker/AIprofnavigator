@@ -53,6 +53,45 @@ def _csv_rows_count(path: Path) -> int:
     return max(0, len(text.splitlines()) - 1)
 
 
+def _build_persistent_memory_context(bundle: dict) -> str:
+    profile_row = bundle.get("profile") if isinstance(bundle.get("profile"), dict) else {}
+    report_row = bundle.get("report") if isinstance(bundle.get("report"), dict) else {}
+    profile = profile_row.get("profile") if isinstance(profile_row.get("profile"), dict) else {}
+    report = report_row.get("report") if isinstance(report_row.get("report"), dict) else {}
+    lines: list[str] = []
+
+    answers_text = str(profile.get("answers_text") or "").strip()
+    if answers_text:
+        lines.append("Предыдущие ответы пользователя:")
+        lines.append(answers_text[:1400])
+
+    selected_barriers = profile.get("selected_barriers") if isinstance(profile.get("selected_barriers"), list) else []
+    if selected_barriers:
+        lines.append("Ранее выбранные барьеры: " + ", ".join(str(item).strip() for item in selected_barriers[:6] if str(item).strip()))
+
+    selected_fears = profile.get("selected_fears") if isinstance(profile.get("selected_fears"), list) else []
+    if selected_fears:
+        lines.append("Ранее выбранные страхи: " + ", ".join(str(item).strip() for item in selected_fears[:6] if str(item).strip()))
+
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    today = (report.get("action_plan") or {}).get("today") if isinstance((report.get("action_plan") or {}).get("today"), dict) else {}
+
+    prev_route = str(decision.get("recommended_main_path") or "").strip()
+    if prev_route:
+        lines.append("Предыдущий рекомендованный маршрут: " + prev_route)
+
+    prev_barrier = str(digital_human.get("main_barrier") or "").strip()
+    if prev_barrier:
+        lines.append("Главный барьер из предыдущего прогона: " + prev_barrier)
+
+    prev_step = str(today.get("action") or "").strip()
+    if prev_step:
+        lines.append("Предыдущий первый шаг: " + prev_step)
+
+    return "\n".join(lines).strip()[:3000]
+
+
 def _is_final_like_state(state_name: str) -> bool:
     low = str(state_name or "").strip().lower()
     return any(token in low for token in ["final_ready", "pdf_ready", "showing_details", "route_selection", "step_tracking"])
@@ -142,6 +181,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         message.from_user.id if message.from_user else message.chat.id,
         source_tag=source_tag,
     )
+    bundle = load_recovery_bundle(public_user_id)
+    memory_context = _build_persistent_memory_context(bundle)
     session_id = str(uuid.uuid4())
     await state.update_data(
         public_user_id=public_user_id,
@@ -161,6 +202,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         pace="normal",
         detail_preference="balanced",
         preferred_input="unknown",
+        memory_context=memory_context,
+        has_persistent_memory=bool(memory_context),
     )
     create_session(
         session_id,

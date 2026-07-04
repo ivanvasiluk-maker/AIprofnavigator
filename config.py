@@ -21,6 +21,7 @@ class Settings:
         self.analytics_events_log_path = os.getenv("ANALYTICS_EVENTS_LOG_PATH", "reports/behavior_events.jsonl").strip()
         self.analytics_excel_log_path = os.getenv("ANALYTICS_EXCEL_LOG_PATH", "reports/analytics_events.csv").strip()
         self.specialist_telegram_url = os.getenv("SPECIALIST_TELEGRAM_URL", "").strip()
+        self.specialist_notify_chat_id = os.getenv("SPECIALIST_NOTIFY_CHAT_ID", "").strip()
         self.support_group_telegram_url = os.getenv("SUPPORT_GROUP_TELEGRAM_URL", "").strip()
         self.app_db_path = os.getenv("APP_DB_PATH", "reports/app_data.sqlite3").strip()
 

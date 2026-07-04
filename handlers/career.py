@@ -233,6 +233,65 @@ def _resolve_pdf_report_path(data: dict) -> str:
     return _PDF_READY_BY_CHAT.get(chat_id, "")
 
 
+def _specialist_notify_target_chat_id() -> int | None:
+    raw = str(settings.specialist_notify_chat_id or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+async def _notify_specialist_request_owner(message: Message, state: FSMContext, action: str) -> None:
+    target_chat_id = _specialist_notify_target_chat_id()
+    if not target_chat_id:
+        return
+
+    data = await state.get_data()
+    public_user_id = _ensure_public_id(data, message)
+    user_id = str(message.from_user.id) if message.from_user else "unknown"
+    username = ("@" + message.from_user.username) if message.from_user and message.from_user.username else "-"
+    full_name = " ".join(
+        [
+            part
+            for part in [
+                message.from_user.first_name if message.from_user else "",
+                message.from_user.last_name if message.from_user else "",
+            ]
+            if part
+        ]
+    ).strip() or "-"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    text = (
+        "Новая заявка на разбор со специалистом\n\n"
+        f"public_user_id: {public_user_id}\n"
+        f"telegram_user_id: {user_id}\n"
+        f"username: {username}\n"
+        f"name: {full_name}\n"
+        f"action: {action}\n"
+        f"time_utc: {now_iso}"
+    )
+
+    try:
+        await message.bot.send_message(target_chat_id, text)
+        await _track_event(
+            message,
+            state,
+            "specialist_notify_sent",
+            action=action,
+            meta={"target_chat_id": target_chat_id},
+        )
+    except Exception as exc:
+        await _track_event(
+            message,
+            state,
+            "specialist_notify_failed",
+            action=action,
+            meta={"error": type(exc).__name__},
+        )
+
+
 async def _run_pdf_generation_background(
     *,
     bot,
@@ -3264,6 +3323,9 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         ]
         if reason_lines:
             answers_text = (answers_text + "\n\nПричины ключевых выборов:\n" + "\n".join(reason_lines)).strip()
+    memory_context = str(data.get("memory_context") or "").strip()
+    if memory_context:
+        answers_text = (answers_text + "\n\nКонтекст предыдущих сессий:\n" + memory_context).strip()
     user_mode = str(data.get("user_mode") or "calm_steps")
     decision_layers = _build_decision_layers(data, story_analysis, answers_text)
     report_generation_id = report_generation_id or str(uuid.uuid4())
@@ -3438,7 +3500,15 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         await message.answer(t(lang, "adaptive_transition_chaotic"))
 
     await message.answer(t(lang, "processing_story"))
-    analysis = await ai_client.analyze_story(clean, lang)
+    memory_context = str(data.get("memory_context") or "").strip()
+    analysis_input = clean
+    if memory_context:
+        analysis_input = (
+            clean
+            + "\n\nКонтекст из предыдущих сессий (использовать как вспомогательные факты, без подмены новой истории):\n"
+            + memory_context
+        )
+    analysis = await ai_client.analyze_story(analysis_input, lang)
     user_segment = _detect_user_segment(clean, analysis)
     q_count = _question_count_for_mode(selected_mode, data.get("max_questions"))
     analysis = _set_mvp_questions(
@@ -4512,6 +4582,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT}:
         await _track_event(message, state, "specialist_clicked", action=action)
+        await _notify_specialist_request_owner(message, state, action)
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "specialist_contact_intro"), reply_markup=result_actions_keyboard())
         if settings.specialist_telegram_url:
