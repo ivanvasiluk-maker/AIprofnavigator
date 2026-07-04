@@ -527,11 +527,15 @@ def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_
     rows = [
         [KeyboardButton(text=RESULT_OPEN_FULL_REPORT)],
         [KeyboardButton(text=RESULT_START_FIRST_STEP)],
+        [KeyboardButton(text=RESULT_DO_STEPS)],
         [KeyboardButton(text=RESULT_FIX_FACT_OR_PRIORITY)],
+        [KeyboardButton(text=RESULT_CLARIFY)],
         [KeyboardButton(text=RESULT_UPLOAD_OR_EDIT_RESUME)],
         [KeyboardButton(text=RESULT_ANALYZE_MARKET)],
+        [KeyboardButton(text=RESULT_KEYWORDS)],
         [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
         [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
+        [KeyboardButton(text=RESTART)],
     ]
     if include_pdf_download or include_docx_download:
         download_row = []
@@ -540,17 +544,6 @@ def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_
         if include_docx_download:
             download_row.append(KeyboardButton(text=RESULT_DOWNLOAD_DOCX))
         rows.append(download_row)
-    rows.extend(
-        [
-            [KeyboardButton(text=RESULT_DO_STEPS)],
-            [KeyboardButton(text=RESULT_CLARIFY)],
-            [KeyboardButton(text=RESULT_FIX_CV)],
-            [KeyboardButton(text=RESULT_KEYWORDS)],
-            [KeyboardButton(text=RESULT_SPECIALIST)],
-            [KeyboardButton(text=RESULT_SUPPORT_GROUP)],
-            [KeyboardButton(text=RESTART)],
-        ]
-    )
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
