@@ -168,6 +168,7 @@ _INTERVIEW_SOCIAL_DONE = "✅ Соцблок: готово"
 _INTERVIEW_ENERGY_DONE = "✅ Энергия: готово"
 _INTERVIEW_PRIORITIES_DONE = "✅ Приоритеты: готово"
 _INTERVIEW_INTEGRATION_DONE = "✅ Интеграция: готово"
+_BARRIER_GROUP_MAX_SELECT = 3
 
 
 def _resume_debug_log(message: Message, step: str, **fields: object) -> None:
@@ -2797,6 +2798,7 @@ async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext,
         return True
 
     await state.update_data(awaiting_extended_diagnostics_choice=True)
+    await _track_event(message, state, "extended_diag_offered", meta={"stage": "post_fast_questions"})
     await message.answer(t(lang, "extended_diag_offer"), reply_markup=extended_diagnostics_keyboard())
     return True
 
@@ -3241,6 +3243,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
     if bool(data.get("awaiting_extended_diagnostics_choice")):
         if clean == EXTENDED_DIAG_YES:
+            await _track_event(message, state, "extended_diag_selected", action="yes")
             analysis_ext = dict(data.get("story_analysis") or {})
             analysis_ext["follow_up_questions"] = _mandatory_psych_social_questions()
             await state.update_data(
@@ -3255,6 +3258,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             return
 
         if clean == EXTENDED_DIAG_SKIP:
+            await _track_event(message, state, "extended_diag_selected", action="skip")
             await state.update_data(awaiting_extended_diagnostics_choice=False, extended_diagnostics_done=True)
             await _start_barriers_module(message, state, lang)
             return
@@ -3714,7 +3718,15 @@ async def _save_barrier_choice(message: Message, state: FSMContext, choice: str)
     lang = _user_language(data)
     current_group = str(data.get("barrier_current_group") or BARRIER_GROUP_INTERNAL)
     selected = list(data.get("selected_psych_markers") or [])
+    group_options = set(_barrier_options_for_group(current_group))
+    group_selected_count = len([item for item in selected if item in group_options])
     already_selected = choice in selected
+    if not already_selected and group_selected_count >= _BARRIER_GROUP_MAX_SELECT:
+        await message.answer(
+            t(lang, "barriers_group_limit_reached", limit=_BARRIER_GROUP_MAX_SELECT),
+            reply_markup=barriers_group_keyboard(current_group),
+        )
+        return
     if not already_selected:
         selected.append(choice)
     await state.update_data(selected_psych_markers=selected, selected_barriers=selected)
