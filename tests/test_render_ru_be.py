@@ -198,6 +198,21 @@ class CareerGpsRenderTests(unittest.TestCase):
         result = _set_mvp_questions({"follow_up_questions": []}, limit=8, mode="calm_steps", story_text="", user_segment=SEGMENT_WORKER)
         self.assertEqual(len(result.get("follow_up_questions", [])), 8)
 
+    def test_set_mvp_questions_pins_required_diagnostics(self) -> None:
+        result = _set_mvp_questions(
+            {"follow_up_questions": []},
+            limit=8,
+            mode="calm_steps",
+            story_text="",
+            user_segment=SEGMENT_WORKER,
+        )
+        rows = result.get("follow_up_questions", [])
+        keys = {str(row.get("multi_key") or "").strip() for row in rows if isinstance(row, dict)}
+        self.assertIn("psych", keys)
+        self.assertIn("integration", keys)
+        self.assertIn("energy", keys)
+        self.assertIn("priorities", keys)
+
     def test_admin_profile_normalizes_generic_roles(self) -> None:
         story_analysis = {
             "current_identity": "Женщина с административным опытом, документооборотом и координацией процессов в Польше.",
@@ -265,6 +280,49 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertFalse(any("документ" in str(item).lower() for item in normalized["experience_layers"]))
         self.assertFalse(any("срок" in str(item).lower() for item in normalized["what_not_reset"]))
         self.assertIn("facts_only", normalized)
+
+    def test_align_report_enforces_segment_routes(self) -> None:
+        story_analysis = {
+            "current_identity": "Работал водителем и на складе",
+            "experience_snapshot": ["Логистика", "Склад"],
+        }
+        report = {
+            "digital_human": {"current_state": "", "previous_identity": ""},
+            "career_decision": {
+                "recommended_main_path": "",
+                "why_this_path": "",
+                "decision_summary": "",
+            },
+            "real_solutions": [],
+            "what_not_reset": [],
+            "experience_layers": [],
+            "action_plan": {"today": {"action": "", "timebox": "", "result": ""}},
+            "social_integration": {},
+            "facts_only": {
+                "explicit_facts": ["Опыт в логистике"],
+                "inferences": ["Похоже, есть прикладной операционный опыт."],
+                "unknowns": [],
+                "contradictions": [],
+            },
+        }
+
+        normalized = ai_client._align_report_with_story(
+            report,
+            story_analysis,
+            answers_text="",
+            decision_layers={},
+            user_segment="logistics_transport",
+            user_segment_label="Логистика и транспорт",
+        )
+
+        decision = normalized.get("career_decision", {})
+        self.assertIn("диспетчер", str(decision.get("recommended_main_path", "")).lower())
+        self.assertIn("сегмент", str(decision.get("decision_summary", "")).lower())
+        solutions = normalized.get("real_solutions", [])
+        self.assertGreaterEqual(len(solutions), 3)
+        self.assertIn("быстрый доход", str(solutions[0].get("recommendation_level", "")).lower())
+        self.assertIn("основной маршрут", str(solutions[1].get("recommendation_level", "")).lower())
+        self.assertIn("долгосрочная", str(solutions[2].get("recommendation_level", "")).lower())
 
     def test_final_report_chunks_render(self) -> None:
         report = {
@@ -903,6 +961,48 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(qa[1].get("question"), "Почему выбрана смена профессии")
         self.assertIn("мало денег", qa[1].get("answer", "").lower())
         start_barriers.assert_awaited_once()
+
+    async def test_fast_mode_forces_mandatory_diagnostics_phase(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "story_analysis": {
+                    "follow_up_questions": [
+                        {
+                            "id": 1,
+                            "question": "Короткий вопрос",
+                            "options": [],
+                            "expected_answer_type": "free_text",
+                            "semantic_intent": "main_goal",
+                        }
+                    ]
+                },
+                "qa_index": 0,
+                "qa_answers": [],
+                "user_mode": "fast",
+                "interaction_profile": {},
+                "interaction_turn": 0,
+                "mandatory_diagnostics_in_progress": False,
+                "mandatory_diagnostics_done": False,
+            },
+            current_state=CareerFlow.waiting_for_answers.state,
+        )
+        message = FakeMessage()
+
+        with patch("handlers.career._track_event", new=AsyncMock()):
+            with patch("handlers.career._start_barriers_module", new=AsyncMock()) as start_barriers:
+                await process_answers_input(message, state, "Ответ")
+
+        self.assertTrue(bool(state.data.get("mandatory_diagnostics_in_progress")))
+        self.assertFalse(bool(state.data.get("mandatory_diagnostics_done")))
+        self.assertEqual(state.data.get("qa_index"), 0)
+        follow_up = (state.data.get("story_analysis") or {}).get("follow_up_questions", [])
+        follow_up_keys = {str(item.get("multi_key") or "") for item in follow_up if isinstance(item, dict)}
+        self.assertIn("psych", follow_up_keys)
+        self.assertIn("integration", follow_up_keys)
+        self.assertIn("energy", follow_up_keys)
+        self.assertIn("priorities", follow_up_keys)
+        start_barriers.assert_not_awaited()
 
 
 if __name__ == "__main__":

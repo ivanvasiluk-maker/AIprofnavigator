@@ -1251,6 +1251,8 @@ class CareerOpenAIClient:
         selected_psych_markers: list[str] | None = None,
         selected_energy_sources: list[str] | None = None,
         selected_career_priorities: list[str] | None = None,
+        user_segment: str = "",
+        user_segment_label: str = "",
         language: str = "ru",
     ) -> dict[str, Any]:
         language = "be" if language == "be" else "ru"
@@ -1265,13 +1267,24 @@ class CareerOpenAIClient:
             selected_psych_markers=json.dumps(selected_psych_markers or [], ensure_ascii=False),
             selected_energy_sources=json.dumps(selected_energy_sources or [], ensure_ascii=False),
             selected_career_priorities=json.dumps(selected_career_priorities or [], ensure_ascii=False),
+            user_segment=str(user_segment or "").strip(),
+            user_segment_label=str(user_segment_label or "").strip(),
             facts_only_json=json.dumps(facts_only, ensure_ascii=False),
             answers=answers,
             language=language,
         )
         fallback = FINAL_REPORT_FALLBACK_BE if language == "be" else FINAL_REPORT_FALLBACK
         report = await self._run_json(prompt, fallback, FINAL_REPORT_SCHEMA, language)
-        return self._align_report_with_story(report, story_analysis, answers, story, facts_only, decision_layers)
+        return self._align_report_with_story(
+            report,
+            story_analysis,
+            answers,
+            story,
+            facts_only,
+            decision_layers,
+            user_segment=user_segment,
+            user_segment_label=user_segment_label,
+        )
 
     def _align_report_with_story(
         self,
@@ -1281,6 +1294,8 @@ class CareerOpenAIClient:
         story_text: str = "",
         facts_only: dict[str, Any] | None = None,
         decision_layers: dict[str, Any] | None = None,
+        user_segment: str = "",
+        user_segment_label: str = "",
     ) -> dict[str, Any]:
         if not isinstance(report, dict):
             return copy.deepcopy(FINAL_REPORT_FALLBACK)
@@ -1321,6 +1336,7 @@ class CareerOpenAIClient:
         self._ensure_competency_signals(report, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
         self._ensure_barrier_driven_today_action(report, answers_text)
+        self._enforce_segment_routes(report, user_segment, user_segment_label)
         normalized_layers = self._normalize_decision_layers(decision_layers)
         self._enforce_route_change_guardrails(report, story_analysis, answers_text, normalized_layers)
         self._sanitize_unconfirmed_claims(report, normalized_facts)
@@ -2023,6 +2039,116 @@ class CareerOpenAIClient:
                 action_plan["today"] = today
                 report["action_plan"] = action_plan
                 return
+
+    def _segment_route_pack(self, user_segment: str, user_segment_label: str) -> tuple[str, str, str, str]:
+        segment = str(user_segment or "").strip().lower()
+        label = str(user_segment_label or "").strip() or "Сегмент не уточнен"
+
+        packs: dict[str, tuple[str, str, str]] = {
+            "worker_production": (
+                "Быстрый доход: профильная роль по текущей квалификации (смена/участок)",
+                "Основной маршрут: рост до мастера смены / старшего участка",
+                "Долгосрочная стратегия: руководитель участка / производственный координатор",
+            ),
+            "service_care": (
+                "Быстрый доход: сервис/уход в роли с коротким входом",
+                "Основной маршрут: старший специалист сервиса/ухода",
+                "Долгосрочная стратегия: координатор ухода / управляющий сервисным блоком",
+            ),
+            "logistics_transport": (
+                "Быстрый доход: водитель/склад/доставка по текущим допускам",
+                "Основной маршрут: диспетчер / логист / старший смены склада",
+                "Долгосрочная стратегия: координатор перевозок / менеджер транспортного отдела",
+            ),
+            "office_staff": (
+                "Быстрый доход: Administrative Assistant / Back-office Specialist",
+                "Основной маршрут: Office Administrator / Operations Coordinator",
+                "Долгосрочная стратегия: руководитель офисных процессов / operations lead",
+            ),
+            "specialist_expert": (
+                "Быстрый доход: смежная экспертная роль с коротким входом",
+                "Основной маршрут: профильная экспертная позиция по ядру компетенций",
+                "Долгосрочная стратегия: senior/expert-track и масштаб ответственности",
+            ),
+            "leader": (
+                "Быстрый доход: роль team lead/координатора в близкой функции",
+                "Основной маршрут: руководитель направления/подразделения",
+                "Долгосрочная стратегия: head/director-track",
+            ),
+            "entrepreneur": (
+                "Быстрый доход: гибридный трек найм + монетизация экспертных услуг",
+                "Основной маршрут: устойчивый микро-бизнес/консалтинг в новой стране",
+                "Долгосрочная стратегия: масштабирование бизнеса и партнерская модель",
+            ),
+        }
+        quick, main, long_term = packs.get(
+            segment,
+            packs["specialist_expert"],
+        )
+        return quick, main, long_term, label
+
+    def _enforce_segment_routes(self, report: dict[str, Any], user_segment: str, user_segment_label: str) -> None:
+        quick_route, main_route, long_route, label = self._segment_route_pack(user_segment, user_segment_label)
+
+        solutions = report.get("real_solutions") if isinstance(report.get("real_solutions"), list) else []
+        if len(solutions) < 3:
+            solutions = []
+        normalized_solutions: list[dict[str, Any]] = []
+        defaults = [
+            {
+                "title": quick_route,
+                "recommendation_level": "быстрый доход",
+                "success_probability": "средняя",
+                "timeline": "2-8 недель",
+                "why": "Маршрут опирается на текущие подтвержденные навыки и снижает риск долгого простоя.",
+                "first_step": "Собрать 10 релевантных вакансий/заказов и отправить 3 прицельных отклика.",
+            },
+            {
+                "title": main_route,
+                "recommendation_level": "основной маршрут развития",
+                "success_probability": "средняя",
+                "timeline": "2-6 месяцев",
+                "why": "Маршрут закрепляет сегментный профиль и дает устойчивую траекторию роста.",
+                "first_step": "Определить 3 критичных требования рынка и закрыть их в течение 14 дней.",
+            },
+            {
+                "title": long_route,
+                "recommendation_level": "долгосрочная стратегия",
+                "success_probability": "средняя",
+                "timeline": "6-18 месяцев",
+                "why": "Маршрут масштабирует доход и ответственность после стабилизации.",
+                "first_step": "Сформировать план развития компетенций и сети контактов на 90 дней.",
+            },
+        ]
+
+        for idx in range(3):
+            if idx < len(solutions) and isinstance(solutions[idx], dict):
+                row = dict(solutions[idx])
+                row["title"] = defaults[idx]["title"]
+                row["recommendation_level"] = defaults[idx]["recommendation_level"]
+                if not str(row.get("why") or "").strip():
+                    row["why"] = defaults[idx]["why"]
+                if not str(row.get("first_step") or "").strip():
+                    row["first_step"] = defaults[idx]["first_step"]
+                if not str(row.get("timeline") or "").strip():
+                    row["timeline"] = defaults[idx]["timeline"]
+                if not str(row.get("success_probability") or "").strip():
+                    row["success_probability"] = defaults[idx]["success_probability"]
+                normalized_solutions.append(row)
+            else:
+                normalized_solutions.append(dict(defaults[idx]))
+
+        report["real_solutions"] = normalized_solutions
+
+        decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+        decision["recommended_main_path"] = str(decision.get("recommended_main_path") or main_route)
+        if not str(decision.get("why_this_path") or "").strip():
+            decision["why_this_path"] = "Решение закреплено по вашему сегменту, текущим ограничениям и приоритету устойчивого дохода."
+        summary = str(decision.get("decision_summary") or "").strip()
+        segment_note = f"Сегмент: {label}."
+        if segment_note not in summary:
+            decision["decision_summary"] = f"{segment_note} {summary}".strip()
+        report["career_decision"] = decision
 
     def _ensure_strategy_mode(self, report: dict[str, Any]) -> None:
         digital_human = report.get("digital_human")

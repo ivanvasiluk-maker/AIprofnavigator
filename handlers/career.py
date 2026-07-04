@@ -169,6 +169,7 @@ _INTERVIEW_ENERGY_DONE = "✅ Энергия: готово"
 _INTERVIEW_PRIORITIES_DONE = "✅ Приоритеты: готово"
 _INTERVIEW_INTEGRATION_DONE = "✅ Интеграция: готово"
 _BARRIER_GROUP_MAX_SELECT = 3
+_HARD_REQUIRED_MULTI_KEYS = {"psych", "integration", "energy", "priorities"}
 
 
 def _resume_debug_log(message: Message, step: str, **fields: object) -> None:
@@ -1393,6 +1394,79 @@ def _mandatory_psych_social_questions() -> list[dict[str, object]]:
     ]
 
 
+def _required_diagnostic_questions() -> list[dict[str, object]]:
+    required: list[dict[str, object]] = []
+    for row in _mandatory_psych_social_questions():
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("multi_key") or "").strip()
+        if key in _HARD_REQUIRED_MULTI_KEYS:
+            required.append(dict(row))
+    return required
+
+
+def _ensure_required_blocks(normalized: list[dict[str, object]], mode_key: str) -> list[dict[str, object]]:
+    if mode_key == "fast":
+        return normalized
+    required_rows = _required_diagnostic_questions()
+    if not required_rows:
+        return normalized
+
+    required_by_key = {
+        str(row.get("multi_key") or "").strip(): row
+        for row in required_rows
+        if isinstance(row, dict) and str(row.get("multi_key") or "").strip()
+    }
+
+    existing_by_key = {
+        str(row.get("multi_key") or "").strip(): idx
+        for idx, row in enumerate(normalized)
+        if isinstance(row, dict) and str(row.get("multi_key") or "").strip()
+    }
+
+    for key in _HARD_REQUIRED_MULTI_KEYS:
+        if key in existing_by_key:
+            continue
+
+        replacement = required_by_key.get(key)
+        if not replacement:
+            continue
+        replacement_row = dict(replacement)
+        q_text = str(replacement_row.get("question") or "").strip() or f"Вопрос {len(normalized) + 1}"
+        opts = replacement_row.get("options", []) if isinstance(replacement_row.get("options", []), list) else []
+        replacement_row.setdefault("question", q_text)
+        replacement_row.setdefault("options", [str(item).strip() for item in opts if str(item).strip()])
+        replacement_row.setdefault("question_id", _slugify(q_text))
+        replacement_row.setdefault("allowed_button_ids", [])
+        replacement_row.setdefault("allowed_button_map", {})
+        replacement_row.setdefault("expected_answer_type", _expected_answer_type(replacement_row))
+        replacement_row.setdefault("semantic_intent", _question_semantic_intent(q_text))
+        replacement_row.setdefault("source", "hard_required")
+        replacement_row.setdefault("validity_status", "needs_confirmation")
+
+        inserted = False
+        for idx in range(len(normalized) - 1, -1, -1):
+            row = normalized[idx]
+            row_key = str(row.get("multi_key") or "").strip()
+            if row_key not in _HARD_REQUIRED_MULTI_KEYS:
+                normalized[idx] = replacement_row
+                inserted = True
+                break
+        if not inserted:
+            normalized.append(replacement_row)
+
+    deduped: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+    for row in normalized:
+        row_key = str(row.get("multi_key") or "").strip()
+        if row_key in _HARD_REQUIRED_MULTI_KEYS:
+            if row_key in seen_keys:
+                continue
+            seen_keys.add(row_key)
+        deduped.append(row)
+    return deduped
+
+
 def _extract_int_values(text: str) -> list[int]:
     compact = re.sub(r"[^0-9]", " ", text or "")
     values: list[int] = []
@@ -1715,7 +1789,12 @@ def _set_mvp_questions(
             normalized_row["force_options_keyboard"] = True
         normalized.append(normalized_row)
 
-    updated["follow_up_questions"] = normalized[:effective_limit]
+    normalized = _ensure_required_blocks(normalized[:effective_limit], mode_key)
+    if len(normalized) > effective_limit:
+        normalized = normalized[:effective_limit]
+    for idx, row in enumerate(normalized, start=1):
+        row["id"] = idx
+    updated["follow_up_questions"] = normalized
     return updated
 
 
@@ -2222,6 +2301,8 @@ async def _rebuild_report_with_note(message: Message, state: FSMContext, lang: s
         selected_psych_markers=data.get("selected_psych_markers") or [],
         selected_energy_sources=data.get("selected_energy_sources") or [],
         selected_career_priorities=data.get("selected_career_priorities") or [],
+        user_segment=str(data.get("user_segment") or ""),
+        user_segment_label=str(data.get("user_segment_label") or ""),
         language=lang,
     )
     chunks = report_chunks(report, lang)
@@ -2792,15 +2873,38 @@ async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext,
     user_mode = str(data.get("user_mode") or "calm_steps")
     if user_mode != "fast":
         return False
-    if bool(data.get("extended_diagnostics_done")):
+    if bool(data.get("mandatory_diagnostics_done")):
         return False
-    if bool(data.get("awaiting_extended_diagnostics_choice")):
+    if bool(data.get("mandatory_diagnostics_in_progress")):
         return True
 
-    await state.update_data(awaiting_extended_diagnostics_choice=True)
-    await _track_event(message, state, "extended_diag_offered", meta={"stage": "post_fast_questions"})
-    await message.answer(t(lang, "extended_diag_offer"), reply_markup=extended_diagnostics_keyboard())
+    analysis_ext = dict(data.get("story_analysis") or {})
+    analysis_ext["follow_up_questions"] = _mandatory_psych_social_questions()
+    await state.update_data(
+        story_analysis=analysis_ext,
+        qa_index=0,
+        awaiting_extended_diagnostics_choice=False,
+        mandatory_diagnostics_in_progress=True,
+        mandatory_diagnostics_done=False,
+        extended_diagnostics_done=True,
+    )
+    await _track_event(message, state, "extended_diag_forced_start", meta={"stage": "post_fast_questions"})
+    await message.answer(t(lang, "extended_diag_started"))
+    await message.answer(_question_prompt(analysis_ext, 0, lang), reply_markup=_question_reply_markup(analysis_ext, 0))
+    await _track_event(message, state, "question_shown", meta={"question_index": 1, "question_id": 1, "stage": "extended_forced"})
     return True
+
+
+async def _advance_after_questions(message: Message, state: FSMContext, lang: str) -> None:
+    data = await state.get_data()
+    if bool(data.get("mandatory_diagnostics_in_progress")):
+        await state.update_data(mandatory_diagnostics_in_progress=False, mandatory_diagnostics_done=True)
+        await _track_event(message, state, "extended_diag_forced_completed", meta={"stage": "post_fast_questions"})
+        await _start_barriers_module(message, state, lang)
+        return
+    if await _maybe_offer_extended_diagnostics(message, state, lang):
+        return
+    await _start_barriers_module(message, state, lang)
 
 
 async def _start_questions_module(message: Message, state: FSMContext, lang: str) -> None:
@@ -2852,6 +2956,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         selected_choice_reasons={},
         pending_choice_reason={},
         awaiting_extended_diagnostics_choice=False,
+        mandatory_diagnostics_in_progress=False,
+        mandatory_diagnostics_done=False,
         extended_diagnostics_done=False,
         promised_question_count=q_count,
     )
@@ -2991,6 +3097,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             selected_psych_markers=selected_psych_markers,
             selected_energy_sources=energy_sources,
             selected_career_priorities=career_priorities,
+            user_segment=str(data.get("user_segment") or ""),
+            user_segment_label=str(data.get("user_segment_label") or ""),
             language=lang,
         )
         if isinstance(resume_analysis, dict) and resume_analysis:
@@ -3029,6 +3137,20 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         session_id=session_id,
     )
     await _track_event(message, state, "report_generated", meta={"has_income_signal": _has_income_signal(report)})
+    await _track_event(
+        message,
+        state,
+        "report_profile_snapshot",
+        meta={
+            "user_segment": str(data.get("user_segment") or ""),
+            "user_segment_label": str(data.get("user_segment_label") or ""),
+            "resource_level": str(report.get("resource_level") or ""),
+            "integration_level": str(report.get("integration_level") or ""),
+            "recommended_main_path": str((report.get("career_decision") or {}).get("recommended_main_path") or ""),
+            "energy_sources": list((report.get("energy_sources") or [])[:5]) if isinstance(report.get("energy_sources"), list) else [],
+            "career_priorities": list((report.get("career_priorities") or [])[:4]) if isinstance(report.get("career_priorities"), list) else [],
+        },
+    )
     await _send_final_map_bundle(message, state, lang, report)
 
 
@@ -3250,6 +3372,8 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 story_analysis=analysis_ext,
                 qa_index=0,
                 awaiting_extended_diagnostics_choice=False,
+                mandatory_diagnostics_in_progress=True,
+                mandatory_diagnostics_done=False,
                 extended_diagnostics_done=True,
             )
             await message.answer(t(lang, "extended_diag_started"))
@@ -3259,8 +3383,13 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
         if clean == EXTENDED_DIAG_SKIP:
             await _track_event(message, state, "extended_diag_selected", action="skip")
-            await state.update_data(awaiting_extended_diagnostics_choice=False, extended_diagnostics_done=True)
-            await _start_barriers_module(message, state, lang)
+            await state.update_data(
+                awaiting_extended_diagnostics_choice=False,
+                mandatory_diagnostics_in_progress=False,
+                mandatory_diagnostics_done=True,
+                extended_diagnostics_done=True,
+            )
+            await _advance_after_questions(message, state, lang)
             return
 
         await message.answer(t(lang, "extended_diag_choice_required"), reply_markup=extended_diagnostics_keyboard())
@@ -3304,9 +3433,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 if isinstance(row, dict)
             )
             await state.update_data(answers_text=merged_answers)
-            if await _maybe_offer_extended_diagnostics(message, state, lang):
-                return
-            await _start_barriers_module(message, state, lang)
+            await _advance_after_questions(message, state, lang)
             return
         await state.update_data(pending_question_append={})
 
@@ -3486,9 +3613,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     if isinstance(row, dict)
                 )
                 await state.update_data(answers_text=merged_answers)
-                if await _maybe_offer_extended_diagnostics(message, state, lang):
-                    return
-                await _start_barriers_module(message, state, lang)
+                await _advance_after_questions(message, state, lang)
                 return
 
             if clean in options:
@@ -3599,15 +3724,11 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             if isinstance(row, dict)
         )
         await state.update_data(answers_text=merged_answers)
-        if await _maybe_offer_extended_diagnostics(message, state, lang):
-            return
-        await _start_barriers_module(message, state, lang)
+        await _advance_after_questions(message, state, lang)
         return
 
     await state.update_data(answers_text=clean)
-    if await _maybe_offer_extended_diagnostics(message, state, lang):
-        return
-    await _start_barriers_module(message, state, lang)
+    await _advance_after_questions(message, state, lang)
 
 
 @router.message(CareerFlow.waiting_for_resume_decision, F.text.in_(ALL_RESUME_SKIP))
@@ -4018,9 +4139,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         if isinstance(row, dict)
     )
     await state.update_data(answers_text=merged_answers)
-    if await _maybe_offer_extended_diagnostics(message, state, lang):
-        return
-    await _start_barriers_module(message, state, lang)
+    await _advance_after_questions(message, state, lang)
 
 
 @router.message(CareerFlow.waiting_for_answers, F.text)
@@ -4529,6 +4648,8 @@ async def process_route_changes_input(message: Message, state: FSMContext, text:
             selected_psych_markers=data.get("selected_psych_markers") or [],
             selected_energy_sources=data.get("selected_energy_sources") or [],
             selected_career_priorities=data.get("selected_career_priorities") or [],
+            user_segment=str(data.get("user_segment") or ""),
+            user_segment_label=str(data.get("user_segment_label") or ""),
             language=lang,
         )
     except Exception as exc:

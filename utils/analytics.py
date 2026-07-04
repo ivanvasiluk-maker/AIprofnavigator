@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -35,6 +36,10 @@ def _registry_path() -> Path:
 
 def _events_log_path() -> Path:
     return Path(settings.analytics_events_log_path)
+
+
+def _excel_log_path() -> Path:
+    return Path(settings.analytics_excel_log_path)
 
 
 def _read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
@@ -139,10 +144,47 @@ def _append_local_event(payload: dict[str, Any]) -> None:
         fh.write(line + "\n")
 
 
-def _send_to_google_sheets(payload: dict[str, Any]) -> None:
+def _append_excel_event(payload: dict[str, Any]) -> None:
+    path = _excel_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = path.exists()
+    headers = [
+        "timestamp",
+        "public_user_id",
+        "event",
+        "state",
+        "action",
+        "user_mode",
+        "language",
+        "days_since_first_seen",
+        "session_id",
+        "meta_json",
+        "sheets_delivery",
+    ]
+    row = {
+        "timestamp": str(payload.get("timestamp") or ""),
+        "public_user_id": str(payload.get("public_user_id") or ""),
+        "event": str(payload.get("event") or ""),
+        "state": str(payload.get("state") or ""),
+        "action": str(payload.get("action") or ""),
+        "user_mode": str(payload.get("user_mode") or ""),
+        "language": str(payload.get("language") or ""),
+        "days_since_first_seen": str(payload.get("days_since_first_seen") or ""),
+        "session_id": str(payload.get("session_id") or ""),
+        "meta_json": json.dumps(payload.get("meta") or {}, ensure_ascii=False),
+        "sheets_delivery": str(payload.get("sheets_delivery") or ""),
+    }
+    with path.open("a", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=headers)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def _send_to_google_sheets(payload: dict[str, Any]) -> bool:
     url = settings.google_sheets_webhook_url
     if not url:
-        return
+        return False
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = request.Request(
         url=url,
@@ -152,9 +194,9 @@ def _send_to_google_sheets(payload: dict[str, Any]) -> None:
     )
     try:
         with request.urlopen(req, timeout=4):
-            return
+            return True
     except (error.URLError, TimeoutError, ValueError):
-        return
+        return False
 
 
 def log_behavior_event_sync(
@@ -177,9 +219,13 @@ def log_behavior_event_sync(
         "user_mode": (user_mode or "").strip(),
         "language": (language or "ru").strip(),
         "days_since_first_seen": days_since_first_seen(public_user_id),
+        "session_id": (session_id or "").strip(),
         "meta": meta or {},
     }
     _append_local_event(payload)
+    sheets_delivery = _send_to_google_sheets(payload)
+    payload["sheets_delivery"] = "ok" if sheets_delivery else "failed_or_disabled"
+    _append_excel_event(payload)
     record_event(
         public_user_id=public_user_id,
         event=(event or "unknown").strip(),
@@ -191,7 +237,6 @@ def log_behavior_event_sync(
         session_id=(session_id or "").strip(),
         timestamp=str(payload.get("timestamp") or ""),
     )
-    _send_to_google_sheets(payload)
 
 
 async def log_behavior_event(
