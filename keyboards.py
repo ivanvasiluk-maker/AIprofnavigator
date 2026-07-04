@@ -136,6 +136,8 @@ STEP_OTHER_STEP = "Другой шаг"
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 RESULT_DOWNLOAD_DOCX = "📝 Скачать DOCX"
 QUESTION_ADD_TEXT = "✍️ Дополнить"
+EXTENDED_DIAG_YES = "🧩 Пройти расширенную диагностику"
+EXTENDED_DIAG_SKIP = "➡️ Продолжить без неё"
 ANSWER_RETRY = "✍️ Ответить заново"
 ANSWER_SKIP = "⏭️ Пропустить этот вопрос"
 ANSWER_KEEP = "✅ Оставить как есть"
@@ -230,6 +232,7 @@ ALL_SUPPORT_MULTI_ACTIONS = set(SUPPORT_OPTIONS) | {SUPPORT_DONE}
 ALL_RESUME_UPLOAD = {RESUME_UPLOAD, RESUME_SEND}
 ALL_RESUME_SKIP = {RESUME_SKIP, RESUME_CONTINUE}
 ALL_STORY_CONFIRM_ACTIONS = {STORY_CONFIRM_OK, STORY_CONFIRM_FIX}
+ALL_EXTENDED_DIAG_ACTIONS = {EXTENDED_DIAG_YES, EXTENDED_DIAG_SKIP}
 ALL_PSYCH_BARRIER_OPTIONS = set(PSYCH_BARRIER_OPTIONS)
 ALL_PSYCH_BARRIER_DONE = {PSYCH_BARRIER_DONE}
 ALL_PSYCH_GROUP_OPTIONS = {BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE, BARRIER_GROUP_MORE, PSYCH_SKIP}
@@ -346,6 +349,16 @@ def input_method_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=INPUT_TEXT)],
             [KeyboardButton(text=INPUT_VOICE)],
             [KeyboardButton(text=INPUT_DONT_KNOW)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def extended_diagnostics_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=EXTENDED_DIAG_YES)],
+            [KeyboardButton(text=EXTENDED_DIAG_SKIP)],
         ],
         resize_keyboard=True,
     )

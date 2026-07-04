@@ -54,6 +54,8 @@ from keyboards import (
     RESULT_DOWNLOAD_PDF,
     RESULT_DOWNLOAD_DOCX,
     QUESTION_ADD_TEXT,
+    EXTENDED_DIAG_YES,
+    EXTENDED_DIAG_SKIP,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_OPEN_FULL_REPORT,
@@ -119,6 +121,7 @@ from keyboards import (
     interview_support_keyboard,
     interview_work_format_keyboard,
     input_method_keyboard,
+    extended_diagnostics_keyboard,
     question_options_keyboard,
     result_actions_keyboard,
     self_exploration_keyboard,
@@ -2738,6 +2741,21 @@ async def _start_barriers_module(message: Message, state: FSMContext, lang: str)
     await message.answer(t(lang, "barriers_prompt"), reply_markup=barriers_keyboard())
 
 
+async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext, lang: str) -> bool:
+    data = await state.get_data()
+    user_mode = str(data.get("user_mode") or "calm_steps")
+    if user_mode != "fast":
+        return False
+    if bool(data.get("extended_diagnostics_done")):
+        return False
+    if bool(data.get("awaiting_extended_diagnostics_choice")):
+        return True
+
+    await state.update_data(awaiting_extended_diagnostics_choice=True)
+    await message.answer(t(lang, "extended_diag_offer"), reply_markup=extended_diagnostics_keyboard())
+    return True
+
+
 async def _start_questions_module(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
     story_text = (data.get("story_text") or "").strip()
@@ -2786,6 +2804,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         priorities_selected=[],
         selected_choice_reasons={},
         pending_choice_reason={},
+        awaiting_extended_diagnostics_choice=False,
+        extended_diagnostics_done=False,
         promised_question_count=q_count,
     )
 
@@ -3174,6 +3194,29 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
         await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
         return
 
+    if bool(data.get("awaiting_extended_diagnostics_choice")):
+        if clean == EXTENDED_DIAG_YES:
+            analysis_ext = dict(data.get("story_analysis") or {})
+            analysis_ext["follow_up_questions"] = _mandatory_psych_social_questions()
+            await state.update_data(
+                story_analysis=analysis_ext,
+                qa_index=0,
+                awaiting_extended_diagnostics_choice=False,
+                extended_diagnostics_done=True,
+            )
+            await message.answer(t(lang, "extended_diag_started"))
+            await message.answer(_question_prompt(analysis_ext, 0, lang), reply_markup=_question_reply_markup(analysis_ext, 0))
+            await _track_event(message, state, "question_shown", meta={"question_index": 1, "question_id": 1, "stage": "extended_fast"})
+            return
+
+        if clean == EXTENDED_DIAG_SKIP:
+            await state.update_data(awaiting_extended_diagnostics_choice=False, extended_diagnostics_done=True)
+            await _start_barriers_module(message, state, lang)
+            return
+
+        await message.answer(t(lang, "extended_diag_choice_required"), reply_markup=extended_diagnostics_keyboard())
+        return
+
     if pending_append:
         append_index = int(pending_append.get("index", -1))
         if append_index == qa_index and questions and qa_index < len(questions):
@@ -3212,6 +3255,8 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 if isinstance(row, dict)
             )
             await state.update_data(answers_text=merged_answers)
+            if await _maybe_offer_extended_diagnostics(message, state, lang):
+                return
             await _start_barriers_module(message, state, lang)
             return
         await state.update_data(pending_question_append={})
@@ -3392,6 +3437,8 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     if isinstance(row, dict)
                 )
                 await state.update_data(answers_text=merged_answers)
+                if await _maybe_offer_extended_diagnostics(message, state, lang):
+                    return
                 await _start_barriers_module(message, state, lang)
                 return
 
@@ -3503,10 +3550,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             if isinstance(row, dict)
         )
         await state.update_data(answers_text=merged_answers)
+        if await _maybe_offer_extended_diagnostics(message, state, lang):
+            return
         await _start_barriers_module(message, state, lang)
         return
 
     await state.update_data(answers_text=clean)
+    if await _maybe_offer_extended_diagnostics(message, state, lang):
+        return
     await _start_barriers_module(message, state, lang)
 
 
@@ -3715,6 +3766,8 @@ async def restart_flow(message: Message, state: FSMContext) -> None:
         pending_answer_review={},
         selected_choice_reasons={},
         pending_choice_reason={},
+        awaiting_extended_diagnostics_choice=False,
+        extended_diagnostics_done=False,
         reminder_due_at="",
     )
     await state.set_state(CareerFlow.WAITING_STORY)
@@ -3899,6 +3952,8 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         if isinstance(row, dict)
     )
     await state.update_data(answers_text=merged_answers)
+    if await _maybe_offer_extended_diagnostics(message, state, lang):
+        return
     await _start_barriers_module(message, state, lang)
 
 
