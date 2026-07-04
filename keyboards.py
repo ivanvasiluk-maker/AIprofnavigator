@@ -135,6 +135,7 @@ STEP_OTHER_STEP = "Другой шаг"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 RESULT_DOWNLOAD_DOCX = "📝 Скачать DOCX"
+QUESTION_ADD_TEXT = "✍️ Дополнить"
 ANSWER_RETRY = "✍️ Ответить заново"
 ANSWER_SKIP = "⏭️ Пропустить этот вопрос"
 ANSWER_KEEP = "✅ Оставить как есть"
@@ -418,6 +419,8 @@ def question_options_keyboard(options: list[str]) -> ReplyKeyboardMarkup | None:
 
     if done_options:
         rows.append([KeyboardButton(text=done_options[0])])
+
+    rows.append([KeyboardButton(text=QUESTION_ADD_TEXT)])
 
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 

@@ -53,6 +53,7 @@ from keyboards import (
     RESULT_DO_STEPS,
     RESULT_DOWNLOAD_PDF,
     RESULT_DOWNLOAD_DOCX,
+    QUESTION_ADD_TEXT,
     RESULT_FIX_CV,
     RESULT_KEYWORDS,
     RESULT_OPEN_FULL_REPORT,
@@ -140,7 +141,7 @@ from openai_client import ai_client
 from states import CareerFlow
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
-from utils.reporting import build_telegram_summary, generate_pdf_report
+from utils.reporting import build_telegram_summary, generate_docx_report_file, generate_pdf_report
 from utils.reporting import generate_html_report_file, generate_pdf_from_html_file_with_error
 
 router = Router()
@@ -245,10 +246,15 @@ async def _run_pdf_generation_background(
             _PDF_READY_BY_CHAT[chat_id] = pdf_path_str
             if report_generation_id:
                 update_report_files(report_generation_id, pdf_report_path=pdf_path_str)
+            await bot.send_document(
+                chat_id,
+                FSInputFile(pdf_path_str),
+                caption=t(lang, "pdf_send_caption"),
+            )
             await bot.send_message(
                 chat_id,
                 t(lang, "pdf_ready_download"),
-                reply_markup=result_actions_keyboard(include_pdf_download=True),
+                reply_markup=route_choice_keyboard(),
             )
             return
 
@@ -2475,11 +2481,10 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     await state.set_state(CareerFlow.FINAL_READY)
-    await message.answer(t(lang, "contract_anchor"), reply_markup=result_actions_keyboard())
-    await message.answer(t(lang, "final_short_intro"), reply_markup=result_actions_keyboard())
-    await _answer_safe(message, build_telegram_summary(report), reply_markup=result_actions_keyboard())
-    await message.answer(t(lang, "post_result_scenarios_intro"), reply_markup=result_actions_keyboard())
-    await message.answer(t(lang, "map_validation_block"), reply_markup=map_validation_keyboard())
+    await message.answer(t(lang, "contract_anchor"), reply_markup=route_choice_keyboard())
+    await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
+    await _answer_safe(message, build_telegram_summary(report), reply_markup=route_choice_keyboard())
+    await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
 
     pdf_report_path = ""
     html_report_path = ""
@@ -2505,7 +2510,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 t(lang, "web_report_ready"),
                 reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
             )
-        await message.answer(t(lang, "pdf_generation_started"), reply_markup=result_actions_keyboard(include_pdf_download=True, include_docx_download=True))
+        await message.answer(t(lang, "pdf_generation_started"), reply_markup=route_choice_keyboard())
 
         _cancel_pdf_task(message.chat.id)
         _PDF_READY_BY_CHAT.pop(message.chat.id, None)
@@ -2518,11 +2523,15 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 report_generation_id=report_generation_id,
             )
         )
-        # Generate DOCX in background as well
-        from utils.reporting import generate_docx_report_file
+        # Generate DOCX and send it immediately if ready.
         docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
         if docx_path:
             docx_report_path = str(docx_path)
+            await message.answer_document(
+                FSInputFile(docx_report_path),
+                caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
+                reply_markup=route_choice_keyboard(),
+            )
     except Exception:
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
@@ -3131,6 +3140,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
     qa_index = int(data.get("qa_index", 0))
     qa_answers = list(data.get("qa_answers") or [])
     pending_review = data.get("pending_answer_review") or {}
+    pending_append = data.get("pending_question_append") if isinstance(data.get("pending_question_append"), dict) else {}
     interaction_profile = dict(data.get("interaction_profile") or {})
     user_mode = str(data.get("user_mode") or "calm_steps")
     quick_report_after_questions = bool(data.get("quick_report_after_questions"))
@@ -3152,6 +3162,51 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
     if pending_review:
         await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
         return
+
+    if pending_append:
+        append_index = int(pending_append.get("index", -1))
+        if append_index == qa_index and questions and qa_index < len(questions):
+            current = questions[qa_index]
+            question_text = current.get("question", f"Вопрос {qa_index + 1}") if isinstance(current, dict) else str(current)
+            current_q_id = _question_id(current, qa_index)
+            if isinstance(current, dict) and current.get("multi_key"):
+                multi_key = str(current.get("multi_key") or "").strip()
+                selected_key = f"{multi_key}_selected"
+                selected_values = list(data.get(selected_key) or [])
+                if clean not in selected_values:
+                    selected_values.append(clean)
+                await state.update_data(**{selected_key: selected_values, "pending_question_append": {}})
+                await message.answer(
+                    t(
+                        lang,
+                        "multi_select_selected",
+                        count=len(selected_values),
+                        items=_selection_to_text(selected_values),
+                        done=str(current.get("done_text") or "✅ Готово"),
+                    ),
+                    reply_markup=_question_reply_markup(analysis, qa_index),
+                )
+                return
+
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean})
+            qa_index += 1
+            await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={}, pending_question_append={})
+            if qa_index < len(questions):
+                await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+                return
+
+            merged_answers = "\n".join(
+                f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
+                for idx, row in enumerate(qa_answers)
+                if isinstance(row, dict)
+            )
+            await state.update_data(answers_text=merged_answers)
+            if quick_report_after_questions or user_mode == "fast":
+                await _build_and_send_report(message, state, lang)
+                return
+            await _start_barriers_module(message, state, lang)
+            return
+        await state.update_data(pending_question_append={})
 
     pending_choice_reason = data.get("pending_choice_reason") if isinstance(data.get("pending_choice_reason"), dict) else {}
     if pending_choice_reason:
@@ -3183,6 +3238,11 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
         question_text = current.get("question", f"Вопрос {qa_index + 1}") if isinstance(current, dict) else str(current)
         current_options = current.get("options", []) if isinstance(current, dict) and isinstance(current.get("options", []), list) else []
         current_options_low = {str(item).strip().lower() for item in current_options if str(item).strip()}
+
+        if clean == QUESTION_ADD_TEXT:
+            await state.update_data(pending_question_append={"index": qa_index, "question_id": current_q_id})
+            await message.answer(t(lang, "answer_add_prompt"), reply_markup=input_method_keyboard())
+            return
 
         # Reject stale button answers from previous questions and require explicit confirmation.
         if clean.lower() not in current_options_low and _is_known_previous_button(questions, qa_index, clean):
@@ -3855,6 +3915,7 @@ async def handle_answers_text(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CareerFlow.ROUTE_SELECTION, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
+@router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
 async def handle_route_selection_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
@@ -3892,7 +3953,7 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
             action=action,
             meta={"selected_route": selected_route or ""},
         )
-        await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=result_actions_keyboard())
+        await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
         await _send_final_map_bundle(message, state, lang, report)
         return
 
@@ -3913,7 +3974,7 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
         action=action,
         meta={"selected_route": selected_route or ""},
     )
-    await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
     await _send_final_map_bundle(message, state, lang, report)
 
 
