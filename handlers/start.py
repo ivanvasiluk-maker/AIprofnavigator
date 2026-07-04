@@ -2,8 +2,10 @@ from aiogram import F, Router
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from pathlib import Path
 import uuid
 
+from config import settings
 from keyboards import (
     ALL_PACE_OPTIONS,
     ALL_VOICE_PACE_OPTIONS,
@@ -28,6 +30,27 @@ from utils.analytics import ensure_public_user_id, log_behavior_event
 from utils.persistence import create_session, load_recovery_bundle, save_profile_version
 
 router = Router()
+
+
+def _mask_webhook(url: str) -> str:
+    clean = str(url or "").strip()
+    if not clean:
+        return "не задан"
+    if len(clean) <= 20:
+        return "задан"
+    return f"{clean[:16]}...{clean[-8:]}"
+
+
+def _csv_rows_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return 0
+    if not text:
+        return 0
+    return max(0, len(text.splitlines()) - 1)
 
 
 def _is_final_like_state(state_name: str) -> bool:
@@ -172,6 +195,26 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.set_state(CareerFlow.SELECTING_PACE)
     await message.answer(t(LANG_RU, "start_intro"))
     await message.answer(t(LANG_RU, "pace_prompt"), reply_markup=pace_keyboard())
+
+
+@router.message(F.text.in_(["/analytics_status", "/excel_status", "/sheets_status"]))
+async def analytics_status(message: Message) -> None:
+    csv_path = Path(settings.analytics_excel_log_path)
+    webhook = str(settings.google_sheets_webhook_url or "").strip()
+    rows = _csv_rows_count(csv_path)
+    webhook_state = "подключен" if webhook else "не подключен"
+    csv_state = "есть" if csv_path.exists() else "нет"
+    lines = [
+        "Статус аналитики:",
+        f"Google Sheets: {webhook_state}",
+        f"Webhook URL: {_mask_webhook(webhook)}",
+        f"Excel CSV файл: {csv_state}",
+        f"CSV путь: {csv_path}",
+        f"Событий в CSV: {rows}",
+    ]
+    if not webhook:
+        lines.append("Подсказка: задайте GOOGLE_SHEETS_WEBHOOK_URL в .env или Railway Variables.")
+    await message.answer("\n".join(lines))
 
 
 @router.message(CareerFlow.SELECTING_PACE, F.text.in_(ALL_PACE_OPTIONS))

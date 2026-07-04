@@ -69,6 +69,13 @@ async def main() -> None:
         sys.exit(1)
 
     print("Starting bot polling...", flush=True)
+    webhook_configured = bool(str(settings.google_sheets_webhook_url or "").strip())
+    print(
+        "Analytics status: "
+        + ("Google Sheets connected" if webhook_configured else "Google Sheets not configured")
+        + f", CSV={settings.analytics_excel_log_path}",
+        flush=True,
+    )
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
