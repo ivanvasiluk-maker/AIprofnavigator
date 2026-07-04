@@ -21,6 +21,7 @@ from handlers.career import (
     _short_conclusion_7_lines,
     _full_conclusion_one_screen,
     _written_conclusion_from_report,
+    _question_prompt,
     format_final_report,
     format_follow_up_questions,
     format_story_snapshot,
@@ -191,6 +192,45 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("1. Какой минимальный доход нужен в месяц?", questions)
         self.assertIn("Если есть кнопки вариантов", questions)
         self.assertIn("NextYou", t("ru", "start_intro"))
+
+    def test_question_prompt_hides_inline_options_text(self) -> None:
+        analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 5,
+                    "question": "Сколько ресурса и времени у вас сейчас на поиск и действия?",
+                    "options": [
+                        "Низкий ресурс, до 15 минут в день",
+                        "Средний ресурс, 30-60 минут",
+                        "Хороший ресурс, 1-2 часа",
+                    ],
+                }
+            ]
+        }
+        text = _question_prompt(analysis, 0, "ru")
+        self.assertIn("=== Вопрос 1/1 ===", text)
+        self.assertIn("№5. Сколько ресурса и времени у вас сейчас на поиск и действия?", text)
+        self.assertNotIn("Варианты:", text)
+        self.assertNotIn("Можно ответить своими словами", text)
+
+    def test_align_report_switches_poland_to_lithuania_markers(self) -> None:
+        report = {
+            "market_analysis": [{"profession": "Role", "salary_range": "6000-9000 PLN brutto"}],
+            "career_recommendations": [{"title": "Role", "income_range": "5000 PLN netto", "why_fit": "Подходит для рынка Польши"}],
+            "career_decision": {"recommended_main_path": "Role", "why_this_path": "Рынок Польши"},
+            "real_solutions": [{"title": "Role", "why": "Переход в Польше", "first_step": "Тест"}],
+        }
+        aligned = ai_client._align_report_with_story(
+            report,
+            story_analysis={"current_identity": "Живу в Литве"},
+            answers_text="Сейчас в Литве",
+            story_text="Переехал в Литву",
+        )
+        text_blob = str(aligned)
+        self.assertIn("EUR", text_blob)
+        self.assertIn("Литв", text_blob)
+        self.assertNotIn("PLN", text_blob)
+        self.assertNotIn("Польш", text_blob)
 
     def test_follow_up_questions_normalized_to_minimum(self) -> None:
         questions = ai_client._normalize_question_count([{"id": 1, "block": "financial_pressure", "question": "Один вопрос?", "type": "short_text", "options": []}], "ru")

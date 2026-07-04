@@ -1334,6 +1334,7 @@ class CareerOpenAIClient:
         self._ensure_resource_level(report, answers_text)
         self._ensure_integration_level(report, answers_text)
         self._ensure_competency_signals(report, story_analysis, answers_text)
+        self._normalize_market_geography(report, story_text, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
         self._ensure_barrier_driven_today_action(report, answers_text)
         self._enforce_segment_routes(report, user_segment, user_segment_label)
@@ -1793,6 +1794,61 @@ class CareerOpenAIClient:
             return
         merged = list(dict.fromkeys([*existing, *extracted]))
         report["competency_signals"] = merged[:6]
+
+    def _detect_target_country(self, story_text: str, story_analysis: dict[str, Any], answers_text: str) -> str:
+        blob = " ".join(
+            [
+                str(story_text or ""),
+                str(story_analysis.get("current_identity", "")),
+                " ".join(str(item) for item in story_analysis.get("experience_snapshot", []) if isinstance(item, str)),
+                str(answers_text or ""),
+            ]
+        ).lower().replace("ё", "е")
+
+        lithuania_tokens = ["литв", "литва", "вильню", "каунас", "klaipeda", "lithuania", "lithuanian"]
+        poland_tokens = ["польш", "польша", "варшав", "краков", "warsaw", "krakow", "poland", "polish"]
+
+        if any(token in blob for token in lithuania_tokens):
+            return "lt"
+        if any(token in blob for token in poland_tokens):
+            return "pl"
+        return "unknown"
+
+    def _replace_recursive_text(self, value: Any, replacements: dict[str, str]) -> Any:
+        if isinstance(value, str):
+            text = value
+            for old, new in replacements.items():
+                text = text.replace(old, new)
+            return text
+        if isinstance(value, list):
+            return [self._replace_recursive_text(item, replacements) for item in value]
+        if isinstance(value, dict):
+            return {key: self._replace_recursive_text(val, replacements) for key, val in value.items()}
+        return value
+
+    def _normalize_market_geography(self, report: dict[str, Any], story_text: str, story_analysis: dict[str, Any], answers_text: str) -> None:
+        country = self._detect_target_country(story_text, story_analysis, answers_text)
+        if country != "lt":
+            return
+
+        replacements = {
+            "PLN brutto": "EUR brutto",
+            "PLN netto": "EUR netto",
+            "PLN": "EUR",
+            "Польши": "Литвы",
+            "Польше": "Литве",
+            "Польша": "Литва",
+            "польский": "литовский",
+            "польского": "литовского",
+            "польском": "литовском",
+            "Poland": "Lithuania",
+            "polish": "lithuanian",
+            "Polish": "Lithuanian",
+        }
+        normalized = self._replace_recursive_text(report, replacements)
+        if isinstance(normalized, dict):
+            report.clear()
+            report.update(normalized)
 
     def _deduplicate_directions(self, report: dict[str, Any]) -> None:
         market = report.get("market_analysis")

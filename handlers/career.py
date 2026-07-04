@@ -1051,13 +1051,7 @@ def _question_prompt(analysis: dict, index: int, lang: str) -> str:
     except Exception:
         q_num = safe_index + 1
     text = row.get("question", "-")
-    options = row.get("options", [])
     lines = [f"=== Вопрос {safe_index + 1}/{total} ===", f"№{q_num}. {text}"]
-    if isinstance(options, list) and options:
-        lines.append("Варианты: " + " | ".join(str(item) for item in options[:10]))
-        lines.append(t(lang, "question_answer_hint_with_options"))
-    else:
-        lines.append(t(lang, "question_answer_hint_no_options"))
     return _clip("\n\n".join(lines))
 
 
