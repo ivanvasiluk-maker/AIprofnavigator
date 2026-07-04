@@ -2755,7 +2755,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         user_segment=user_segment,
     )
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    quick_report_after_questions = cv_uploaded or user_mode == "fast"
+    # Mandatory requirement: barrier analysis must run in every mode.
+    quick_report_after_questions = False
 
     await state.update_data(
         story_analysis=analysis,
@@ -2792,9 +2793,8 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         if cv_uploaded:
             _resume_debug_log(message, "questions_empty_after_resume")
         await message.answer(t(lang, "questions_empty"))
-        if quick_report_after_questions:
-            await state.update_data(answers_text=t(lang, "resume_continue_without"))
-            await _build_and_send_report(message, state, lang)
+        await state.update_data(answers_text=t(lang, "resume_continue_without"))
+        await _start_barriers_module(message, state, lang)
         return
 
     await state.set_state(CareerFlow.INTERVIEW)
@@ -3211,9 +3211,6 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 if isinstance(row, dict)
             )
             await state.update_data(answers_text=merged_answers)
-            if quick_report_after_questions or user_mode == "fast":
-                await _build_and_send_report(message, state, lang)
-                return
             await _start_barriers_module(message, state, lang)
             return
         await state.update_data(pending_question_append={})
@@ -3394,9 +3391,6 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     if isinstance(row, dict)
                 )
                 await state.update_data(answers_text=merged_answers)
-                if quick_report_after_questions or user_mode == "fast":
-                    await _build_and_send_report(message, state, lang)
-                    return
                 await _start_barriers_module(message, state, lang)
                 return
 
@@ -3508,16 +3502,10 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             if isinstance(row, dict)
         )
         await state.update_data(answers_text=merged_answers)
-        if quick_report_after_questions or user_mode == "fast":
-            await _build_and_send_report(message, state, lang)
-            return
         await _start_barriers_module(message, state, lang)
         return
 
     await state.update_data(answers_text=clean)
-    if user_mode == "fast":
-        await _build_and_send_report(message, state, lang)
-        return
     await _start_barriers_module(message, state, lang)
 
 
@@ -3844,9 +3832,6 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                 if isinstance(row, dict)
             )
             await state.update_data(answers_text=merged_answers)
-            if quick_report_after_questions or user_mode == "fast":
-                await _build_and_send_report(message, state, lang)
-                return
             await _start_barriers_module(message, state, lang)
             return
 
@@ -3913,9 +3898,6 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         if isinstance(row, dict)
     )
     await state.update_data(answers_text=merged_answers)
-    if quick_report_after_questions or user_mode == "fast":
-        await _build_and_send_report(message, state, lang)
-        return
     await _start_barriers_module(message, state, lang)
 
 
