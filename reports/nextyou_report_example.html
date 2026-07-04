@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NextYou Report Example</title>
+  <style>
+    :root {
+      --bg-1: #f4f7fb;
+      --bg-2: #e8f4f2;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5b6475;
+      --accent: #0f766e;
+      --accent-soft: #dff6f1;
+      --line: #d6deea;
+      --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    }
+
+    @page { size: A4; margin: 16mm; }
+
+    body {
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 0;
+      padding: 0;
+      background:
+        radial-gradient(1200px 500px at -10% -20%, #d7ede8 0%, transparent 55%),
+        radial-gradient(1000px 380px at 120% 0%, #dfeaf9 0%, transparent 52%),
+        linear-gradient(180deg, var(--bg-1), var(--bg-2));
+    }
+
+    .page {
+      background: var(--paper);
+      max-width: 860px;
+      margin: 22px auto;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 14px 16px;
+      border: 1px solid #cbe8e0;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #f5fffc 0%, #eef7ff 100%);
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 30px;
+      letter-spacing: 0.2px;
+      margin: 0 0 4px 0;
+      color: #0e1a31;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin: 18px 0 8px 0;
+      color: var(--accent);
+      border-left: 4px solid #8fd9cb;
+      padding-left: 10px;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin: 0 0 7px 0;
+      color: #1c2a40;
+    }
+
+    p { margin: 6px 0; }
+
+    ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+    }
+
+    li { margin: 3px 0; }
+
+    .brand {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: var(--accent);
+      border: 1px solid #9ee2d5;
+      background: var(--accent-soft);
+      border-radius: 999px;
+      padding: 4px 12px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 6px 12px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed #b8d9d1;
+    }
+
+    .meta p { margin: 2px 0; }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 13px;
+      margin-bottom: 10px;
+      background: #ffffff;
+    }
+
+    .muted {
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      margin-top: 14px;
+      padding-top: 10px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 700px) {
+      body { font-size: 12px; }
+      .page {
+        margin: 10px;
+        padding: 14px;
+        border-radius: 12px;
+      }
+      h1 { font-size: 24px; }
+      h2 { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="hero">
+      <div class="brand">NextYou</div>
+      <h1>NextYou Report</h1>
+      <p class="subtitle">Пример персональной карты карьерного перехода</p>
+      <div class="meta">
+        <p><b>Имя пользователя:</b> Сергей</p>
+        <p><b>Страна:</b> Литва</p>
+        <p><b>Дата:</b> 2026-07-04</p>
+        <p><b>Режим:</b> calm_steps</p>
+      </div>
+    </div>
+
+    <h2>1. Что я услышал</h2>
+    <div class="card">
+      <h3>Ключевые факты</h3>
+      <p>42 года, 8 месяцев в Литве. 17 лет в строительстве: плитка, гипсокартон, покраска, мелкий ремонт, сборка мебели. Сейчас нерегулярная занятость через знакомого.</p>
+    </div>
+
+    <h2>2. Профессиональное ядро</h2>
+    <div class="card">
+      <h3>Ваш профессиональный капитал</h3>
+      <p>Практик-универсал с опытом полного цикла отделки и самостоятельного ведения небольшого объекта.</p>
+    </div>
+
+    <h2>3. Сильные стороны и опоры</h2>
+    <div class="card">
+      <ul>
+        <li>Широкий набор рабочих навыков</li>
+        <li>Умение договариваться с заказчиком</li>
+        <li>Самостоятельность в организации работ</li>
+      </ul>
+    </div>
+
+    <h2>4. Ограничения и неизвестные</h2>
+    <div class="card">
+      <ul>
+        <li>Слабый литовский и английский</li>
+        <li>Страх формального найма в компании</li>
+        <li>Зависимость от одного источника заказов</li>
+      </ul>
+    </div>
+
+    <h2>5. Устойчивость в период изменений</h2>
+    <div class="card">
+      <p><b>Ресурс:</b> средний, но нестабильный из-за рваного графика и дохода.</p>
+      <p><b>Главный риск:</b> затяжной режим подработок без роста.</p>
+    </div>
+
+    <h2>6. Интеграция в новой стране</h2>
+    <div class="card">
+      <p>Интеграция пока начальная: низкая языковая опора и ограниченный социальный круг в профессиональной среде.</p>
+    </div>
+
+    <h2>7. Сравнение маршрутов</h2>
+    <div class="card">
+      <ul>
+        <li><b>Пессимистичный:</b> оставаться в хаотичных подработках.</li>
+        <li><b>Базовый:</b> гибридный путь: бригада + собственные мелкие заказы.</li>
+        <li><b>Оптимистичный:</b> выход в стабильный подряд/официальную фирму.</li>
+      </ul>
+    </div>
+
+    <h2>8. Выбранный маршрут и первый шаг</h2>
+    <div class="card">
+      <p><b>Рекомендованный маршрут:</b> гибридный.</p>
+      <p><b>Первый шаг на сегодня:</b> оформить профиль услуг и отправить 10 целевых откликов/контактов.</p>
+    </div>
+
+    <h2>9. План на 30 дней</h2>
+    <div class="card">
+      <ul>
+        <li><b>Неделя 1:</b> портфолио, шаблоны сообщений, список каналов.</li>
+        <li><b>Неделя 2:</b> регулярные отклики и 1 пробный объект.</li>
+        <li><b>Неделя 3:</b> закрепить 1 стабильный канал заказов.</li>
+        <li><b>Неделя 4:</b> проанализировать каналы и усилить 2 лучших.</li>
+      </ul>
+    </div>
+
+    <h2>10. Анализ резюме</h2>
+    <div class="card">
+      <p>CV не загружено. Для точного разбора добавить резюме и адаптировать формулировки под рынок Литвы.</p>
+    </div>
+
+    <h2>11. Честный блок неопределенности</h2>
+    <div class="card">
+      <p>Точный срок стабилизации дохода заранее не гарантируется. При дисциплине шагов и регулярных откликах реалистичный горизонт перехода в более устойчивый режим: 4-8 недель.</p>
+    </div>
+
+    <p class="muted">Это пример структуры отчета NextYou в формате HTML.</p>
+  </section>
+</body>
+</html>

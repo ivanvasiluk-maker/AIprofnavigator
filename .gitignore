@@ -30,6 +30,7 @@ Thumbs.db
 # Generated reports
 reports/*.html
 reports/*.pdf
+!reports/nextyou_report_example.html
 
 # Private bot and GPT runtime code
 bot.py
