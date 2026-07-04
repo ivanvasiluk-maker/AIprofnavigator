@@ -1580,6 +1580,7 @@ def _set_mvp_questions(
     effective_limit = max(1, int(limit) if int(limit) > 0 else _question_count_for_mode(mode_key))
 
     if mode_key == "fast":
+        effective_limit = min(effective_limit, 5)
         normalized_fast: list[dict[str, object]] = []
         for idx, row in enumerate(_questions_fast()[:effective_limit], start=1):
             opts = row.get("options", []) if isinstance(row.get("options", []), list) else []
@@ -1614,12 +1615,12 @@ def _set_mvp_questions(
 
     segment_specific = _segment_questions(user_segment)
     common = _segment_common_questions()
-    mode_base = _questions_deep_route() if mode_key in {"deep_route", "support"} else _questions_calm()
-    merged_base = segment_specific + common + mode_base
-    deduped = _filter_known_questions(merged_base, story_text)
+    mandatory = _mandatory_psych_social_questions()
+    mode_base = _questions_fast() if mode_key == "fast" else (_questions_deep_route() if mode_key in {"deep_route", "support"} else _questions_calm())
+    merged_base = _filter_known_questions(segment_specific + common + mode_base, story_text) + mandatory
 
     selected: list[dict[str, object]] = []
-    for row in deduped:
+    for row in merged_base:
         if not isinstance(row, dict):
             continue
         q_key = str(row.get("question", "")).strip().lower()
