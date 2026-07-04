@@ -2564,6 +2564,47 @@ def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str
     return selected_route
 
 
+def _written_conclusion_from_report(report: dict) -> str:
+    digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
+    decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
+    action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+    barriers = digital_human.get("barriers", {}) if isinstance(digital_human.get("barriers"), dict) else {}
+    not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
+
+    current_state = str(digital_human.get("current_state") or "").strip() or "данных пока недостаточно"
+    market_value = str(digital_human.get("main_asset") or "").strip() or (str(not_reset[0]).strip() if not_reset else "данных пока недостаточно")
+    main_limit = ""
+    internal = [str(item).strip() for item in (barriers.get("internal") or []) if str(item).strip()]
+    external = [str(item).strip() for item in (barriers.get("external") or []) if str(item).strip()]
+    if internal:
+        main_limit = internal[0]
+    elif external:
+        main_limit = external[0]
+    else:
+        main_limit = str(digital_human.get("main_barrier") or "").strip() or "данных пока недостаточно"
+
+    resource_level = _level_label(report.get("resource_level"))
+    readiness = str((digital_human.get("career_readiness") or {}).get("urgency") if isinstance(digital_human.get("career_readiness"), dict) else "").strip()
+    readiness_text = readiness or "данных пока недостаточно"
+    integration_level = _level_label(report.get("integration_level"))
+    next_step = str(today.get("action") or "").strip() or "Сделайте 1 проверяемый шаг по маршруту сегодня (10-15 минут)."
+    recommended_route = str(decision.get("recommended_main_path") or "").strip() or "маршрут уточняется"
+
+    lines = [
+        "Письменное заключение",
+        "",
+        f"1. Кто вы как профессионал: {current_state}.",
+        f"2. Ваша ценность на рынке труда: {market_value}.",
+        f"3. Ограничения и ресурсы: ключевое ограничение — {main_limit}; уровень ресурса — {resource_level}.",
+        f"4. Готовность к изменениям: {readiness_text}.",
+        f"5. Интеграция в новой стране: уровень интеграции — {integration_level}.",
+        f"6. Рекомендованный маршрут: {recommended_route}.",
+        f"7. Следующий шаг: {next_step}",
+    ]
+    return "\n".join(lines)
+
+
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
@@ -2571,8 +2612,16 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     await message.answer(t(lang, "contract_anchor"), reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
+    written_conclusion = _written_conclusion_from_report(report)
     closing_message = str(report.get("closing_message") or "").strip()
-    if closing_message:
+    if not closing_message:
+        report["closing_message"] = written_conclusion
+        closing_message = written_conclusion
+
+    await message.answer(t(lang, "written_conclusion_intro"), reply_markup=route_choice_keyboard())
+    await _answer_safe(message, _clip(written_conclusion, 3500), reply_markup=route_choice_keyboard())
+
+    if closing_message and closing_message != written_conclusion:
         short_closing = _clip(closing_message, 320)
         await message.answer(f"Итог кратко:\n{short_closing}", reply_markup=route_choice_keyboard())
 

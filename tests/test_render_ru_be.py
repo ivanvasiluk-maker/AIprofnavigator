@@ -18,6 +18,7 @@ from handlers.career import (
     _set_mvp_questions,
     _start_questions_module,
     barriers_fallback,
+    _written_conclusion_from_report,
     format_final_report,
     format_follow_up_questions,
     format_story_snapshot,
@@ -544,6 +545,31 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("semantic_intent", first)
         self.assertIn("source", first)
         self.assertIn("validity_status", first)
+
+    def test_written_conclusion_covers_all_required_dimensions(self) -> None:
+        report = {
+            "digital_human": {
+                "current_state": "Специалист с опытом координации и клиентских задач",
+                "main_asset": "Сильная организационная дисциплина и коммуникация",
+                "main_barrier": "Тревога перед отказами",
+                "career_readiness": {"urgency": "высокая"},
+                "barriers": {"internal": ["Страх отказов"], "external": ["Язык"]},
+            },
+            "career_decision": {"recommended_main_path": "Administrative Assistant / Back-office Specialist"},
+            "action_plan": {"today": {"action": "Собрать 10 вакансий и отправить 3 отклика"}},
+            "resource_level": "medium",
+            "integration_level": "low",
+        }
+
+        text = _written_conclusion_from_report(report)
+
+        self.assertIn("Кто вы как профессионал", text)
+        self.assertIn("ценность на рынке труда", text)
+        self.assertIn("Ограничения и ресурсы", text)
+        self.assertIn("Готовность к изменениям", text)
+        self.assertIn("Интеграция в новой стране", text)
+        self.assertIn("Рекомендованный маршрут", text)
+        self.assertIn("Следующий шаг", text)
 
     def test_route_choice_is_joint_not_bot_assigned(self) -> None:
         report = {
