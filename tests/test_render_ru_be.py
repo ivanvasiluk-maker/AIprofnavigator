@@ -17,6 +17,7 @@ from handlers.career import (
     process_story_input,
     _set_mvp_questions,
     _start_questions_module,
+    barriers_fallback,
     format_final_report,
     format_follow_up_questions,
     format_story_snapshot,
@@ -1003,6 +1004,24 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("energy", follow_up_keys)
         self.assertIn("priorities", follow_up_keys)
         start_barriers.assert_not_awaited()
+
+    async def test_barriers_repeat_choice_from_previous_group_does_not_stall(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "barrier_current_group": "🚶 Поведение",
+                "selected_psych_markers": ["Боюсь отказов", "Боюсь выглядеть глупо"],
+            },
+            current_state=CareerFlow.waiting_for_barriers.state,
+        )
+        message = FakeMessage()
+        message.text = "Боюсь отказов"
+        await barriers_fallback(message, state)
+
+        self.assertEqual(state.current_state, CareerFlow.waiting_for_barriers.state)
+        self.assertGreaterEqual(message.answer.await_count, 1)
+        payload = message.answer.await_args_list[-1].args[0]
+        self.assertIn("уже выбран", payload.lower())
 
 
 if __name__ == "__main__":

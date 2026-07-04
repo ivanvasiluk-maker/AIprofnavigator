@@ -28,6 +28,7 @@ from keyboards import (
     ALL_PSYCH_BARRIER_DONE,
     ALL_PSYCH_GROUP_OPTIONS,
     ALL_PSYCH_BARRIER_OPTIONS,
+    PSYCH_BARRIER_OPTIONS,
     ALL_RESTART,
     ALL_RESUME_SKIP,
     ALL_RESUME_UPLOAD,
@@ -3876,6 +3877,7 @@ async def barriers_fallback(message: Message, state: FSMContext) -> None:
     low = raw.lower()
     current_group = str(data.get("barrier_current_group") or BARRIER_GROUP_INTERNAL)
     current_options = set(_barrier_options_for_group(current_group))
+    selected = list(data.get("selected_psych_markers") or [])
 
     if raw in ALL_PSYCH_GROUP_OPTIONS:
         if raw == PSYCH_SKIP:
@@ -3884,7 +3886,12 @@ async def barriers_fallback(message: Message, state: FSMContext) -> None:
         await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_group_keyboard(current_group))
         return
 
-    if low in _BARRIER_DONE_ALIASES or low in _BARRIER_DONE_BY_LOWER:
+    is_done_text = (
+        low in _BARRIER_DONE_ALIASES
+        or low in _BARRIER_DONE_BY_LOWER
+        or ("отмет" in low and "меша" in low)
+    )
+    if is_done_text:
         moved = await _advance_barrier_group(message, state)
         if moved:
             return
@@ -3896,6 +3903,20 @@ async def barriers_fallback(message: Message, state: FSMContext) -> None:
         return
 
     normalized_choice = _BARRIER_OPTION_BY_LOWER.get(low) or raw
+    if normalized_choice in ALL_PSYCH_BARRIER_OPTIONS and normalized_choice not in current_options:
+        if normalized_choice in selected:
+            await message.answer(
+                t(lang, "barriers_already_selected", count=len(selected), items=_selection_to_text(selected))
+                + "\n\n"
+                + t(lang, _barrier_prompt_key(current_group)),
+                reply_markup=barriers_group_keyboard(current_group),
+            )
+            return
+        await message.answer(
+            t(lang, "barriers_only_hint") + "\n\n" + t(lang, _barrier_prompt_key(current_group)),
+            reply_markup=barriers_group_keyboard(current_group),
+        )
+        return
     if normalized_choice not in current_options:
         await message.answer(t(lang, "barriers_only_hint"), reply_markup=barriers_group_keyboard(current_group))
         return
