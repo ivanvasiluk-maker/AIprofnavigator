@@ -2794,30 +2794,12 @@ def _written_conclusion_from_report(report: dict) -> str:
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
+    has_route_choice = bool(str(data.get("user_route_choice") or "").strip())
     await state.set_state(CareerFlow.FINAL_READY)
-    await message.answer(t(lang, "contract_anchor"), reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
     short_conclusion = _short_conclusion_7_lines(report)
-    full_conclusion = _full_conclusion_one_screen(report)
-    written_conclusion = _written_conclusion_from_report(report)
-    closing_message = str(report.get("closing_message") or "").strip()
-    if not closing_message:
-        report["closing_message"] = full_conclusion
-        closing_message = full_conclusion
-
-    await message.answer(t(lang, "written_conclusion_short_intro"), reply_markup=route_choice_keyboard())
     await _answer_safe(message, _clip(short_conclusion, 3500), reply_markup=route_choice_keyboard())
-
-    await message.answer(t(lang, "written_conclusion_full_intro"), reply_markup=route_choice_keyboard())
-    await _answer_safe(message, _clip(full_conclusion, 3500), reply_markup=route_choice_keyboard())
-
-    await message.answer(t(lang, "written_conclusion_intro"), reply_markup=route_choice_keyboard())
-    await _answer_safe(message, _clip(written_conclusion, 3500), reply_markup=route_choice_keyboard())
-
-    if closing_message and closing_message != written_conclusion:
-        short_closing = _clip(closing_message, 320)
-        await message.answer(f"Итог кратко:\n{short_closing}", reply_markup=route_choice_keyboard())
 
     pdf_report_path = ""
     html_report_path = ""
@@ -2844,7 +2826,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         if html_url:
             await message.answer(
                 t(lang, "web_report_ready"),
-                reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
+                reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url),
             )
         await message.answer(t(lang, "pdf_generation_started"), reply_markup=route_choice_keyboard())
 
@@ -2869,9 +2851,8 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 reply_markup=route_choice_keyboard(),
             )
 
-        await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
-        await _answer_safe(message, f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
-        await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+        if not has_route_choice:
+            await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
     except Exception:
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
@@ -4532,7 +4513,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
             if html_url:
                 await message.answer(
                     t(lang, "web_report_ready"),
-                    reply_markup=telegram_link_keyboard("Открыть web-отчёт", html_url),
+                    reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url),
                 )
                 return
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())

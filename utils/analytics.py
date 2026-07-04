@@ -14,6 +14,7 @@ from config import settings
 from utils.persistence import get_recent_events, get_recent_events_all, get_user, record_event, upsert_user
 
 _registry_lock = threading.Lock()
+_ASYNC_EVENT_TASKS: set[asyncio.Task] = set()
 
 
 def _utc_now() -> datetime:
@@ -193,7 +194,7 @@ def _send_to_google_sheets(payload: dict[str, Any]) -> bool:
         method="POST",
     )
     try:
-        with request.urlopen(req, timeout=4):
+        with request.urlopen(req, timeout=1.5):
             return True
     except (error.URLError, TimeoutError, ValueError):
         return False
@@ -250,17 +251,26 @@ async def log_behavior_event(
     meta: dict[str, Any] | None = None,
     session_id: str = "",
 ) -> None:
-    await asyncio.to_thread(
-        log_behavior_event_sync,
-        public_user_id=public_user_id,
-        event=event,
-        state_name=state_name,
-        action=action,
-        user_mode=user_mode,
-        language=language,
-        meta=meta,
-        session_id=session_id,
-    )
+    async def _runner() -> None:
+        try:
+            await asyncio.to_thread(
+                log_behavior_event_sync,
+                public_user_id=public_user_id,
+                event=event,
+                state_name=state_name,
+                action=action,
+                user_mode=user_mode,
+                language=language,
+                meta=meta,
+                session_id=session_id,
+            )
+        except Exception:
+            # Telemetry must never block user flow.
+            return
+
+    task = asyncio.create_task(_runner())
+    _ASYNC_EVENT_TASKS.add(task)
+    task.add_done_callback(lambda t: _ASYNC_EVENT_TASKS.discard(t))
 
 
 def behavior_insights(public_user_id: str, lookback_days: int = 7) -> list[str]:
