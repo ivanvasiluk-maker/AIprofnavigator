@@ -250,7 +250,6 @@ async def _notify_specialist_request_owner(message: Message, state: FSMContext, 
 
     data = await state.get_data()
     public_user_id = _ensure_public_id(data, message)
-    user_id = str(message.from_user.id) if message.from_user else "unknown"
     username = ("@" + message.from_user.username) if message.from_user and message.from_user.username else "-"
     full_name = " ".join(
         [
@@ -263,14 +262,13 @@ async def _notify_specialist_request_owner(message: Message, state: FSMContext, 
         ]
     ).strip() or "-"
     now_iso = datetime.now(timezone.utc).isoformat()
-    text = (
-        "Новая заявка на разбор со специалистом\n\n"
-        f"public_user_id: {public_user_id}\n"
-        f"telegram_user_id: {user_id}\n"
-        f"username: {username}\n"
-        f"name: {full_name}\n"
-        f"action: {action}\n"
-        f"time_utc: {now_iso}"
+    text = "\n".join(
+        [
+            "Уведомление: новая заявка на разбор со специалистом.",
+            f"Пользователь: {full_name} {username}".strip(),
+            f"ID заявки: {public_user_id}",
+            f"Время: {now_iso}",
+        ]
     )
 
     try:
