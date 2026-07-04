@@ -18,6 +18,8 @@ from handlers.career import (
     _set_mvp_questions,
     _start_questions_module,
     barriers_fallback,
+    _short_conclusion_7_lines,
+    _full_conclusion_one_screen,
     _written_conclusion_from_report,
     format_final_report,
     format_follow_up_questions,
@@ -562,6 +564,8 @@ class CareerGpsRenderTests(unittest.TestCase):
         }
 
         text = _written_conclusion_from_report(report)
+        short_text = _short_conclusion_7_lines(report)
+        one_screen_text = _full_conclusion_one_screen(report)
 
         self.assertIn("Кто вы как профессионал", text)
         self.assertIn("ценность на рынке труда", text)
@@ -570,6 +574,9 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("Интеграция в новой стране", text)
         self.assertIn("Рекомендованный маршрут", text)
         self.assertIn("Следующий шаг", text)
+        self.assertGreaterEqual(len(short_text.splitlines()), 7)
+        self.assertIn("Полное заключение (1 экран)", one_screen_text)
+        self.assertIn("Письменное заключение (полное по ТЗ)", text)
 
     def test_route_choice_is_joint_not_bot_assigned(self) -> None:
         report = {

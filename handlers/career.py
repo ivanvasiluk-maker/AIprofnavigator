@@ -2564,7 +2564,7 @@ def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str
     return selected_route
 
 
-def _written_conclusion_from_report(report: dict) -> str:
+def _short_conclusion_7_lines(report: dict) -> str:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
@@ -2592,8 +2592,6 @@ def _written_conclusion_from_report(report: dict) -> str:
     recommended_route = str(decision.get("recommended_main_path") or "").strip() or "маршрут уточняется"
 
     lines = [
-        "Письменное заключение",
-        "",
         f"1. Кто вы как профессионал: {current_state}.",
         f"2. Ваша ценность на рынке труда: {market_value}.",
         f"3. Ограничения и ресурсы: ключевое ограничение — {main_limit}; уровень ресурса — {resource_level}.",
@@ -2605,6 +2603,141 @@ def _written_conclusion_from_report(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _full_conclusion_one_screen(report: dict) -> str:
+    digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
+    decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
+    action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+    barriers = digital_human.get("barriers", {}) if isinstance(digital_human.get("barriers"), dict) else {}
+    facts_only = report.get("facts_only", {}) if isinstance(report.get("facts_only"), dict) else {}
+    unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()][:3]
+    not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
+
+    strengths = [str(item).strip() for item in not_reset if str(item).strip()][:3]
+    internal = [str(item).strip() for item in (barriers.get("internal") or []) if str(item).strip()][:2]
+    external = [str(item).strip() for item in (barriers.get("external") or []) if str(item).strip()][:2]
+    next_step = str(today.get("action") or "").strip() or "Сделайте 1 проверяемый шаг по маршруту сегодня (10-15 минут)."
+
+    lines = [
+        "Полное заключение (1 экран)",
+        "",
+        f"Кто вы сейчас: {str(digital_human.get('current_state') or 'данных пока недостаточно').strip()}.",
+        f"Что не обнулилось: {', '.join(strengths) if strengths else 'данных пока недостаточно'}.",
+        f"Что помогает: {str(digital_human.get('main_asset') or 'данных пока недостаточно').strip()}.",
+        f"Что тормозит: {', '.join(internal + external) if (internal or external) else str(digital_human.get('main_barrier') or 'данных пока недостаточно').strip()}.",
+        f"Ресурс и устойчивость: {_resource_human_message(report.get('resource_level')).splitlines()[0]}",
+        f"Интеграция: {_integration_human_message(report.get('integration_level')).splitlines()[0]}",
+        f"Основной маршрут: {str(decision.get('recommended_main_path') or 'маршрут уточняется').strip()}.",
+        f"Почему он: {str(decision.get('why_this_path') or 'опирается на подтвержденные факты профиля').strip()}.",
+        f"Что уточнить: {', '.join(unknowns) if unknowns else 'критичных неизвестных сейчас нет'}.",
+        f"Первый шаг: {next_step}",
+    ]
+    return "\n".join(lines)
+
+
+def _written_conclusion_from_report(report: dict) -> str:
+    digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
+    decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
+    action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
+    weekly_plan = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
+    first_month = (report.get("development_map") or {}).get("first_month", []) if isinstance((report.get("development_map") or {}).get("first_month"), list) else []
+    facts_only = report.get("facts_only", {}) if isinstance(report.get("facts_only"), dict) else {}
+    unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()][:4]
+    barriers = digital_human.get("barriers", {}) if isinstance(digital_human.get("barriers"), dict) else {}
+    not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
+    competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
+    energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
+    priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
+    resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
+
+    rows = _build_route_comparison_rows(report)
+    route_lines = []
+    labels = ["пессимистический", "базовый", "оптимистический"]
+    for idx, row in enumerate(rows[:3]):
+        label = labels[idx] if idx < len(labels) else f"вариант {idx + 1}"
+        route_lines.append(
+            f"- {label}: {row.get('route', '-')}; плюс: {row.get('good', '-')}; риск: {row.get('obstacle', '-')}; условие: {row.get('need', '-')}."
+        )
+
+    today_task = str(today.get("action") or "").strip() or "Сделайте 1 проверяемый шаг по маршруту сегодня (5-20 минут)."
+    today_time = str(today.get("timebox") or "").strip() or "5-20 минут"
+    week_goals = [str(item.get("focus") or item.get("task") or "").strip() for item in weekly_plan if isinstance(item, dict)][:4]
+    if not week_goals and first_month:
+        week_goals = [str(item.get("focus") or "").strip() for item in first_month if isinstance(item, dict) and str(item.get("focus") or "").strip()][:4]
+
+    swot_strengths = [str(item).strip() for item in not_reset if str(item).strip()][:3]
+    swot_weaknesses = [str(item).strip() for item in (barriers.get("internal") or []) if str(item).strip()][:2] + [str(item).strip() for item in (barriers.get("external") or []) if str(item).strip()][:2]
+    swot_blind = [str(digital_human.get("main_risk") or "").strip(), str(digital_human.get("main_fear") or "").strip()]
+    swot_blind = [item for item in swot_blind if item][:2]
+    swot_consider = [f"ресурс: {_level_label(report.get('resource_level'))}", f"интеграция: {_level_label(report.get('integration_level'))}"]
+
+    self_actions = []
+    if swot_weaknesses:
+        self_actions.append("действовать микрошагами 5-15 минут и фиксировать факт выполнения")
+    self_actions.append("держать один основной маршрут минимум 7 дней без хаотичного переключения")
+    specialist_actions = [
+        "если тревога/перегруз держатся неделями и блокируют действия, полезен разбор со специалистом",
+        "если маршрут понятен, но нет движения, полезен внешний разбор барьера и корректировка шага",
+    ]
+
+    heard_bits: list[str] = []
+    if str(digital_human.get("current_state") or "").strip():
+        heard_bits.append(str(digital_human.get("current_state") or "").strip())
+    if str(digital_human.get("main_asset") or "").strip():
+        heard_bits.append(f"главный актив: {str(digital_human.get('main_asset') or '').strip()}")
+    if str(digital_human.get("main_risk") or "").strip():
+        heard_bits.append(f"главный риск: {str(digital_human.get('main_risk') or '').strip()}")
+    if str(digital_human.get("main_barrier") or "").strip():
+        heard_bits.append(f"главное ограничение: {str(digital_human.get('main_barrier') or '').strip()}")
+    heard_text = "; ".join(heard_bits[:4]) if heard_bits else "данных пока недостаточно"
+
+    lines = [
+        "Письменное заключение (полное по ТЗ)",
+        "",
+        f"Кто вы как профессионал: {str(digital_human.get('current_state') or 'данных пока недостаточно').strip()}.",
+        f"Ваша ценность на рынке труда: {str(digital_human.get('main_asset') or 'данных пока недостаточно').strip()}.",
+        f"Ограничения и ресурсы: уровень ресурса — {_level_label(report.get('resource_level'))}; ключевой барьер — {str(digital_human.get('main_barrier') or 'данных пока недостаточно').strip()}.",
+        f"Готовность к изменениям: {str((digital_human.get('career_readiness') or {}).get('urgency') if isinstance(digital_human.get('career_readiness'), dict) else 'данных пока недостаточно').strip() or 'данных пока недостаточно'}.",
+        f"Интеграция в новой стране: уровень интеграции — {_level_label(report.get('integration_level'))}.",
+        f"Рекомендованный маршрут: {str(decision.get('recommended_main_path') or 'маршрут уточняется').strip()}.",
+        f"Следующий шаг: {today_task}",
+        "",
+        f"1. Что я услышал: {heard_text}.",
+        f"2. Профессиональное ядро: {_professional_core_summary(report)}",
+        f"3. Сильные стороны и опоры: {', '.join([str(item).strip() for item in competency_signals if str(item).strip()][:5]) or 'данных пока недостаточно'}; источники энергии: {', '.join([str(item).strip() for item in energy_sources if str(item).strip()][:4]) or 'данных пока недостаточно'}.",
+        f"4. Ограничения и неизвестные: {', '.join(swot_weaknesses) if swot_weaknesses else 'данных пока недостаточно'}. Уточнить: {', '.join(unknowns) if unknowns else 'критичных неизвестных сейчас нет'}.",
+        f"SWOT: strengths={', '.join(swot_strengths) if swot_strengths else '-'}; weaknesses={', '.join(swot_weaknesses) if swot_weaknesses else '-'}; blind_spots={', '.join(swot_blind) if swot_blind else '-'}; important={', '.join(swot_consider)}.",
+        f"Психо/соц (без диагнозов): самому — {', '.join(self_actions)}; со специалистом — {', '.join(specialist_actions)}.",
+        f"5. Устойчивость в период изменений: {_resource_human_message(report.get('resource_level'))}",
+        f"6. Интеграция в новой стране: {_integration_human_message(report.get('integration_level'))}",
+        f"7. Сравнение маршрутов (быстрый доход / основной / долгосрочный; пессимистический-базовый-оптимистический): {' '.join(route_lines) if route_lines else 'данных пока недостаточно.'}",
+        (
+            "8. Выбранный маршрут и первый шаг: "
+            f"{str(decision.get('recommended_main_path') or 'маршрут уточняется').strip()}. "
+            f"Шаг: {today_task} ({today_time}). "
+            "Кнопки: Сделал / Слишком сложно / Сделать проще / Другой шаг."
+        ),
+        f"9. План на 30 дней: {', '.join(week_goals) if week_goals else 'до 4 недельных целей, по одному основному действию в день и при необходимости одному дополнительному шагу поддержки.'}",
+        (
+            "10. Анализ резюме: "
+            + (
+                f"сильные стороны — {', '.join([str(item).strip() for item in (resume_analysis.get('what_is_good') or []) if str(item).strip()][:4]) or 'данных пока недостаточно'}; "
+                f"пробелы/правки — {', '.join([str(item).strip() for item in (resume_analysis.get('what_is_missing') or []) if str(item).strip()][:4]) or 'данных пока недостаточно'}; "
+                f"несостыковки — {', '.join([str(item).strip() for item in (resume_analysis.get('inconsistencies') or []) if str(item).strip()][:3]) or 'не выявлено'}"
+            )
+        )
+        if resume_analysis
+        else "10. Анализ резюме: CV не загружено: используйте кнопку «Загрузить резюме для анализа».",
+        (
+            "11. Что может быть не так в выводе: карта меняется при новых данных о языке, документах, резюме, приоритетах, контактах и рынке. "
+            "Кнопки: Всё похоже на правду / Исправить факт / Изменить приоритет / Не согласен с маршрутом."
+        ),
+        f"Приоритеты сейчас: {', '.join([str(item).strip() for item in priorities if str(item).strip()][:4]) or 'данных пока недостаточно'}.",
+    ]
+    return "\n".join(lines)
+
+
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
@@ -2612,11 +2745,19 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     await message.answer(t(lang, "contract_anchor"), reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
+    short_conclusion = _short_conclusion_7_lines(report)
+    full_conclusion = _full_conclusion_one_screen(report)
     written_conclusion = _written_conclusion_from_report(report)
     closing_message = str(report.get("closing_message") or "").strip()
     if not closing_message:
-        report["closing_message"] = written_conclusion
-        closing_message = written_conclusion
+        report["closing_message"] = full_conclusion
+        closing_message = full_conclusion
+
+    await message.answer(t(lang, "written_conclusion_short_intro"), reply_markup=route_choice_keyboard())
+    await _answer_safe(message, _clip(short_conclusion, 3500), reply_markup=route_choice_keyboard())
+
+    await message.answer(t(lang, "written_conclusion_full_intro"), reply_markup=route_choice_keyboard())
+    await _answer_safe(message, _clip(full_conclusion, 3500), reply_markup=route_choice_keyboard())
 
     await message.answer(t(lang, "written_conclusion_intro"), reply_markup=route_choice_keyboard())
     await _answer_safe(message, _clip(written_conclusion, 3500), reply_markup=route_choice_keyboard())
