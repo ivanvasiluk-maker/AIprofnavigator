@@ -371,7 +371,7 @@ async def _run_pdf_generation_background(
             await bot.send_message(
                 chat_id,
                 t(lang, "pdf_ready_download"),
-                reply_markup=route_choice_keyboard(),
+                reply_markup=result_actions_keyboard(include_pdf_download=True),
             )
             return
 
@@ -2857,7 +2857,12 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         ).strip()
 
         # Required flow: HTML report is always prepared first.
-        html_path = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+        html_path = generate_html_report_file(
+            report,
+            output_dir=settings.report_output_dir,
+            user_name=user_name,
+            profile_version=report_generation_id,
+        )
         html_report_path = _normalize_report_path(str(html_path))
         html_path = Path(html_report_path)
         html_url = _report_public_url(html_path)
@@ -2883,15 +2888,18 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 report_generation_id=report_generation_id,
             )
         )
-        # Generate DOCX and send it immediately if ready.
-        docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
-        if docx_path:
-            docx_report_path = _normalize_report_path(str(docx_path))
-            await message.answer_document(
-                FSInputFile(docx_report_path),
-                caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
-                reply_markup=route_choice_keyboard(),
-            )
+        # Generate DOCX independently so optional export errors do not break primary web-report delivery.
+        try:
+            docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+            if docx_path:
+                docx_report_path = _normalize_report_path(str(docx_path))
+                await message.answer_document(
+                    FSInputFile(docx_report_path),
+                    caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
+                    reply_markup=route_choice_keyboard(),
+                )
+        except Exception as docx_exc:
+            print(f"[docx] chat_id={message.chat.id} generation_error={type(docx_exc).__name__}: {docx_exc}", flush=True)
 
         if not has_route_choice:
             await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
@@ -4563,7 +4571,12 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                     if part
                 ).strip()
                 try:
-                    regenerated = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+                    regenerated = generate_html_report_file(
+                        report,
+                        output_dir=settings.report_output_dir,
+                        user_name=user_name,
+                        profile_version=str(data.get("report_generation_id") or "").strip(),
+                    )
                     html_path = _normalize_report_path(str(regenerated))
                     report_generation_id = str(data.get("report_generation_id") or "").strip()
                     await state.update_data(html_report_path=html_path)

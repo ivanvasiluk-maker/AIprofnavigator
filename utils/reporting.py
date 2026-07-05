@@ -18,6 +18,7 @@ class ReportMeta:
     country: str
     mode: str
     created_at: str
+    profile_version: str = ""
 
 
 def _resolve_unicode_font_path() -> Path | None:
@@ -159,12 +160,18 @@ def _detect_mode(report: dict) -> str:
     return "Growth"
 
 
-def build_meta(report: dict, user_name: str = "") -> ReportMeta:
+def build_meta(report: dict, user_name: str = "", profile_version: str = "") -> ReportMeta:
     name = _safe_text(user_name, "Пользователь")
     country = _detect_country(report)
     mode = _detect_mode(report)
     created_at = datetime.now().strftime("%Y-%m-%d")
-    return ReportMeta(user_name=name, country=country, mode=mode, created_at=created_at)
+    return ReportMeta(
+        user_name=name,
+        country=country,
+        mode=mode,
+        created_at=created_at,
+        profile_version=_safe_text(profile_version, "-") if str(profile_version or "").strip() else "-",
+    )
 
 
 def _clean_fact_line(text: object) -> str:
@@ -631,6 +638,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
                         <p><b>Страна:</b> {escape(meta.country)}</p>
                         <p><b>Дата:</b> {escape(meta.created_at)}</p>
                         <p><b>Режим:</b> {escape(meta.mode)}</p>
+                        <p><b>Версия профиля:</b> {escape(meta.profile_version)}</p>
                     </div>
                 </div>
   </section>
@@ -1029,8 +1037,8 @@ def generate_pdf_report(report: dict, output_dir: str, user_name: str = "") -> P
     return pdf_path
 
 
-def generate_html_report_file(report: dict, output_dir: str, user_name: str = "") -> Path:
-    meta = build_meta(report, user_name=user_name)
+def generate_html_report_file(report: dict, output_dir: str, user_name: str = "", profile_version: str = "") -> Path:
+    meta = build_meta(report, user_name=user_name, profile_version=profile_version)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", meta.user_name)[:40] or "user"
     base_dir = Path(output_dir)
