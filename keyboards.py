@@ -135,7 +135,7 @@ STEP_OTHER_STEP = "Другой шаг"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 RESULT_DOWNLOAD_DOCX = "📝 Скачать DOCX"
-QUESTION_ADD_TEXT = "✍️ Дополнить"
+QUESTION_ADD_TEXT = "✍️ Я запишу сам"
 EXTENDED_DIAG_YES = "🧩 Пройти расширенную диагностику"
 EXTENDED_DIAG_SKIP = "➡️ Продолжить без неё"
 ANSWER_RETRY = "✍️ Ответить заново"
