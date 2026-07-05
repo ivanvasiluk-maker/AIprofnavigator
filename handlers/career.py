@@ -278,7 +278,7 @@ async def _send_text_report_fallback_document(message: Message, lang: str, repor
     base_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     txt_path = base_dir / f"career_report_fallback_{ts}.txt"
-    txt_content = _short_conclusion_7_lines(report)
+    txt_content = _written_conclusion_from_report(report)
     txt_path.write_text(txt_content, encoding="utf-8")
     await message.answer_document(
         FSInputFile(str(txt_path.resolve())),
