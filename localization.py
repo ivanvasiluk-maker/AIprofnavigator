@@ -510,6 +510,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ru": "Полный разбор готов. HTML-документ прикреплён ниже.",
         "be": "",
     },
+    "web_report_public_url_not_configured": {
+        "ru": "Публичная ссылка на HTML пока не настроена. Документ уже прикреплён файлом; для кнопки откройте публичный REPORT_BASE_URL (не localhost).",
+        "be": "",
+    },
     "pdf_generation_started": {
         "ru": "PDF формируется в фоне. Основной полный разбор уже доступен в HTML.",
         "be": "",

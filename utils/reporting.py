@@ -230,6 +230,34 @@ def _build_story_echo(report: dict) -> str:
     )
 
 
+def _heard_facts(report: dict, limit: int = 4) -> list[str]:
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    explicit_facts = [_clean_fact_line(item) for item in (facts_only.get("explicit_facts") or [])]
+    explicit_facts = [item for item in explicit_facts if item]
+    inferences = [str(item).strip() for item in (facts_only.get("inferences") or []) if str(item).strip()]
+    combined: list[str] = []
+    for item in explicit_facts + inferences:
+        if item not in combined:
+            combined.append(item)
+        if len(combined) >= max(2, limit):
+            break
+    if not combined:
+        return ["Подтвержденных фактов пока мало: уточните 2-4 ключевые детали опыта и текущей ситуации."]
+    return combined[:limit]
+
+
+def _main_request(report: dict) -> str:
+    priorities = report.get("career_priorities") if isinstance(report.get("career_priorities"), list) else []
+    cleaned_priorities = [str(item).strip() for item in priorities if str(item).strip()]
+    if cleaned_priorities:
+        return cleaned_priorities[0]
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    route = _safe_text(decision.get("recommended_main_path"), "")
+    if route:
+        return f"Найти рабочий вход через маршрут: {route}"
+    return "Запрос требует уточнения: какой результат важнее в ближайшие 30 дней"
+
+
 def _unknowns_list(report: dict) -> list[str]:
     facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
     unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()]
@@ -430,6 +458,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
             if req not in market_questions and req != "-":
                 market_questions.append(req)
     unknowns = _unknowns_list(report)
+    heard_facts = _heard_facts(report, limit=4)
+    main_request = _main_request(report)
+    primary_constraint = next((item for item in weaknesses_items if item != "-"), "данных недостаточно")
     self_help_points, specialist_points = _psych_social_recommendation(report)
     scenario_labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
 
@@ -646,7 +677,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     <section class='page'>
         <h2>1. Что я услышал</h2>
         <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
-        <div class='card'><h3>Ключевые факты из истории и резюме</h3><p>{escape(story_echo)}</p></div>
+        <div class='card'><h3>Ключевые факты из истории и резюме (2-4)</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in heard_facts[:4])}</ul></div>
+        <div class='card'><h3>Главный запрос, ресурс и ограничение</h3><ul><li><b>Главный запрос:</b> {escape(main_request)}</li><li><b>Ресурс:</b> {escape(_level_label(report.get('resource_level')))}</li><li><b>Ограничение:</b> {escape(primary_constraint)}</li></ul></div>
 
         <h2>2. Профессиональное ядро</h2>
         <div class='card'><h3>Ваш профессиональный капитал</h3><p>{escape(_professional_core_summary(report))}</p></div>
@@ -719,7 +751,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Почему именно оно</h3><p>{escape(_safe_text(decision.get('why_this_path')))}</p></div>
         <div class='card'><h3>Что не делать сейчас</h3><p>{escape(_safe_text(decision.get('avoid_for_now')))}</p></div>
         <div class='card'><h3>Как проверить гипотезу</h3><ul>{''.join(f'<li>{escape(step)}</li>' for step in hypothesis_steps)}</ul></div>
-        <div class='card'><h3>Кнопки после отчёта</h3><ul><li>🧭 Начать первый шаг</li><li>✍️ Исправить факт или приоритет</li><li>📄 Загрузить / доработать резюме</li><li>🔎 Разобрать рынок и вакансии</li><li>👤 Разобрать со специалистом</li><li>👥 Найти группу / сообщество</li></ul></div>
+        <div class='card'><h3>Кнопки первого шага</h3><ul><li>Сделал</li><li>Слишком сложно</li><li>Сделать проще</li><li>Другой шаг</li></ul></div>
 
         <h2>9. План на 30 дней</h2>
     <div class='card'>
@@ -798,13 +830,24 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
             Это не медицинская рекомендация — только карьерная и адаптационная опора.
         </div>
 
+        <div class='closing-grid' style='margin-top:12px;'>
+            <div class='closing-card'>
+                <div class='closing-title'>Что можно делать самому</div>
+                <ul>{''.join(f'<li>{escape(x)}</li>' for x in self_help_points[:3]) or '<li>Сделайте один короткий шаг 5-20 минут и зафиксируйте результат.</li>'}</ul>
+            </div>
+            <div class='closing-card'>
+                <div class='closing-title'>О чем подумать со специалистом</div>
+                <ul>{''.join(f'<li>{escape(x)}</li>' for x in specialist_points[:3]) or '<li>Если шаги не запускаются, полезно разобрать барьер и переформулировать маршрут.</li>'}</ul>
+            </div>
+        </div>
+
         <div class='card' style='margin-top:14px;'>
             <h3>🔎 Проверьте карту</h3>
             <ul>
-                <li>✅ Всё похоже на правду → продолжайте по шагам</li>
-                <li>✍️ Исправить факт → карта обновится</li>
-                <li>🧭 Изменить приоритет → маршрут перестроится</li>
-                <li>❓ Не согласен с маршрутом → объясните, что не так</li>
+                <li>Всё похоже на правду</li>
+                <li>Исправить факт</li>
+                <li>Изменить приоритет</li>
+                <li>Не согласен с маршрутом</li>
             </ul>
         </div>
 
@@ -1027,14 +1070,23 @@ def generate_html_report_file(report: dict, output_dir: str, user_name: str = ""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", meta.user_name)[:40] or "user"
     base_dir = Path(output_dir)
-    html_path = base_dir / f"career_report_{safe_name}_{ts}.html"
+    if str(profile_version or "").strip():
+        safe_version = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(profile_version).strip())[:64] or "version"
+        html_path = base_dir / f"career_report_{safe_name}_v_{safe_version}.html"
+    else:
+        html_path = base_dir / f"career_report_{safe_name}_{ts}.html"
     html = render_report_html(report, meta)
     base_dir.mkdir(parents=True, exist_ok=True)
     html_path.write_text(html, encoding="utf-8")
     return html_path
 
 
-def generate_docx_report_file(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, str]:
+def generate_docx_report_file(
+    report: dict,
+    output_dir: str,
+    user_name: str = "",
+    profile_version: str = "",
+) -> tuple[Path | None, str]:
     """Generate a DOCX version of the report. Returns (path, error_string)."""
     try:
         from docx import Document
@@ -1043,22 +1095,47 @@ def generate_docx_report_file(report: dict, output_dir: str, user_name: str = ""
     except Exception as exc:
         return None, f"python-docx unavailable: {exc}"
 
-    meta = build_meta(report, user_name=user_name)
+    meta = build_meta(report, user_name=user_name, profile_version=profile_version)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", meta.user_name)[:40] or "user"
     base_dir = Path(output_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
-    docx_path = base_dir / f"career_report_{safe_name}_{ts}.docx"
+    if str(profile_version or "").strip():
+        safe_version = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(profile_version).strip())[:64] or "version"
+        docx_path = base_dir / f"career_report_{safe_name}_v_{safe_version}.docx"
+    else:
+        docx_path = base_dir / f"career_report_{safe_name}_{ts}.docx"
 
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
     today = action_plan.get("today", {}) if isinstance(action_plan.get("today"), dict) else {}
     market = report.get("market_analysis", []) if isinstance(report.get("market_analysis"), list) else []
+    recommendations = report.get("career_recommendations", []) if isinstance(report.get("career_recommendations"), list) else []
+    real_solutions = report.get("real_solutions", []) if isinstance(report.get("real_solutions"), list) else []
+    translation = report.get("career_translation", []) if isinstance(report.get("career_translation"), list) else []
+    bridges = report.get("career_bridges", []) if isinstance(report.get("career_bridges"), list) else []
     not_reset = report.get("what_not_reset", []) if isinstance(report.get("what_not_reset"), list) else []
+    experience_layers = report.get("experience_layers", []) if isinstance(report.get("experience_layers"), list) else []
+    career_barriers = report.get("career_barriers", []) if isinstance(report.get("career_barriers"), list) else []
+    barrier_landscape = report.get("barrier_landscape", {}) if isinstance(report.get("barrier_landscape"), dict) else {}
+    weekly = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
+    social_integration = report.get("social_integration", {}) if isinstance(report.get("social_integration"), dict) else {}
+    energy_sources = report.get("energy_sources", []) if isinstance(report.get("energy_sources"), list) else []
+    career_priorities = report.get("career_priorities", []) if isinstance(report.get("career_priorities"), list) else []
+    competency_signals = report.get("competency_signals", []) if isinstance(report.get("competency_signals"), list) else []
     resume_analysis = report.get("resume_analysis", {}) if isinstance(report.get("resume_analysis"), dict) else {}
     development = report.get("development_map", {}) if isinstance(report.get("development_map"), dict) else {}
     first_month = development.get("first_month", []) if isinstance(development.get("first_month"), list) else []
+    barriers_obj = digital_human.get("barriers") if isinstance(digital_human.get("barriers"), dict) else {}
+    strengths_items = list(dict.fromkeys(_list_items(not_reset)[:4] + _list_items(digital_human.get("hidden_strengths"))[:4]))[:6]
+    weaknesses_items = list(dict.fromkeys(_list_items(barriers_obj.get("internal"))[:3] + _list_items(barriers_obj.get("external"))[:3]))[:6]
+    story_facts = _heard_facts(report, limit=4)
+    main_request = _main_request(report)
+    resource_level_human = _resource_human_message(report.get("resource_level"))
+    integration_level_human = _integration_human_message(report.get("integration_level"))
+    primary_constraint = next((item for item in weaknesses_items if item != "-"), "данных недостаточно")
+    route_scenario_labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
     closing_message = _safe_text(
         report.get("closing_message"),
         "Это работа, а не испытание. Один проверяемый шаг — и карта начнёт двигаться.",
@@ -1102,42 +1179,156 @@ def generate_docx_report_file(report: dict, output_dir: str, user_name: str = ""
         # 1. Что я услышал
         _add_heading(doc, "1. Что я услышал", 1)
         _add_kv(doc, "Кто вы сейчас", _safe_text(digital_human.get("current_state")))
-        _add_kv(doc, "Главный актив", _safe_text(digital_human.get("main_asset")))
+        _add_heading(doc, "Ключевые факты из истории и резюме (2-4)", 2)
+        for item in story_facts:
+            _add_bullet(doc, item)
+        _add_kv(doc, "Главный запрос", main_request)
+        _add_kv(doc, "Ресурс", _level_label(report.get("resource_level")))
+        _add_kv(doc, "Ограничение", primary_constraint)
         doc.add_paragraph("")
 
         # 2. Профессиональное ядро
         _add_heading(doc, "2. Профессиональное ядро", 1)
         doc.add_paragraph(_professional_core_summary(report))
-        _add_heading(doc, "Что не обнулилось", 2)
+        _add_heading(doc, "Что не обнулилось после миграции", 2)
         for item in _list_items(not_reset)[:8]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Слои опыта", 2)
+        for item in _list_items(experience_layers)[:6]:
             _add_bullet(doc, item)
         doc.add_paragraph("")
 
-        # 3. Сравнение маршрутов
-        _add_heading(doc, "3. Сравнение маршрутов", 1)
-        labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
+        # 3. Сильные стороны и опоры
+        _add_heading(doc, "3. Сильные стороны и опоры", 1)
+        _add_heading(doc, "Подтвержденные сильные стороны", 2)
+        for item in strengths_items or ["Данных недостаточно"]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Источники энергии", 2)
+        for item in _list_items(energy_sources)[:6]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Карьерные приоритеты", 2)
+        for item in _list_items(career_priorities)[:6]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Подтвержденные компетенции", 2)
+        for item in _list_items(competency_signals)[:6]:
+            _add_bullet(doc, item)
+        doc.add_paragraph("")
+
+        # 4. Ограничения и неизвестные
+        _add_heading(doc, "4. Ограничения и неизвестные", 1)
+        _add_heading(doc, "Ограничения", 2)
+        for item in weaknesses_items or ["Данных недостаточно"]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Что нужно уточнить", 2)
+        for item in unknowns or ["Критичных неизвестных сейчас нет"]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "SWOT: Strengths", 2)
+        for item in strengths_items or ["Данных недостаточно"]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "SWOT: Weaknesses", 2)
+        for item in weaknesses_items or ["Данных недостаточно"]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Психологический и социальный анализ (без медицинских выводов)", 2)
+        _add_heading(doc, "Что можно делать самому", 3)
+        for item in self_help_pts:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Когда полезен специалист", 3)
+        for item in specialist_pts:
+            _add_bullet(doc, item)
+        doc.add_paragraph("")
+
+        # 5. Устойчивость в период изменений
+        _add_heading(doc, "5. Устойчивость в период изменений", 1)
+        _add_kv(doc, "Ресурс и рабочий темп", resource_level_human)
+        _add_kv(doc, "Главный риск", _safe_text(digital_human.get("main_risk")))
+        _add_kv(doc, "Главный страх", _safe_text(digital_human.get("main_fear")))
+        doc.add_paragraph("")
+
+        # 6. Интеграция в новой стране
+        _add_heading(doc, "6. Интеграция в новой стране", 1)
+        _add_kv(doc, "Состояние интеграции", integration_level_human)
+        _add_kv(doc, "Главный актив", _safe_text(digital_human.get("main_asset")))
+        _add_heading(doc, "Скрытые активы", 2)
+        for item in _list_items(digital_human.get("hidden_strengths"))[:6]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Люди и контакты", 2)
+        for item in _list_items(social_integration.get("people"))[:6]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Сообщества и мосты", 2)
+        for item in _list_items(social_integration.get("communities"))[:6]:
+            _add_bullet(doc, item)
+        _add_heading(doc, "Понимание рынка и возможности", 2)
+        for item in _list_items(social_integration.get("opportunities"))[:6]:
+            _add_bullet(doc, item)
+        doc.add_paragraph("")
+
+        # 7. Сравнение маршрутов
+        _add_heading(doc, "7. Сравнение маршрутов", 1)
         for idx, item in enumerate(market[:3]):
             if not isinstance(item, dict):
                 continue
-            label = labels[idx] if idx < len(labels) else f"Вариант {idx+1}"
+            label = route_scenario_labels[idx] if idx < len(route_scenario_labels) else f"Вариант {idx+1}"
             _add_heading(doc, f"{label}: {_safe_text(item.get('profession'))}", 2)
             _add_kv(doc, "Соответствие", f"{item.get('fit_percent', '-')}%")
             _add_kv(doc, "Доход", _safe_text(item.get("salary_range")))
             _add_kv(doc, "Скорость входа", _safe_text(item.get("entry_speed")))
             _add_kv(doc, "Требования", ", ".join(_list_items(item.get("requirements"))[:5]))
+            _add_kv(doc, "Риск", _safe_text(item.get("competition")))
+        _add_heading(doc, "Рекомендованные роли", 2)
+        for item in recommendations[:4]:
+            if not isinstance(item, dict):
+                continue
+            _add_bullet(doc, f"{_safe_text(item.get('title'))}: {_safe_text(item.get('why_fit'))}")
+        _add_heading(doc, "Три сценария: пессимистичный, базовый, оптимистичный", 2)
+        for idx, item in enumerate(real_solutions[:3]):
+            if not isinstance(item, dict):
+                continue
+            label = route_scenario_labels[idx] if idx < len(route_scenario_labels) else f"Вариант {idx+1}"
+            _add_bullet(doc, f"{label}: {_safe_text(item.get('title'))}; {_safe_text(item.get('why'))}")
+        _add_heading(doc, "Перевод опыта на язык рынка", 2)
+        for item in translation[:6]:
+            if not isinstance(item, dict):
+                continue
+            _add_bullet(doc, f"{_safe_text(item.get('source_experience'))} -> {_safe_text(item.get('market_term'))}")
+        _add_heading(doc, "Карьерные мосты", 2)
+        for item in bridges[:5]:
+            if not isinstance(item, dict):
+                continue
+            _add_bullet(doc, f"{_safe_text(item.get('role'))}: {_safe_text(item.get('first_market_test'))}")
+        _add_heading(doc, "Риски маршрутов и барьеры", 2)
+        for item in career_barriers[:5]:
+            if not isinstance(item, dict):
+                continue
+            _add_bullet(doc, f"{_safe_text(item.get('barrier'))}: {_safe_text(item.get('mechanism'))}")
+        _add_heading(doc, "Контекст застревания", 2)
+        _add_kv(doc, "Внешние барьеры", ", ".join(_list_items(barrier_landscape.get("external"))[:5]))
+        _add_kv(doc, "Внутренние барьеры", ", ".join(_list_items(barrier_landscape.get("internal"))[:5]))
+        _add_kv(doc, "Поведенческий риск", _safe_text(barrier_landscape.get("behavioral_risk")))
+        _add_kv(doc, "Первое противодействие", _safe_text(barrier_landscape.get("first_counter_action")))
         doc.add_paragraph("")
 
-        # 4. Выбранный маршрут и первый шаг
-        _add_heading(doc, "4. Выбранный маршрут и первый шаг", 1)
+        # 8. Выбранный маршрут и первый шаг
+        _add_heading(doc, "8. Выбранный маршрут и первый шаг", 1)
         _add_kv(doc, "Маршрут", _safe_text(decision.get("recommended_main_path")))
         _add_kv(doc, "Почему", _safe_text(decision.get("why_this_path")))
         _add_kv(doc, "Запасной", _safe_text(decision.get("backup_path")))
+        _add_kv(doc, "Что не делать сейчас", _safe_text(decision.get("avoid_for_now")))
         _add_kv(doc, "Первый шаг", _safe_text(today.get("action")))
         _add_kv(doc, "Время", _safe_text(today.get("timebox")))
+        _add_kv(doc, "Результат", _safe_text(today.get("result")))
+        _add_heading(doc, "Кнопки первого шага", 2)
+        for item in ["Сделал", "Слишком сложно", "Сделать проще", "Другой шаг"]:
+            _add_bullet(doc, item)
         doc.add_paragraph("")
 
-        # 5. План на 30 дней
-        _add_heading(doc, "5. План на 30 дней", 1)
+        # 9. План на 30 дней
+        _add_heading(doc, "9. План на 30 дней", 1)
+        _add_heading(doc, "Первая неделя", 2)
+        for task in _list_items(action_plan.get("this_week"))[:7]:
+            _add_bullet(doc, task)
+        _add_heading(doc, "Цели на месяц", 2)
+        for task in _list_items(action_plan.get("this_month"))[:6]:
+            _add_bullet(doc, task)
         for week in first_month[:4]:
             if not isinstance(week, dict):
                 continue
@@ -1145,21 +1336,43 @@ def generate_docx_report_file(report: dict, output_dir: str, user_name: str = ""
             for task in _list_items(week.get("tasks", []))[:4]:
                 _add_bullet(doc, task)
             doc.add_paragraph(f"Результат недели: {_safe_text(week.get('output'))}")
+        _add_heading(doc, "Недельный ритм (7 дней)", 2)
+        if weekly:
+            for item in weekly[:7]:
+                if isinstance(item, dict):
+                    _add_bullet(doc, f"День {item.get('day', '-')}: {_safe_text(item.get('task'))}")
+        else:
+            _add_bullet(doc, "Данных недостаточно")
         doc.add_paragraph("")
 
-        # 6. Анализ резюме
-        _add_heading(doc, "6. Анализ резюме", 1)
+        # 10. Анализ резюме
+        _add_heading(doc, "10. Анализ резюме", 1)
         if resume_analysis:
-            for item in _list_items(resume_analysis.get("what_is_good"))[:5]:
-                _add_bullet(doc, item, "✅ ")
-            for item in _list_items(resume_analysis.get("what_is_missing"))[:5]:
-                _add_bullet(doc, item, "⚠️ ")
+            _add_heading(doc, "Профессии и периоды", 2)
+            for item in _list_items(resume_analysis.get("professions"))[:6] + _list_items(resume_analysis.get("periods"))[:6]:
+                _add_bullet(doc, item)
+            _add_heading(doc, "Задачи и достижения", 2)
+            for item in _list_items(resume_analysis.get("tasks"))[:6] + _list_items(resume_analysis.get("what_is_good"))[:6]:
+                _add_bullet(doc, item)
+            _add_heading(doc, "Образование, языки, сертификаты", 2)
+            for item in _list_items(resume_analysis.get("education"))[:6] + _list_items(resume_analysis.get("languages"))[:6] + _list_items(resume_analysis.get("certificates"))[:6]:
+                _add_bullet(doc, item)
+            _add_heading(doc, "Что недосказано для маршрута", 2)
+            for item in _list_items(resume_analysis.get("what_is_missing"))[:6]:
+                _add_bullet(doc, item)
+            _add_heading(doc, "Несостыковки для уточнения", 2)
+            for item in _list_items(resume_analysis.get("inconsistencies"))[:6]:
+                _add_bullet(doc, item)
+            _add_heading(doc, "Вопросы для уточнения", 2)
+            for item in _list_items(resume_analysis.get("clarifying_questions"))[:6]:
+                _add_bullet(doc, item)
         else:
             doc.add_paragraph("Резюме не загружено. Загрузите CV для отдельного анализа под маршрут.")
+            _add_bullet(doc, "Кнопка: Загрузить резюме для анализа")
         doc.add_paragraph("")
 
-        # 7. Заключение (STAR section)
-        _add_heading(doc, "7. Что может быть не так. Заключение", 1)
+        # 11. Что может быть не так
+        _add_heading(doc, "11. Что может быть не так в моем выводе", 1)
         doc.add_paragraph(
             "Карта меняется при новых данных о языке, документах, резюме, приоритетах или рынке."
         )
@@ -1170,9 +1383,12 @@ def generate_docx_report_file(report: dict, output_dir: str, user_name: str = ""
         _add_heading(doc, "Что делать самому:", 2)
         for pt in self_help_pts:
             _add_bullet(doc, pt)
-        _add_heading(doc, "Когда полезен специалист:", 2)
+        _add_heading(doc, "О чем подумать со специалистом:", 2)
         for pt in specialist_pts:
             _add_bullet(doc, pt)
+        _add_heading(doc, "Кнопки валидации карты", 2)
+        for item in ["Все похоже на правду", "Исправить факт", "Изменить приоритет", "Не согласен с маршрутом"]:
+            _add_bullet(doc, item)
         doc.add_paragraph("")
 
         # Closing
@@ -1195,10 +1411,25 @@ def generate_pdf_from_html_file(html_path: Path) -> Path | None:
     return pdf_path
 
 
-def generate_report_files(report: dict, output_dir: str, user_name: str = "") -> tuple[Path | None, Path, Path | None]:
-    html_path = generate_html_report_file(report, output_dir=output_dir, user_name=user_name)
+def generate_report_files(
+    report: dict,
+    output_dir: str,
+    user_name: str = "",
+    profile_version: str = "",
+) -> tuple[Path | None, Path, Path | None]:
+    html_path = generate_html_report_file(
+        report,
+        output_dir=output_dir,
+        user_name=user_name,
+        profile_version=profile_version,
+    )
     pdf_path = generate_pdf_from_html_file(html_path)
-    docx_path, _ = generate_docx_report_file(report, output_dir=output_dir, user_name=user_name)
+    docx_path, _ = generate_docx_report_file(
+        report,
+        output_dir=output_dir,
+        user_name=user_name,
+        profile_version=profile_version,
+    )
     return pdf_path, html_path, docx_path
 
 

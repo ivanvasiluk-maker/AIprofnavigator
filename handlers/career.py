@@ -9,6 +9,7 @@ import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -211,6 +212,15 @@ def _report_public_url(path: Path) -> str:
     base = str(settings.report_base_url or "").strip().rstrip("/")
     if not base:
         return ""
+    lowered = base.lower()
+    if "localhost" in lowered or "127.0.0.1" in lowered or "[::1]" in lowered:
+        return ""
+    try:
+        host = (urlparse(base).hostname or "").lower()
+    except Exception:
+        host = ""
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return ""
     return f"{base}/{path.name}"
 
 
@@ -274,15 +284,9 @@ def _resolve_docx_report_path(data: dict) -> str:
 
 
 async def _send_text_report_fallback_document(message: Message, lang: str, report: dict) -> None:
-    base_dir = Path(settings.report_output_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    txt_path = base_dir / f"career_report_fallback_{ts}.txt"
-    txt_content = _written_conclusion_from_report(report)
-    txt_path.write_text(txt_content, encoding="utf-8")
-    await message.answer_document(
-        FSInputFile(str(txt_path.resolve())),
-        caption=t(lang, "text_report_fallback_caption"),
+    await message.answer(
+        "Полный текстовый разбор отключен. Основной формат отчёта — web-версия (HTML). "
+        "Попробуйте открыть отчёт по кнопке или повторите запрос.",
         reply_markup=result_actions_keyboard(),
     )
 
@@ -2875,6 +2879,8 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         )
         if html_url:
             await message.answer(t(lang, "web_report_ready"), reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url))
+        else:
+            await message.answer(t(lang, "web_report_public_url_not_configured"), reply_markup=route_choice_keyboard())
         await message.answer(t(lang, "pdf_generation_started"), reply_markup=route_choice_keyboard())
 
         _cancel_pdf_task(message.chat.id)
@@ -2890,7 +2896,12 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         )
         # Generate DOCX independently so optional export errors do not break primary web-report delivery.
         try:
-            docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
+            docx_path, _ = generate_docx_report_file(
+                report,
+                output_dir=settings.report_output_dir,
+                user_name=user_name,
+                profile_version=report_generation_id,
+            )
             if docx_path:
                 docx_report_path = _normalize_report_path(str(docx_path))
                 await message.answer_document(
