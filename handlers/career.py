@@ -273,6 +273,20 @@ def _resolve_docx_report_path(data: dict) -> str:
     return ""
 
 
+async def _send_text_report_fallback_document(message: Message, lang: str, report: dict) -> None:
+    base_dir = Path(settings.report_output_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    txt_path = base_dir / f"career_report_fallback_{ts}.txt"
+    txt_content = _short_conclusion_7_lines(report)
+    txt_path.write_text(txt_content, encoding="utf-8")
+    await message.answer_document(
+        FSInputFile(str(txt_path.resolve())),
+        caption=t(lang, "text_report_fallback_caption"),
+        reply_markup=result_actions_keyboard(),
+    )
+
+
 def _specialist_notify_target_chat_id() -> int | None:
     raw = str(settings.specialist_notify_chat_id or "").strip()
     if not raw:
@@ -2838,6 +2852,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
 
     short_conclusion = _short_conclusion_7_lines(report)
     await _answer_safe(message, _clip(short_conclusion, 3500), reply_markup=route_choice_keyboard())
+    await message.answer(t(lang, "report_file_preparing_wait"), reply_markup=route_choice_keyboard())
 
     pdf_report_path = ""
     html_report_path = ""
@@ -2894,9 +2909,10 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
 
         if not has_route_choice:
             await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
-    except Exception:
+    except Exception as exc:
+        print(f"[final-report] chat_id={message.chat.id} delivery_error={type(exc).__name__}: {exc}", flush=True)
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
-        await message.answer(t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
+        await _send_text_report_fallback_document(message, lang, report)
 
     await state.set_state(CareerFlow.FINAL_READY)
     today_task = _today_task_from_report(report)

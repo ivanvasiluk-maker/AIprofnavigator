@@ -478,6 +478,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ru": "Шаг 5/5. Готово. Ниже краткая карта: что не обнулилось, что мешает, что пока неизвестно, основной и запасной маршрут и маленький первый шаг.",
         "be": "",
     },
+    "report_file_preparing_wait": {
+        "ru": "Подождите 10-30 секунд, собираю документ и отправлю файлом прямо сюда.",
+        "be": "",
+    },
     "written_conclusion_intro": {
         "ru": "Ниже полное письменное заключение.",
         "be": "",
@@ -520,6 +524,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     },
     "docx_send_caption": {
         "ru": "Ваш отчёт NextYou в формате DOCX.",
+        "be": "",
+    },
+    "text_report_fallback_caption": {
+        "ru": "Полный разбор NextYou в текстовом формате.",
         "be": "",
     },
     "docx_pending": {
