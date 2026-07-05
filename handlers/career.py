@@ -2836,11 +2836,13 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         html_url = _report_public_url(html_path)
 
         await _track_event(message, state, "html_ready", meta={"path": html_path.name})
+        await message.answer_document(
+            FSInputFile(str(html_path)),
+            caption=t(lang, "web_report_ready"),
+            reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else route_choice_keyboard(),
+        )
         if html_url:
-            await message.answer(
-                t(lang, "web_report_ready"),
-                reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url),
-            )
+            await message.answer(t(lang, "web_report_ready"), reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url))
         await message.answer(t(lang, "pdf_generation_started"), reply_markup=route_choice_keyboard())
 
         _cancel_pdf_task(message.chat.id)
@@ -4542,12 +4544,12 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
         if html_path and Path(html_path).exists():
             html_url = _report_public_url(Path(html_path))
-            if html_url:
-                await message.answer(
-                    t(lang, "web_report_ready"),
-                    reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url),
-                )
-                return
+            await message.answer_document(
+                FSInputFile(html_path),
+                caption=t(lang, "web_report_ready"),
+                reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url) if html_url else result_actions_keyboard(),
+            )
+            return
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
 

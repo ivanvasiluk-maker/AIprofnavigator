@@ -503,7 +503,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "be": "",
     },
     "web_report_ready": {
-        "ru": "Полный разбор готов. Откройте его по кнопке ниже.",
+        "ru": "Полный разбор готов. HTML-документ прикреплён ниже.",
         "be": "",
     },
     "pdf_generation_started": {
