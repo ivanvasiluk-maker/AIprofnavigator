@@ -685,6 +685,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Состояние интеграции</h3><p>{escape(integration_level).replace('\n', '<br/>')}</p></div>
         <div class='card'><h3>Ваш главный актив</h3><p>{escape(_safe_text(digital_human.get('main_asset')))}</p></div>
         <div class='card'><h3>Скрытые активы</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(digital_human.get('hidden_strengths'))[:6])}</ul></div>
+                <div class='card'><h3>Люди и контакты</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('people'))[:6])}</ul></div>
+                <div class='card'><h3>Сообщества и мосты</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('communities'))[:6])}</ul></div>
+                <div class='card'><h3>Понимание рынка и возможности</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('opportunities'))[:6])}</ul></div>
   </section>
 
     <section class='page'>
@@ -692,21 +695,11 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
           <div class='muted'>Анализ возможностей</div>
     {''.join(possibilities) if possibilities else '<p class="muted">Данных недостаточно.</p>'}
         <div class='card'><h3>Что рынок будет проверять</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in market_questions[:10]) or '<li>Данных недостаточно.</li>'}</ul></div>
-        <h2>Рекомендованные роли</h2>
-        {''.join(recommendations_html) if recommendations_html else '<p class="muted">Данных недостаточно.</p>'}
-        <h2>Три сценария: пессимистичный, базовый, оптимистичный</h2>
-        {''.join(solutions_html) if solutions_html else '<p class="muted">Данных недостаточно.</p>'}
-  </section>
-
-    <section class='page'>
-        <h2>Перевод опыта и карьерные мосты</h2>
-        {''.join(translation_html) if translation_html else '<p class="muted">Данных недостаточно.</p>'}
-        {''.join(bridges_html) if bridges_html else '<p class="muted">Данных недостаточно.</p>'}
-    </section>
-
-    <section class='page'>
-        <h2>Барьеры и анти-цикл</h2>
-        {''.join(barriers_html) if barriers_html else '<p class="muted">Данных недостаточно.</p>'}
+                <div class='card'><h3>Рекомендованные роли</h3>{''.join(recommendations_html) if recommendations_html else '<p class="muted">Данных недостаточно.</p>'}</div>
+                <div class='card'><h3>Три сценария: пессимистичный, базовый, оптимистичный</h3>{''.join(solutions_html) if solutions_html else '<p class="muted">Данных недостаточно.</p>'}</div>
+        <div class='card'><h3>Перевод опыта на язык рынка</h3>{''.join(translation_html) if translation_html else '<p class="muted">Данных недостаточно.</p>'}</div>
+        <div class='card'><h3>Карьерные мосты и шаги входа</h3>{''.join(bridges_html) if bridges_html else '<p class="muted">Данных недостаточно.</p>'}</div>
+        <div class='card'><h3>Риски маршрутов и барьеры</h3>{''.join(barriers_html) if barriers_html else '<p class="muted">Данных недостаточно.</p>'}</div>
         <div class='card'>
             <h3>Контекст застревания</h3>
             <ul>
@@ -716,14 +709,6 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
                 <li><b>Первое противодействие:</b> {escape(_safe_text(barrier_landscape.get('first_counter_action')))}</li>
             </ul>
         </div>
-    </section>
-
-    <section class='page'>
-        <h2>Социальная и культурная интеграция</h2>
-        <div class='card'><h3>Люди</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('people'))[:6])}</ul></div>
-        <div class='card'><h3>Сообщества</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('communities'))[:6])}</ul></div>
-        <div class='card'><h3>Возможности</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('opportunities'))[:6])}</ul></div>
-        <div class='card'><h3>Вклад</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(social_integration.get('contribution'))[:6])}</ul></div>
     </section>
 
     <section class='page'>
