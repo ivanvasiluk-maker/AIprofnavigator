@@ -214,15 +214,25 @@ def _report_public_url(path: Path) -> str:
     return f"{base}/{path.name}"
 
 
+def _normalize_report_path(raw_path: str) -> str:
+    value = str(raw_path or "").strip()
+    if not value:
+        return ""
+    path_obj = Path(value).expanduser()
+    if not path_obj.is_absolute():
+        path_obj = Path.cwd() / path_obj
+    return str(path_obj.resolve())
+
+
 def _resolve_pdf_report_path(data: dict) -> str:
-    direct = str(data.get("pdf_report_path") or "").strip()
+    direct = _normalize_report_path(str(data.get("pdf_report_path") or ""))
     if direct and Path(direct).exists():
         return direct
 
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     if report_generation_id:
         persisted = get_report_by_generation_id(report_generation_id) or {}
-        persisted_path = str(persisted.get("pdf_report_path") or "").strip()
+        persisted_path = _normalize_report_path(str(persisted.get("pdf_report_path") or ""))
         if persisted_path and Path(persisted_path).exists():
             return persisted_path
 
@@ -234,14 +244,29 @@ def _resolve_pdf_report_path(data: dict) -> str:
 
 
 def _resolve_html_report_path(data: dict) -> str:
-    direct = str(data.get("html_report_path") or "").strip()
+    direct = _normalize_report_path(str(data.get("html_report_path") or ""))
     if direct and Path(direct).exists():
         return direct
 
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     if report_generation_id:
         persisted = get_report_by_generation_id(report_generation_id) or {}
-        persisted_path = str(persisted.get("html_report_path") or "").strip()
+        persisted_path = _normalize_report_path(str(persisted.get("html_report_path") or ""))
+        if persisted_path and Path(persisted_path).exists():
+            return persisted_path
+
+    return ""
+
+
+def _resolve_docx_report_path(data: dict) -> str:
+    direct = _normalize_report_path(str(data.get("docx_report_path") or ""))
+    if direct and Path(direct).exists():
+        return direct
+
+    report_generation_id = str(data.get("report_generation_id") or "").strip()
+    if report_generation_id:
+        persisted = get_report_by_generation_id(report_generation_id) or {}
+        persisted_path = _normalize_report_path(str(persisted.get("docx_report_path") or ""))
         if persisted_path and Path(persisted_path).exists():
             return persisted_path
 
@@ -320,7 +345,7 @@ async def _run_pdf_generation_background(
             pdf_path, pdf_error = None, str(exc)
 
         if pdf_path is not None and pdf_path.exists():
-            pdf_path_str = str(pdf_path)
+            pdf_path_str = _normalize_report_path(str(pdf_path))
             _PDF_READY_BY_CHAT[chat_id] = pdf_path_str
             if report_generation_id:
                 update_report_files(report_generation_id, pdf_report_path=pdf_path_str)
@@ -2832,12 +2857,13 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
 
         # Required flow: HTML report is always prepared first.
         html_path = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
-        html_report_path = str(html_path)
+        html_report_path = _normalize_report_path(str(html_path))
+        html_path = Path(html_report_path)
         html_url = _report_public_url(html_path)
 
         await _track_event(message, state, "html_ready", meta={"path": html_path.name})
         await message.answer_document(
-            FSInputFile(str(html_path)),
+            FSInputFile(html_report_path),
             caption=t(lang, "web_report_ready"),
             reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else route_choice_keyboard(),
         )
@@ -2859,7 +2885,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         # Generate DOCX and send it immediately if ready.
         docx_path, _ = generate_docx_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
         if docx_path:
-            docx_report_path = str(docx_path)
+            docx_report_path = _normalize_report_path(str(docx_path))
             await message.answer_document(
                 FSInputFile(docx_report_path),
                 caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
@@ -4536,7 +4562,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                 ).strip()
                 try:
                     regenerated = generate_html_report_file(report, output_dir=settings.report_output_dir, user_name=user_name)
-                    html_path = str(regenerated)
+                    html_path = _normalize_report_path(str(regenerated))
                     report_generation_id = str(data.get("report_generation_id") or "").strip()
                     await state.update_data(html_report_path=html_path)
                     if report_generation_id:
@@ -4552,6 +4578,31 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                 reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url) if html_url else result_actions_keyboard(),
             )
             return
+        pdf_path = _resolve_pdf_report_path(data)
+        if pdf_path and Path(pdf_path).exists():
+            await message.answer_document(
+                FSInputFile(pdf_path),
+                caption=t(lang, "pdf_send_caption"),
+                reply_markup=result_actions_keyboard(include_pdf_download=True),
+            )
+            return
+        docx_path = _resolve_docx_report_path(data)
+        if docx_path and Path(docx_path).exists():
+            await message.answer_document(
+                FSInputFile(docx_path),
+                caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
+                reply_markup=result_actions_keyboard(include_pdf_download=True, include_docx_download=True),
+            )
+            return
+        print(
+            "[open-full-report] file_not_found "
+            f"chat_id={message.chat.id} "
+            f"report_generation_id={str(data.get('report_generation_id') or '').strip()} "
+            f"html={_normalize_report_path(str(data.get('html_report_path') or ''))} "
+            f"pdf={_normalize_report_path(str(data.get('pdf_report_path') or ''))} "
+            f"docx={_normalize_report_path(str(data.get('docx_report_path') or ''))}",
+            flush=True,
+        )
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
 
@@ -4644,7 +4695,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     if action == RESULT_DOWNLOAD_DOCX:
         current_data = await state.get_data()
-        docx_path = str(current_data.get("docx_report_path") or "").strip()
+        docx_path = _resolve_docx_report_path(current_data)
         if docx_path and Path(docx_path).exists():
             await message.answer_document(
                 FSInputFile(docx_path),
