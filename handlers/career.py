@@ -367,19 +367,8 @@ async def _run_pdf_generation_background(
             _PDF_READY_BY_CHAT[chat_id] = pdf_path_str
             if report_generation_id:
                 update_report_files(report_generation_id, pdf_report_path=pdf_path_str)
-            await bot.send_document(
-                chat_id,
-                FSInputFile(pdf_path_str),
-                caption=t(lang, "pdf_send_caption"),
-            )
-            await bot.send_message(
-                chat_id,
-                t(lang, "pdf_ready_download"),
-                reply_markup=result_actions_keyboard(include_pdf_download=True),
-            )
             return
 
-        await bot.send_message(chat_id, t(lang, "pdf_safe_fallback"), reply_markup=pdf_fallback_keyboard())
         if report_generation_id:
             update_report_files(report_generation_id, pdf_report_path="")
         if pdf_error:
@@ -2836,7 +2825,6 @@ def _written_conclusion_from_report(report: dict) -> str:
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
-    has_route_choice = bool(str(data.get("user_route_choice") or "").strip())
     await state.set_state(CareerFlow.FINAL_READY)
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
@@ -2848,7 +2836,6 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     html_report_path = ""
     docx_report_path = ""
     rows = _build_route_comparison_rows(report)
-    compare_text = _format_route_comparison(rows)
     await state.update_data(route_compare_rows=rows)
     try:
         user_name = " ".join(
@@ -2879,9 +2866,6 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         )
         if html_url:
             await message.answer(t(lang, "web_report_ready"), reply_markup=telegram_link_keyboard("📄 Открыть полный разбор", html_url))
-        else:
-            await message.answer(t(lang, "web_report_public_url_not_configured"), reply_markup=route_choice_keyboard())
-        await message.answer(t(lang, "pdf_generation_started"), reply_markup=route_choice_keyboard())
 
         _cancel_pdf_task(message.chat.id)
         _PDF_READY_BY_CHAT.pop(message.chat.id, None)
@@ -2894,7 +2878,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
                 report_generation_id=report_generation_id,
             )
         )
-        # Generate DOCX independently so optional export errors do not break primary web-report delivery.
+        # HTML is the primary user-facing result. Keep optional exports silent.
         try:
             docx_path, _ = generate_docx_report_file(
                 report,
@@ -2904,16 +2888,8 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
             )
             if docx_path:
                 docx_report_path = _normalize_report_path(str(docx_path))
-                await message.answer_document(
-                    FSInputFile(docx_report_path),
-                    caption=t(lang, "docx_send_caption") or "Ваш отчёт в формате DOCX",
-                    reply_markup=route_choice_keyboard(),
-                )
         except Exception as docx_exc:
             print(f"[docx] chat_id={message.chat.id} generation_error={type(docx_exc).__name__}: {docx_exc}", flush=True)
-
-        if not has_route_choice:
-            await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
     except Exception as exc:
         print(f"[final-report] chat_id={message.chat.id} delivery_error={type(exc).__name__}: {exc}", flush=True)
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})

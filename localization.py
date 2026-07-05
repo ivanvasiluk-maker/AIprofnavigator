@@ -935,7 +935,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         "be": "",
     },
     "specialist_contact_intro": {
-        "ru": "Заявка на разбор принята (ID: {request_id}). Специалист свяжется с вами в этом чате.",
+        "ru": "Заявка на разбор принята (ID: {request_id}). Я свяжусь с вами в этом чате.",
         "be": "",
     },
     "support_group_contact_intro": {
