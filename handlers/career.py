@@ -2875,6 +2875,8 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
     await state.set_state(CareerFlow.FINAL_READY)
     today_task = _today_task_from_report(report)
     await state.update_data(
+        final_report=report,
+        final_report_generated=True,
         skiller_today_task=today_task,
         chat_id=message.chat.id,
         pdf_report_path=pdf_report_path,
@@ -4490,11 +4492,11 @@ async def handle_route_selection_fallback(message: Message, state: FSMContext) -
 async def handle_post_result_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
-    if not data.get("final_report_generated"):
+    action = (message.text or "").strip()
+    if not data.get("final_report_generated") and action != RESULT_OPEN_FULL_REPORT:
         await message.answer(t(lang, "generation_lock_message"))
         return
 
-    action = (message.text or "").strip()
     await _track_event(message, state, "result_action_clicked", action=action)
     if action == MAP_CHECK_DISAGREE_ROUTE:
         await _track_event(message, state, "user_disagreed", action=action)
