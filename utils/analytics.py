@@ -16,6 +16,54 @@ from utils.persistence import get_recent_events, get_recent_events_all, get_user
 _registry_lock = threading.Lock()
 _ASYNC_EVENT_TASKS: set[asyncio.Task] = set()
 
+_INTERVIEW_QUALITY_EVENTS: set[str] = {
+    "story_evidence_extracted",
+    "career_hypothesis_created",
+    "career_hypothesis_confirmed",
+    "career_hypothesis_rejected",
+    "critical_gap_detected",
+    "clarifying_question_asked",
+    "clarifying_question_skipped_existing_answer",
+    "interview_ready",
+    "interview_ready_with_uncertainty",
+    "preliminary_map_shown",
+    "profile_correction_received",
+    "report_guardrail_failed",
+    "report_regenerated",
+}
+
+_EVENT_ALIASES: dict[str, str] = {
+    # Existing runtime events -> PATCH-33 canonical events
+    "story_submitted": "story_evidence_extracted",
+    "question_shown": "clarifying_question_asked",
+    "conflict_detected": "clarifying_question_skipped_existing_answer",
+    "interview_ready_early": "interview_ready_with_uncertainty",
+    "prelim_map_error_flagged": "profile_correction_received",
+    "guardrail_violations": "report_guardrail_failed",
+    "guardrail_regen_triggered": "report_regenerated",
+}
+
+_FIRST_VALUE_EVENTS: set[str] = {
+    "interview_ready",
+    "interview_ready_with_uncertainty",
+    "preliminary_map_shown",
+    "report_generated",
+}
+
+
+def _canonical_event_name(event: str, meta: dict[str, Any] | None = None) -> str:
+    raw = str(event or "unknown").strip()
+    if not raw:
+        return "unknown"
+    if raw in _INTERVIEW_QUALITY_EVENTS:
+        return raw
+    normalized = _EVENT_ALIASES.get(raw, raw)
+    if normalized == "interview_ready_with_uncertainty":
+        status = str((meta or {}).get("status") or "").strip().lower()
+        if status == "ready":
+            return "interview_ready"
+    return normalized
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -211,33 +259,210 @@ def log_behavior_event_sync(
     meta: dict[str, Any] | None = None,
     session_id: str = "",
 ) -> None:
+    meta_payload = meta or {}
+    canonical_event = _canonical_event_name(event, meta_payload)
     payload: dict[str, Any] = {
         "timestamp": _utc_now().isoformat(),
         "public_user_id": public_user_id,
-        "event": (event or "unknown").strip(),
+        "event": canonical_event,
         "state": (state_name or "").strip(),
         "action": (action or "").strip(),
         "user_mode": (user_mode or "").strip(),
         "language": (language or "ru").strip(),
         "days_since_first_seen": days_since_first_seen(public_user_id),
         "session_id": (session_id or "").strip(),
-        "meta": meta or {},
+        "meta": meta_payload,
     }
+    if canonical_event == "clarifying_question_asked":
+        # PATCH-34 rule: each question must map to a decision that can change.
+        decision_change = str(meta_payload.get("decision_that_may_change") or meta_payload.get("decision_impact") or "").strip()
+        payload["meta"]["question_has_decision_justification"] = bool(decision_change)
+
     _append_local_event(payload)
     sheets_delivery = _send_to_google_sheets(payload)
     payload["sheets_delivery"] = "ok" if sheets_delivery else "failed_or_disabled"
     _append_excel_event(payload)
     record_event(
         public_user_id=public_user_id,
-        event=(event or "unknown").strip(),
+        event=canonical_event,
         state_name=(state_name or "").strip(),
         action=(action or "").strip(),
         user_mode=(user_mode or "").strip(),
         language=(language or "ru").strip(),
-        meta=meta or {},
+        meta=meta_payload,
         session_id=(session_id or "").strip(),
         timestamp=str(payload.get("timestamp") or ""),
     )
+
+
+def interview_quality_metrics(*, lookback_days: int = 30, sample_limit: int = 3000) -> dict[str, Any]:
+    """Aggregate quality metrics for conversational interview flow (PATCH-33)."""
+    rows = get_recent_events_all(lookback_days=max(1, int(lookback_days)), limit=250000)
+    if not rows:
+        return {
+            "sample_users": 0,
+            "average_questions_before_preliminary_map": 0.0,
+            "percentage_reports_without_extra_questions": 0.0,
+            "duplicate_question_rate": 0.0,
+            "user_correction_rate": 0.0,
+            "critical_guardrail_failure_rate": 0.0,
+            "average_time_to_first_value": 0.0,
+            "preliminary_map_acceptance_rate": 0.0,
+            "route_change_after_report_rate": 0.0,
+            "time_to_first_useful_hypothesis": 0.0,
+            "anti_metrics": ["number_of_fields_completed"],
+        }
+
+    by_user: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        uid = str(row.get("public_user_id") or "").strip()
+        if not uid:
+            continue
+        by_user.setdefault(uid, []).append(row)
+        if len(by_user) > max(1, int(sample_limit)):
+            break
+
+    def _to_dt(value: str) -> datetime | None:
+        return _parse_iso(value)
+
+    users = list(by_user.keys())
+    if not users:
+        return {
+            "sample_users": 0,
+            "average_questions_before_preliminary_map": 0.0,
+            "percentage_reports_without_extra_questions": 0.0,
+            "duplicate_question_rate": 0.0,
+            "user_correction_rate": 0.0,
+            "critical_guardrail_failure_rate": 0.0,
+            "average_time_to_first_value": 0.0,
+            "preliminary_map_acceptance_rate": 0.0,
+            "route_change_after_report_rate": 0.0,
+            "time_to_first_useful_hypothesis": 0.0,
+            "anti_metrics": ["number_of_fields_completed"],
+        }
+
+    total_questions = 0
+    duplicate_questions = 0
+    users_with_reports = 0
+    users_reports_without_extra_questions = 0
+    prelim_shown_count = 0
+    prelim_accepted_count = 0
+    route_changed_after_report = 0
+    user_corrections = 0
+    critical_guardrail_failures = 0
+    report_generations = 0
+    q_before_prelim_samples: list[int] = []
+    ttfv_samples: list[float] = []
+    useful_hypothesis_samples: list[float] = []
+
+    for uid in users:
+        user_rows = by_user.get(uid, [])
+        user_rows.sort(key=lambda r: str(r.get("timestamp") or ""))
+        seen_signatures: set[str] = set()
+        questions_before_prelim = 0
+        prelim_shown_at: datetime | None = None
+        report_generated_at: datetime | None = None
+        story_start_at: datetime | None = None
+        first_value_at: datetime | None = None
+        first_useful_hypothesis_at: datetime | None = None
+        interview_ready_at: datetime | None = None
+        report_has_extra_q_after_ready = False
+        report_has_route_change_after = False
+
+        for row in user_rows:
+            ts = _to_dt(str(row.get("timestamp") or ""))
+            if ts is None:
+                continue
+            event_name = _canonical_event_name(str(row.get("event") or ""), row.get("meta") if isinstance(row.get("meta"), dict) else None)
+            meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+
+            if story_start_at is None and event_name == "story_evidence_extracted":
+                story_start_at = ts
+
+            if first_value_at is None and event_name in _FIRST_VALUE_EVENTS:
+                first_value_at = ts
+
+            if event_name in {"career_hypothesis_confirmed", "interview_ready", "interview_ready_with_uncertainty"} and first_useful_hypothesis_at is None:
+                first_useful_hypothesis_at = ts
+
+            if event_name == "clarifying_question_asked":
+                total_questions += 1
+                signature = str(meta.get("signature") or meta.get("question_signature") or meta.get("question_id") or "").strip()
+                if signature:
+                    if signature in seen_signatures:
+                        duplicate_questions += 1
+                    seen_signatures.add(signature)
+                if prelim_shown_at is None:
+                    questions_before_prelim += 1
+                if interview_ready_at is not None and report_generated_at is None:
+                    report_has_extra_q_after_ready = True
+
+            if event_name == "preliminary_map_shown":
+                prelim_shown_count += 1
+                if prelim_shown_at is None:
+                    prelim_shown_at = ts
+
+            if event_name in {"prelim_map_confirmed", "career_hypothesis_confirmed"}:
+                prelim_accepted_count += 1
+
+            if event_name in {"interview_ready", "interview_ready_with_uncertainty"} and interview_ready_at is None:
+                interview_ready_at = ts
+
+            if event_name == "profile_correction_received":
+                user_corrections += 1
+
+            if event_name == "report_guardrail_failed":
+                report_generations += 1
+                errors = meta.get("errors") if isinstance(meta.get("errors"), list) else []
+                critical_count = int(meta.get("critical_count") or 0)
+                if critical_count > 0 or any(str(item).startswith("[CRITICAL]") for item in errors):
+                    critical_guardrail_failures += 1
+
+            if event_name == "report_generated" and report_generated_at is None:
+                report_generated_at = ts
+                users_with_reports += 1
+
+            if event_name == "route_changed" and report_generated_at is not None:
+                report_has_route_change_after = True
+
+        if prelim_shown_at is not None:
+            q_before_prelim_samples.append(questions_before_prelim)
+
+        if story_start_at is not None and first_value_at is not None:
+            ttfv_samples.append(max(0.0, (first_value_at - story_start_at).total_seconds()))
+
+        if story_start_at is not None and first_useful_hypothesis_at is not None:
+            useful_hypothesis_samples.append(max(0.0, (first_useful_hypothesis_at - story_start_at).total_seconds()))
+
+        if report_generated_at is not None and not report_has_extra_q_after_ready:
+            users_reports_without_extra_questions += 1
+
+        if report_has_route_change_after:
+            route_changed_after_report += 1
+
+    def _avg(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        return round(sum(values) / len(values), 2)
+
+    def _pct(num: int, den: int) -> float:
+        if den <= 0:
+            return 0.0
+        return round((100.0 * num) / den, 2)
+
+    return {
+        "sample_users": len(users),
+        "average_questions_before_preliminary_map": _avg([float(v) for v in q_before_prelim_samples]),
+        "percentage_reports_without_extra_questions": _pct(users_reports_without_extra_questions, users_with_reports),
+        "duplicate_question_rate": _pct(duplicate_questions, total_questions),
+        "user_correction_rate": _pct(user_corrections, prelim_shown_count),
+        "critical_guardrail_failure_rate": _pct(critical_guardrail_failures, max(report_generations, 1)),
+        "average_time_to_first_value": _avg(ttfv_samples),
+        "preliminary_map_acceptance_rate": _pct(prelim_accepted_count, prelim_shown_count),
+        "route_change_after_report_rate": _pct(route_changed_after_report, users_with_reports),
+        "time_to_first_useful_hypothesis": _avg(useful_hypothesis_samples),
+        "anti_metrics": ["number_of_fields_completed"],
+    }
 
 
 async def log_behavior_event(
@@ -410,6 +635,7 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
     """
     rows = get_recent_events_all(lookback_days=60, limit=250000)
     if not rows:
+        interview_quality = interview_quality_metrics(lookback_days=60, sample_limit=sample_limit)
         return {
             "sample_users": 0,
             "reached_map_percent": 0.0,
@@ -419,6 +645,7 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
             "specialist_click_percent": 0.0,
             "pdf_or_report_error_percent": 0.0,
             "dropoff_stages": [],
+            "interview_quality": interview_quality,
         }
 
     user_order: list[str] = []
@@ -449,6 +676,7 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
 
     sample_size = len(user_order)
     if sample_size == 0:
+        interview_quality = interview_quality_metrics(lookback_days=60, sample_limit=sample_limit)
         return {
             "sample_users": 0,
             "reached_map_percent": 0.0,
@@ -458,6 +686,7 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
             "specialist_click_percent": 0.0,
             "pdf_or_report_error_percent": 0.0,
             "dropoff_stages": [],
+            "interview_quality": interview_quality,
         }
 
     reached_map = 0
@@ -491,6 +720,8 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
     def _pct(value: int) -> float:
         return round((100.0 * value) / sample_size, 2)
 
+    interview_quality = interview_quality_metrics(lookback_days=60, sample_limit=sample_limit)
+
     return {
         "sample_users": sample_size,
         "reached_map_percent": _pct(reached_map),
@@ -500,4 +731,5 @@ def pilot_quality_metrics(sample_limit: int = 100) -> dict[str, Any]:
         "specialist_click_percent": _pct(specialist),
         "pdf_or_report_error_percent": _pct(errors),
         "dropoff_stages": dropoff_counter.most_common(5),
+        "interview_quality": interview_quality,
     }

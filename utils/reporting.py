@@ -258,10 +258,131 @@ def _main_request(report: dict) -> str:
     return "Запрос требует уточнения: какой результат важнее в ближайшие 30 дней"
 
 
+def _strategy_bundle(report: dict) -> tuple[str, list[str]]:
+    code = str(report.get("career_strategy") or "").strip()
+    bundle = report.get(code) if code and isinstance(report.get(code), dict) else {}
+    if not code or not isinstance(bundle, dict):
+        return "", []
+
+    if code == "fast_income":
+        return (
+            "Нужен доход в ближайшие 1–2 месяца",
+            [
+                _safe_text(bundle.get("goal_30_days")),
+                f"Быстрые роли: {', '.join(_list_items(bundle.get('realistic_entry_roles'))[:4])}",
+                f"Минимум для входа: {', '.join(_list_items(bundle.get('minimum_requirements'))[:5])}",
+                f"План 7 дней: {', '.join(_list_items(bundle.get('application_plan_7_days'))[:3])}",
+                f"Следующий шаг: {_safe_text(bundle.get('today_action', {}).get('action') if isinstance(bundle.get('today_action'), dict) else '')}",
+            ],
+        )
+    if code == "upskill_for_profile":
+        return (
+            "Готов(а) добрать навыки 3–6 месяцев",
+            [
+                _safe_text(bundle.get("language_target")),
+                f"Целевые роли: {', '.join(_list_items(bundle.get('target_roles_6_months'))[:4])}",
+                f"План 12 недель: {', '.join(_list_items(bundle.get('checkpoints'))[:4])}",
+                f"Портфолио / кейсы: {', '.join(_list_items(bundle.get('portfolio_or_case_plan'))[:3])}",
+            ],
+        )
+    if code == "long_transition":
+        return (
+            "Готов(а) вложиться в переобучение и смену траектории",
+            [
+                _safe_text(bundle.get("goal_30_days")),
+                f"Долгий горизонт: {', '.join(_list_items(bundle.get('target_roles_6_months'))[:4])}",
+                f"Сегодня: {_safe_text(bundle.get('today_action', {}).get('action') if isinstance(bundle.get('today_action'), dict) else '')}",
+            ],
+        )
+    if code == "need_decision":
+        return (
+            "Не уверен(а), помоги выбрать",
+            [
+                _safe_text(bundle.get("message")),
+                f"Предварительный маршрут: {_safe_text(bundle.get('preliminary_route'))}",
+                f"Что уточнить: {', '.join(_list_items(bundle.get('missing_fields'))[:6]) or 'данных недостаточно'}",
+            ],
+        )
+    return "", []
+
+
 def _unknowns_list(report: dict) -> list[str]:
     facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
     unknowns = [str(item).strip() for item in (facts_only.get("unknowns") or []) if str(item).strip()]
     return unknowns[:6]
+
+
+def _decatastrophize_language(text: object) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return "данных недостаточно"
+    replacements = {
+        "Ваша идеальная профессия": "Возможный маршрут",
+        "Вы точно должны стать": "Предварительная гипотеза",
+        "Ваше настоящее предназначение": "Потребуется проверить",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    return value
+
+
+def _route_evidence_blocks(report: dict) -> list[dict[str, object]]:
+    raw = report.get("route_evidence_blocks") if isinstance(report.get("route_evidence_blocks"), list) else []
+    blocks: list[dict[str, object]] = []
+    allowed_roles = {"primary", "transition", "quick", "emergency"}
+
+    def _normalize_row(row: dict, fallback_income_role: str) -> dict[str, object]:
+        income_role = str(row.get("income_role") or fallback_income_role).strip().lower()
+        if income_role not in allowed_roles:
+            income_role = fallback_income_role
+        return {
+            "route": _decatastrophize_language(row.get("route") or "Возможный маршрут"),
+            "why_it_fits": _list_items(row.get("why_it_fits")),
+            "evidence_from_user": _list_items(row.get("evidence_from_user")),
+            "missing_competencies": _list_items(row.get("missing_competencies")),
+            "entry_level": _safe_text(row.get("entry_level"), "Потребуется проверить"),
+            "income_role": income_role,
+            "risks": _list_items(row.get("risks")),
+            "what_may_disprove_this_route": _list_items(row.get("what_may_disprove_this_route")),
+        }
+
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        fallback = "primary" if len(blocks) == 0 else "transition" if len(blocks) == 1 else "quick" if len(blocks) == 2 else "emergency"
+        blocks.append(_normalize_row(row, fallback))
+
+    if blocks:
+        return blocks
+
+    market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+    facts = _heard_facts(report, limit=4)
+    fallback_roles = ["primary", "transition", "quick", "emergency"]
+    for idx, role in enumerate(fallback_roles):
+        row = market[idx] if idx < len(market) and isinstance(market[idx], dict) else {}
+        route_name = _safe_text(row.get("profession"), "Возможный маршрут")
+        risks = [
+            _safe_text(row.get("competition"), "Потребуется проверить уровень конкуренции"),
+            "Потребуется проверить стабильность входа на локальном рынке",
+        ]
+        blocks.append(
+            {
+                "route": _decatastrophize_language(route_name),
+                "why_it_fits": [
+                    _safe_text(row.get("profile_match_reason"), "Предварительная гипотеза по совпадению опыта."),
+                ],
+                "evidence_from_user": facts[:3],
+                "missing_competencies": _list_items(row.get("requirements"))[:4],
+                "entry_level": _safe_text(row.get("entry_speed"), "Потребуется проверить"),
+                "income_role": role,
+                "risks": risks[:3],
+                "what_may_disprove_this_route": [
+                    "Новые факты о legal access или языковом уровне",
+                    "Прямой отказ пользователя от функции маршрута",
+                ],
+            }
+        )
+    return blocks
 
 
 def _psych_social_recommendation(report: dict) -> tuple[list[str], list[str]]:
@@ -292,6 +413,24 @@ def _psych_social_recommendation(report: dict) -> tuple[list[str], list[str]]:
     specialist.append("Это не медицинское заключение: рекомендация нужна только для опоры и ускорения адаптации.")
 
     return self_help[:3], specialist[:3]
+
+
+def _first_step_buttons(report: dict) -> list[str]:
+    buttons = report.get("first_step_buttons") if isinstance(report.get("first_step_buttons"), list) else []
+    cleaned = [str(item).strip() for item in buttons if str(item).strip()]
+    if cleaned:
+        return cleaned[:5]
+
+    if str(report.get("profile_domain") or "").strip() == "construction_engineering_cost_estimation":
+        return [
+            "Сделал",
+            "Слишком сложно",
+            "Сделать проще",
+            "Помоги составить таблицу",
+            "Хочу примеры запросов",
+        ]
+
+    return ["Сделал", "Слишком сложно", "Сделать проще", "Другой шаг"]
 
 
 def build_telegram_summary(report: dict) -> str:
@@ -339,26 +478,83 @@ def build_telegram_summary(report: dict) -> str:
         for row in first_month[:4]
         if isinstance(row, dict)
     ) or "- данных недостаточно"
+    strategy_title, strategy_lines = _strategy_bundle(report)
+    strategy_block = "\n".join(f"- {line}" for line in strategy_lines) if strategy_lines else "- данных недостаточно"
+    route_evidence = _route_evidence_blocks(report)
+
+    income_label = {
+        "primary": "Основной маршрут",
+        "transition": "Переходный маршрут",
+        "quick": "Быстрый доход",
+        "emergency": "Аварийный вариант",
+    }
+    evidence_lines: list[str] = []
+    for item in route_evidence[:4]:
+        if not isinstance(item, dict):
+            continue
+        label = income_label.get(str(item.get("income_role") or ""), "Возможный маршрут")
+        evidence_lines.append(
+            f"- {label}: {_safe_text(item.get('route'))}; доказательства: {', '.join(_list_items(item.get('evidence_from_user'))[:2])}; "
+            f"проверка: {', '.join(_list_items(item.get('what_may_disprove_this_route'))[:2])}"
+        )
+    evidence_block = "\n".join(evidence_lines) if evidence_lines else "- данных недостаточно"
+
+    function_lines = [f"- {item}" for item in _list_items(competency_signals)[:5] if str(item).strip() and str(item).strip() != "-"]
+    function_block = "\n".join(function_lines) if function_lines else "- данных недостаточно"
+
+    level_lines = []
+    for row in report.get("function_levels", []) if isinstance(report.get("function_levels"), list) else []:
+        if not isinstance(row, dict):
+            continue
+        level_lines.append(f"- {_safe_text(row.get('function'))}: {_safe_text(row.get('level'))}")
+    if not level_lines:
+        level_lines.append("- Предварительная гипотеза: уровень по функциям нужно уточнить по доказательствам.")
+    levels_block = "\n".join(level_lines)
+
+    explicit_refusals = report.get("explicit_refusals") if isinstance(report.get("explicit_refusals"), list) else []
+    refusals_block = "\n".join(f"- {str(item).strip()}" for item in explicit_refusals if str(item).strip())
+    if not refusals_block:
+        refusals_block = "- Прямые отказы не зафиксированы: потребуется проверить."
+
+    cannot_claim_block = "\n".join(f"- {item}" for item in unknowns[:4]) if unknowns else "- Категоричные выводы делать нельзя: данных недостаточно."
+    constraints_block = "\n".join(f"- {item}" for item in weaknesses[:5] if str(item).strip()) or "- данных недостаточно"
+    main_route = _safe_text(decision.get("recommended_main_path"), "Возможный маршрут")
+    backup_route = _safe_text(decision.get("backup_path"), "Предварительная гипотеза")
 
     summary = [
         story_echo,
         "",
         "Ваш NextYou отчёт",
         "",
-        f"1. Что я услышал:\n{story_echo}",
-        f"2. Профессиональное ядро:\n{professional_core}",
+        f"1. Как мы поняли вашу ситуацию:\n{story_echo}",
+        f"2. Ваше профессиональное ядро:\n{professional_core}",
+        f"3. Подтверждённые функции:\n{function_block}",
+        f"4. Уровень по каждой функции:\n{levels_block}",
+        f"5. Что нельзя утверждать на основании имеющихся данных:\n{cannot_claim_block}",
+        f"6. Что вы хотите сохранить:\n{not_reset_block}",
+        f"7. От чего вы хотите уйти:\n{refusals_block}",
+        f"8. Основной маршрут:\nВозможный маршрут: {main_route}",
+        f"9. Переходный маршрут:\nПредварительная гипотеза: {backup_route}",
+        f"10. Быстрый доход:\n{_safe_text(digital_human.get('fastest_path_to_income'), 'Потребуется проверить конкретную роль быстрого дохода.')}",
+        f"11. Аварийный вариант:\n{_safe_text(decision.get('avoid_for_now'), 'Потребуется проверить аварийный вариант в зависимости от ограничений.')}",
+        f"12. Требования и ограничения:\n{constraints_block}",
+        f"13. Неопределённости:\n{unknowns_block}",
+        f"Маршрутные доказательства:\n{evidence_block}",
+        f"14. Первый шаг до 15 минут:\n{_safe_text(today.get('action'))}",
+        f"15. План на неделю и месяц:\n{weekly_block}\n{month_block}",
+        f"Стратегия выбора:\n{strategy_title or 'данных недостаточно'}\n{strategy_block}",
         f"Кто вы сейчас:\n{_safe_text(digital_human.get('current_state'))}",
         f"Что не обнулилось:\n{not_reset_block}",
         f"Ваше профессиональное ядро:\n{professional_core}",
-        f"3. Сильные стороны и опоры:\n{energy_block}",
-        f"4. Ограничения и неизвестные:\n{weaknesses_block}\n\nЧто уточнить:\n{unknowns_block}",
-        f"5. Устойчивость в период изменений:\n{resource_level}",
+        f"Сильные стороны и опоры:\n{energy_block}",
+        f"Ограничения и неизвестные:\n{weaknesses_block}\n\nЧто уточнить:\n{unknowns_block}",
+        f"Устойчивость в период изменений:\n{resource_level}",
         f"Ресурс и рабочий темп:\n{resource_level}",
-        f"6. Интеграция в новой стране:\n{integration_level}",
+        f"Интеграция в новой стране:\n{integration_level}",
         f"Состояние интеграции:\n{integration_level}",
-        f"7. Сравнение маршрутов:\n{route_block}",
-        f"8. Выбранный маршрут и первый шаг:\n{_safe_text(decision.get('recommended_main_path'))}\n{_safe_text(today.get('action'))}",
-        f"9. План на 30 дней:\n{weekly_block}\n{month_block}",
+        f"Сравнение маршрутов:\n{route_block}",
+        f"Выбранный маршрут и первый шаг:\n{_safe_text(decision.get('recommended_main_path'))}\n{_safe_text(today.get('action'))}",
+        f"План на 30 дней:\n{weekly_block}\n{month_block}",
         f"10. Анализ резюме:\nАнализ CV: {resume_status}",
         f"11. Что может быть не так:\n{weaknesses_block}",
         f"Источники энергии:\n{energy_block}",
@@ -367,9 +563,9 @@ def build_telegram_summary(report: dict) -> str:
         f"Что делать самому:\n{_safe_text(today.get('action'))}",
         f"Что подумать со специалистом:\n{_safe_text(decision.get('why_this_path'))}",
         f"Главный риск:\n{_safe_text(digital_human.get('main_risk'))}",
-        f"Рекомендуемый маршрут:\n{_safe_text(decision.get('recommended_main_path'))}",
+        f"Рекомендуемый маршрут:\n{main_route}",
         f"Почему он предложен:\n{_safe_text(decision.get('why_this_path'))}",
-        f"Запасной маршрут:\n{_safe_text(decision.get('backup_path'))}",
+        f"Запасной маршрут:\n{backup_route}",
         f"Маленький первый шаг:\n{_safe_text(today.get('action'))}",
         "Что хотите сделать дальше?",
     ]
@@ -450,6 +646,12 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         f"Интеграция: {integration_level.splitlines()[0]}",
         f"Приоритеты: {', '.join(_list_items(career_priorities)[:3])}",
     ]
+    strategy_title, strategy_lines = _strategy_bundle(report)
+    strategy_html = (
+        f"<div class='card'><h3>Стратегия выбора</h3><p><b>{escape(strategy_title)}</b></p><ul>"
+        + ''.join(f"<li>{escape(line)}</li>" for line in strategy_lines)
+        + "</ul></div>"
+    ) if strategy_lines else "<div class='card'><h3>Стратегия выбора</h3><p>Данных недостаточно.</p></div>"
     market_questions = []
     for item in market[:6]:
         if not isinstance(item, dict):
@@ -463,6 +665,40 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     primary_constraint = next((item for item in weaknesses_items if item != "-"), "данных недостаточно")
     self_help_points, specialist_points = _psych_social_recommendation(report)
     scenario_labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
+    route_evidence = _route_evidence_blocks(report)
+
+    function_lines = "".join(f"<li>{escape(item)}</li>" for item in _list_items(competency_signals)[:6]) or "<li>Данных недостаточно.</li>"
+    function_levels = report.get("function_levels") if isinstance(report.get("function_levels"), list) else []
+    level_lines = "".join(
+        f"<li>{escape(_safe_text(row.get('function')))}: {escape(_safe_text(row.get('level')))}</li>"
+        for row in function_levels[:8]
+        if isinstance(row, dict)
+    ) or "<li>Предварительная гипотеза: уровень по функциям потребует проверки.</li>"
+    explicit_refusals = report.get("explicit_refusals") if isinstance(report.get("explicit_refusals"), list) else []
+    refusals_html = "".join(f"<li>{escape(str(item))}</li>" for item in explicit_refusals[:6] if str(item).strip()) or "<li>Прямые отказы не зафиксированы: потребуется проверить.</li>"
+    unknowns_html = "".join(f"<li>{escape(item)}</li>" for item in unknowns[:6]) or "<li>Категоричные выводы делать нельзя: данных недостаточно.</li>"
+
+    route_label = {
+        "primary": "Основной маршрут",
+        "transition": "Переходный маршрут",
+        "quick": "Быстрый доход",
+        "emergency": "Аварийный вариант",
+    }
+    route_evidence_html = "".join(
+        (
+            "<div class='card'>"
+            f"<h3>{escape(route_label.get(str(item.get('income_role') or ''), 'Возможный маршрут'))}: {escape(_safe_text(item.get('route')))}</h3>"
+            f"<p><b>Почему подходит:</b> {escape(', '.join(_list_items(item.get('why_it_fits'))[:4]))}</p>"
+            f"<p><b>Доказательства пользователя:</b> {escape(', '.join(_list_items(item.get('evidence_from_user'))[:4]))}</p>"
+            f"<p><b>Чего не хватает:</b> {escape(', '.join(_list_items(item.get('missing_competencies'))[:4]))}</p>"
+            f"<p><b>Уровень входа:</b> {escape(_safe_text(item.get('entry_level')))}</p>"
+            f"<p><b>Риски:</b> {escape(', '.join(_list_items(item.get('risks'))[:4]))}</p>"
+            f"<p><b>Что может опровергнуть маршрут:</b> {escape(', '.join(_list_items(item.get('what_may_disprove_this_route'))[:4]))}</p>"
+            "</div>"
+        )
+        for item in route_evidence[:4]
+        if isinstance(item, dict)
+    ) or "<div class='card'><p>Данных недостаточно для доказательного блока маршрутов.</p></div>"
 
     possibilities = []
     labels = ["Быстрый доход", "Основной маршрут", "Долгосрочное развитие"]
@@ -675,6 +911,22 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
   </section>
 
     <section class='page'>
+        <h2>Контракт финального отчёта (15 блоков)</h2>
+        <div class='card'><h3>1. Как мы поняли вашу ситуацию</h3><p>{escape(story_echo)}</p></div>
+        <div class='card'><h3>2. Ваше профессиональное ядро</h3><p>{escape(_professional_core_summary(report))}</p></div>
+        <div class='card'><h3>3. Подтверждённые функции</h3><ul>{function_lines}</ul></div>
+        <div class='card'><h3>4. Уровень по каждой функции</h3><ul>{level_lines}</ul></div>
+        <div class='card'><h3>5. Что нельзя утверждать на основании имеющихся данных</h3><ul>{unknowns_html}</ul></div>
+        <div class='card'><h3>6. Что вы хотите сохранить</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in _list_items(not_reset)[:6])}</ul></div>
+        <div class='card'><h3>7. От чего вы хотите уйти</h3><ul>{refusals_html}</ul></div>
+        <div class='card'><h3>8-11. Маршруты с обязательным блоком доказательств</h3>{route_evidence_html}</div>
+        <div class='card'><h3>12. Требования и ограничения</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in weaknesses_items) or '<li>Данных недостаточно.</li>'}</ul></div>
+        <div class='card'><h3>13. Неопределённости</h3><ul>{unknowns_html}</ul></div>
+        <div class='card'><h3>14. Первый шаг до 15 минут</h3><p>{escape(_safe_text(today.get('action')))}</p></div>
+        <div class='card'><h3>15. План на неделю и месяц</h3><ul>{''.join(f"<li>День {escape(str(item.get('day', '-')))}: {escape(_safe_text(item.get('task')))}</li>" for item in weekly[:7] if isinstance(item, dict)) or '<li>Данных недостаточно.</li>'}</ul></div>
+    </section>
+
+    <section class='page'>
         <h2>1. Что я услышал</h2>
         <div class='card'><h3>Кто вы сейчас</h3><p>{escape(_safe_text(digital_human.get('current_state')))}</p></div>
         <div class='card'><h3>Ключевые факты из истории и резюме (2-4)</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in heard_facts[:4])}</ul></div>
@@ -750,8 +1002,9 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>Запасной маршрут</h3><p>{escape(_safe_text(decision.get('backup_path')))}</p></div>
         <div class='card'><h3>Почему именно оно</h3><p>{escape(_safe_text(decision.get('why_this_path')))}</p></div>
         <div class='card'><h3>Что не делать сейчас</h3><p>{escape(_safe_text(decision.get('avoid_for_now')))}</p></div>
+        {strategy_html}
         <div class='card'><h3>Как проверить гипотезу</h3><ul>{''.join(f'<li>{escape(step)}</li>' for step in hypothesis_steps)}</ul></div>
-        <div class='card'><h3>Кнопки первого шага</h3><ul><li>Сделал</li><li>Слишком сложно</li><li>Сделать проще</li><li>Другой шаг</li></ul></div>
+        <div class='card'><h3>Кнопки первого шага</h3><ul>{''.join(f'<li>{escape(item)}</li>' for item in _first_step_buttons(report))}</ul></div>
 
         <h2>9. План на 30 дней</h2>
     <div class='card'>
@@ -1317,7 +1570,7 @@ def generate_docx_report_file(
         _add_kv(doc, "Время", _safe_text(today.get("timebox")))
         _add_kv(doc, "Результат", _safe_text(today.get("result")))
         _add_heading(doc, "Кнопки первого шага", 2)
-        for item in ["Сделал", "Слишком сложно", "Сделать проще", "Другой шаг"]:
+        for item in _first_step_buttons(report):
             _add_bullet(doc, item)
         doc.add_paragraph("")
 

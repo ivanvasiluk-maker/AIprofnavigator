@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CareerBaselineExpectedProfile",
+  "type": "object",
+  "required": [
+    "profile_id"
+  ],
+  "properties": {
+    "profile_id": {"type": "string"},
+    "expected_routes": {"type": "array", "items": {"type": "string"}},
+    "route_expectations": {
+      "type": "object",
+      "properties": {
+        "main_route": {"type": "string"},
+        "transition_route": {"type": "string"},
+        "quick_route": {"type": "string"},
+        "emergency_route": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "professional_core": {"type": "array", "items": {"type": "string"}},
+    "expected_professional_core": {"type": "array", "items": {"type": "string"}},
+    "seniority_expectations": {"type": "object", "additionalProperties": true},
+    "direct_refusals": {"type": "array", "items": {"type": "string"}},
+    "must_show_uncertainty": {"type": "boolean"},
+    "evidence_fragments": {"type": "array", "items": {"type": "string"}},
+    "forbidden_recommendations": {"type": "array", "items": {"type": "string"}},
+    "critical_errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CareerLogicChangeProposal",
+  "type": "object",
+  "required": [
+    "change_id",
+    "source_error_codes",
+    "affected_profiles_expected_to_improve",
+    "profiles_at_regression_risk",
+    "universal_rule_changed",
+    "files_to_change",
+    "feature_flag",
+    "rollback_condition",
+    "acceptance_condition"
+  ],
+  "properties": {
+    "change_id": {
+      "type": "string"
+    },
+    "source_error_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "affected_profiles_expected_to_improve": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "profiles_at_regression_risk": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "universal_rule_changed": {
+      "type": "string"
+    },
+    "files_to_change": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_flag": {
+      "type": "string"
+    },
+    "rollback_condition": {
+      "type": "string"
+    },
+    "acceptance_condition": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

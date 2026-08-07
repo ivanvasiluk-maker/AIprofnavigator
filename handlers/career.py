@@ -12,8 +12,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Document, FSInputFile, Message
+from aiogram.types import Document, FSInputFile, Message, ReplyKeyboardRemove
 from pypdf import PdfReader
 
 from config import settings
@@ -39,7 +40,10 @@ from keyboards import (
     ALL_ANSWER_REVIEW_ACTIONS,
     ALL_BARRIER_DETAIL_ACTIONS,
     ALL_CV_REVIEW_ACTIONS,
+    ALL_CAREER_STRATEGY_ACTIONS,
     ALL_PRACTICAL_BARRIER_ACTIONS,
+    ALL_SPECIALIST_ROUTING_ACTIONS,
+    ALL_CRISIS_SUPPORT_ACTIONS,
     SUPPORT_DONE,
     ALL_RESULT_ACTIONS,
     RESULT_ANALYZE_FEARS,
@@ -62,6 +66,13 @@ from keyboards import (
     RESULT_KEYWORDS,
     RESULT_OPEN_FULL_REPORT,
     MAP_CHECK_TRUE,
+    SHOW_MAP_NOW,
+    CLARIFY_MORE,
+    PRELIM_LOOKS_LIKE_ME,
+    PRELIM_HAS_ERROR,
+    PRELIM_ADD_DETAIL,
+    preliminary_result_offer_keyboard,
+    preliminary_map_keyboard,
     MAP_CHECK_FIX_FACT,
     MAP_CHECK_CHANGE_PRIORITY,
     MAP_CHECK_DISAGREE_ROUTE,
@@ -77,6 +88,10 @@ from keyboards import (
     PDF_FALLBACK_STEPS,
     PDF_FALLBACK_CLARIFY,
     PDF_FALLBACK_SPECIALIST,
+    CAREER_STRATEGY_FAST_INCOME,
+    CAREER_STRATEGY_UPSKILL,
+    CAREER_STRATEGY_LONG,
+    CAREER_STRATEGY_HELP,
     ROUTE_CHOICE_STABLE,
     ROUTE_CHOICE_PRIVATE,
     ROUTE_CHOICE_RETRAIN,
@@ -84,6 +99,14 @@ from keyboards import (
     ROUTE_CHOICE_CLOSE,
     ROUTE_CHOICE_OTHER,
     ROUTE_CHOICE_NO_LOGIC,
+    SPECIALIST_ROUTE_CAREER,
+    SPECIALIST_ROUTE_PSYCH,
+    SPECIALIST_ROUTE_BOTH,
+    SPECIALIST_ROUTE_SELF,
+    CRISIS_HELP_HOTLINE,
+    CRISIS_CONTINUE_LATER,
+    CRISIS_SPECIALIST,
+    CRISIS_TRUSTED_PERSON,
     STEP_BARRIERS,
     STEP_DONE,
     STEP_DONE_USER,
@@ -131,19 +154,31 @@ from keyboards import (
     practical_barrier_keyboard,
     pdf_fallback_keyboard,
     map_validation_keyboard,
+    pace_keyboard,
+    career_strategy_keyboard,
+    specialist_routing_keyboard,
+    crisis_support_keyboard,
     resume_choice_keyboard,
     resume_wait_keyboard,
     step_tracking_keyboard,
     support_mode_keyboard,
     route_choice_keyboard,
     career_switch_reason_keyboard,
+    # route-context intake uses plain text prompts and the existing input method keyboard
     story_confirmation_keyboard,
     telegram_link_keyboard,
     think_reminder_keyboard,
 )
 from localization import t
 from openai_client import ai_client
-from states import CareerFlow
+from services.evidence_profile import (
+    CareerEvidenceProfile,
+    apply_answer_to_profile,
+    build_evidence_profile_from_analysis,
+    next_question_from_profile,
+    profile_ready_for_safe_conclusion,
+)
+from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
 from utils.reporting import build_telegram_summary, generate_docx_report_file, generate_pdf_report
@@ -173,12 +208,417 @@ _INTERVIEW_INTEGRATION_DONE = "✅ Интеграция: готово"
 _BARRIER_GROUP_MAX_SELECT = 3
 _HARD_REQUIRED_MULTI_KEYS = {"psych", "integration", "energy", "priorities"}
 
+_NEED_DECISION_QUESTIONS = [
+    "1/3. Как долго вы можете прожить без стабильного дохода?",
+    "2/3. Насколько для вас важно сохранить профессиональный статус?",
+    "3/3. Готовы ли вы учиться регулярно ближайшие 3–6 месяцев?",
+]
+
+LANGUAGE_DOCUMENTS_BUTTONS = [
+    "Польский A1-A2, право работать есть",
+    "Польский B1+, право работать есть",
+    "Язык слабый, документы в порядке",
+    "Не уверен по документам",
+    "Нужно уточнить право на работу",
+    "Отвечу текстом",
+]
+
+_CONSTRUCTION_BRIDGE_ROLES = [
+    "Assistant Cost Estimator",
+    "Junior Quantity Surveyor",
+    "Construction Documentation Specialist",
+    "Technical Assistant Construction",
+    "Construction Project Assistant",
+]
+
+_CAREER_STRATEGY_BY_ACTION = {
+    CAREER_STRATEGY_FAST_INCOME: ("fast_income", CAREER_STRATEGY_FAST_INCOME),
+    CAREER_STRATEGY_UPSKILL: ("upskill_for_profile", CAREER_STRATEGY_UPSKILL),
+    CAREER_STRATEGY_LONG: ("long_transition", CAREER_STRATEGY_LONG),
+    CAREER_STRATEGY_HELP: ("need_decision", CAREER_STRATEGY_HELP),
+}
+
+_ROUTE_CONTEXT_FIELDS = [
+    {
+        "id": "location",
+        "prompt": "1/8. Укажите страну и город в одном сообщении. Например: Польша, Варшава.",
+        "keys": ["country", "city"],
+    },
+    {
+        "id": "language",
+        "prompt": "2/8. Укажите текущий уровень языка и целевой язык. Например: польский A2, польский B1.",
+        "keys": ["current_language_level", "target_language"],
+    },
+    {
+        "id": "income",
+        "prompt": "3/8. Укажите срочность дохода, минимальный доход и желаемый доход. Например: срочно; 3500; 5000.",
+        "keys": ["income_urgency", "minimum_monthly_income", "desired_monthly_income"],
+    },
+    {
+        "id": "study",
+        "prompt": "4/8. Укажите бюджет на обучение и сколько времени в неделю готовы учиться. Например: 200 евро; 5 часов в неделю.",
+        "keys": ["training_budget", "available_time_for_study"],
+    },
+    {
+        "id": "goal",
+        "prompt": "5/8. Что вам ближе сейчас: остаться в профессии, перейти в близкую сферу или сменить сферу?",
+        "keys": ["career_goal_type"],
+    },
+    {
+        "id": "work",
+        "prompt": "6/8. Какие форматы работы вам подходят и есть ли ограничения по здоровью, детям, графику или транспорту?",
+        "keys": ["work_preferences", "health_or_schedule_limits"],
+    },
+    {
+        "id": "documents",
+        "prompt": "7/8. Укажите документы и право на работу, а также статус диплома или признания квалификации.",
+        "keys": ["documents_and_work_rights", "diploma_status"],
+    },
+    {
+        "id": "proof",
+        "prompt": "8/8. Есть ли портфолио, рекомендации или реальные примеры работ?",
+        "keys": ["portfolio_or_references"],
+    },
+]
+
 
 def _resume_debug_log(message: Message, step: str, **fields: object) -> None:
     user_id = message.from_user.id if message.from_user else "unknown"
     details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
     suffix = f" {details}" if details else ""
     print(f"[resume-flow] user_id={user_id} step={step}{suffix}", flush=True)
+
+
+def _safe_default(value: object, default: str = "данных недостаточно") -> str:
+    text = str(value or "").strip()
+    return text if text else default
+
+
+CRISIS_RISK_MARKERS = [
+    "суицид",
+    "суицидальные мысли",
+    "убить себя",
+    "покончить с собой",
+    "самоповреждение",
+    "нет смысла жить",
+    "хочу умереть",
+    "не хочу жить",
+    "удариться",
+    "покончить",
+    "не могу есть",
+    "не могу нормально есть",
+    "не могу спать",
+    "не сплю",
+    "не могу встать",
+    "не могу вставать",
+    "не могу подняться с кровати",
+    "не могу работать",
+    "не могу выйти на работу",
+    "не могу функционировать",
+    "не встаю",
+    "лежу в постели",
+    "ничего не вижу",
+    "полная безнадежность",
+    "совсем сломался",
+    "нет будущего",
+    "не видно выхода",
+]
+
+_RESTART_INTENT_MARKERS = [
+    "пройти заново",
+    "начать заново",
+    "начать сначала",
+    "сначала",
+    "с начала",
+    "пройти сначала",
+    "хочу пройти сначала",
+    "хочу начать сначала",
+    "restart",
+    "start over",
+    "new start",
+    "новый старт",
+]
+
+_PRELIMINARY_RESULT_MARKERS = [
+    "предварительный результат",
+    "показать результат",
+    "перейти к результату",
+    "достаточно",
+    "хватит вопросов",
+    "остановить интервью",
+    "show result",
+    "показать карту",
+]
+
+
+def _detect_crisis_risk(text: str) -> bool:
+    """Check for crisis/safety signals in user input."""
+    blob = str(text or "").lower().replace("ё", "е")
+    return any(marker in blob for marker in CRISIS_RISK_MARKERS)
+
+
+def _is_restart_intent(text: str) -> bool:
+    low = str(text or "").strip().lower().replace("ё", "е")
+    if not low:
+        return False
+    if low in {"/start", "restart", "start over"}:
+        return True
+    if low in {item.lower() for item in ALL_RESTART}:
+        return True
+    return any(marker in low for marker in _RESTART_INTENT_MARKERS)
+
+
+def _is_preliminary_result_intent(text: str) -> bool:
+    low = str(text or "").strip().lower().replace("ё", "е")
+    if not low:
+        return False
+    return any(marker in low for marker in _PRELIMINARY_RESULT_MARKERS)
+
+
+async def _maybe_switch_to_crisis_support(
+    message: Message,
+    state: FSMContext,
+    lang: str,
+    text: str,
+    *,
+    source: str,
+) -> bool:
+    if not _detect_crisis_risk(text):
+        return False
+    await state.update_data(career_planning_paused=True, crisis_detected=True, crisis_detected_source=source)
+    await _handle_crisis_detected(message, state, lang)
+    return True
+
+
+def _route_field_value(route: dict[str, object], field: str) -> str:
+    if not isinstance(route, dict):
+        return ""
+
+    if field == "target_roles":
+        payload = route.get("target_roles_6_months") or route.get("realistic_entry_roles") or route.get("new_career_options") or []
+        if isinstance(payload, list):
+            return "|".join(str(item).strip().lower() for item in payload if str(item).strip())
+        return str(payload or "").strip().lower()
+
+    if field == "timeline":
+        timeline = route.get("time_to_entry") or route.get("training_plan_12_weeks") or route.get("decision_checkpoint") or route.get("goal_30_days")
+        if isinstance(timeline, dict):
+            return "|".join(f"{k}:{timeline[k]}" for k in sorted(timeline.keys()))
+        return str(timeline or "").strip().lower()
+
+    if field == "skills":
+        skills = route.get("required_tools_and_skills") or route.get("gap_analysis") or []
+        if isinstance(skills, list):
+            return "|".join(str(item).strip().lower() for item in skills if str(item).strip())
+        return str(skills or "").strip().lower()
+
+    if field == "education":
+        education = route.get("recommended_certificates") or route.get("diploma_or_license_check") or route.get("training_cost") or ""
+        if isinstance(education, list):
+            return "|".join(str(item).strip().lower() for item in education if str(item).strip())
+        if isinstance(education, dict):
+            return "|".join(f"{k}:{education[k]}" for k in sorted(education.keys()))
+        return str(education or "").strip().lower()
+
+    if field == "income_path":
+        income = route.get("income_at_start") or route.get("income_growth_potential") or route.get("goal_30_days") or ""
+        if isinstance(income, dict):
+            return "|".join(f"{k}:{income[k]}" for k in sorted(income.keys()))
+        return str(income or "").strip().lower()
+
+    if field == "today_action":
+        today = route.get("today_action")
+        if isinstance(today, dict):
+            return str(today.get("action") or "").strip().lower()
+        return str(today or "").strip().lower()
+
+    return ""
+
+
+def _validate_route_divergence(route_a: dict[str, object], route_b: dict[str, object]) -> tuple[bool, int, dict[str, bool]]:
+    compare = {
+        "target_roles": _route_field_value(route_a, "target_roles") != _route_field_value(route_b, "target_roles"),
+        "timeline": _route_field_value(route_a, "timeline") != _route_field_value(route_b, "timeline"),
+        "skills": _route_field_value(route_a, "skills") != _route_field_value(route_b, "skills"),
+        "education": _route_field_value(route_a, "education") != _route_field_value(route_b, "education"),
+        "income_path": _route_field_value(route_a, "income_path") != _route_field_value(route_b, "income_path"),
+        "today_action": _route_field_value(route_a, "today_action") != _route_field_value(route_b, "today_action"),
+    }
+    divergence_score = sum(1 for is_different in compare.values() if is_different)
+    return divergence_score >= 4, divergence_score, compare
+
+
+def _career_strategy_from_action(action: str) -> tuple[str, str]:
+    return _CAREER_STRATEGY_BY_ACTION.get(action, ("need_decision", CAREER_STRATEGY_HELP))
+
+
+def _career_strategy_action_from_code(strategy_code: str) -> str:
+    for action, mapped in _CAREER_STRATEGY_BY_ACTION.items():
+        if mapped[0] == strategy_code:
+            return action
+    return CAREER_STRATEGY_UPSKILL
+
+
+def _need_decision_comparison_text(bundle: dict[str, object]) -> str:
+    rows = bundle.get("comparison_table") if isinstance(bundle.get("comparison_table"), list) else []
+    if not rows:
+        return ""
+    lines = ["Мини-сравнение путей:"]
+    for row in rows[:3]:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "- {path}: плюс — {gain}; риск/цена — {tradeoff}; первый результат — {first_result}.".format(
+                path=_safe_default(row.get("path"), "Маршрут"),
+                gain=_safe_default(row.get("gain"), "данных недостаточно"),
+                tradeoff=_safe_default(row.get("tradeoff"), "данных недостаточно"),
+                first_result=_safe_default(row.get("first_result"), "данных недостаточно"),
+            )
+        )
+    return "\n".join(lines)
+
+
+def _route_context_missing(data: dict[str, object]) -> list[str]:
+    missing: list[str] = []
+    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    for field in (
+        "country",
+        "city",
+        "current_language_level",
+        "target_language",
+        "income_urgency",
+        "minimum_monthly_income",
+        "desired_monthly_income",
+        "training_budget",
+        "available_time_for_study",
+        "career_goal_type",
+        "work_preferences",
+        "health_or_schedule_limits",
+        "documents_and_work_rights",
+        "diploma_status",
+        "portfolio_or_references",
+    ):
+        if not str((route_context or {}).get(field) or data.get(field) or "").strip():
+            missing.append(field)
+    return missing
+
+
+def _route_context_question(index: int) -> dict[str, object]:
+    if index < 0 or index >= len(_ROUTE_CONTEXT_FIELDS):
+        return {}
+    return dict(_ROUTE_CONTEXT_FIELDS[index])
+
+
+def _route_context_section_text(route_context: dict[str, str]) -> str:
+    ordered = [
+        ("Страна", route_context.get("country", "")),
+        ("Город", route_context.get("city", "")),
+        ("Текущий уровень языка", route_context.get("current_language_level", "")),
+        ("Целевой язык", route_context.get("target_language", "")),
+        ("Срочность дохода", route_context.get("income_urgency", "")),
+        ("Минимальный доход", route_context.get("minimum_monthly_income", "")),
+        ("Желаемый доход", route_context.get("desired_monthly_income", "")),
+        ("Бюджет на обучение", route_context.get("training_budget", "")),
+        ("Время на обучение", route_context.get("available_time_for_study", "")),
+        ("Карьерная цель", route_context.get("career_goal_type", "")),
+        ("Предпочтения по работе", route_context.get("work_preferences", "")),
+        ("Ограничения", route_context.get("health_or_schedule_limits", "")),
+        ("Документы и право на работу", route_context.get("documents_and_work_rights", "")),
+        ("Статус диплома", route_context.get("diploma_status", "")),
+        ("Портфолио / рекомендации", route_context.get("portfolio_or_references", "")),
+    ]
+    lines = [f"- {label}: {value}" for label, value in ordered if str(value).strip()]
+    return "\n".join(lines)
+
+
+def _split_route_context_answer(answer: str, expected_parts: int) -> list[str]:
+    parts = [part.strip() for part in re.split(r"[;\n,]+", answer or "") if part.strip()]
+    if len(parts) >= expected_parts:
+        return parts[:expected_parts]
+    if len(parts) == 1 and expected_parts > 1:
+        return [parts[0]] + [""] * (expected_parts - 1)
+    return parts
+
+
+async def _start_route_context_intake(message: Message, state: FSMContext, lang: str, *, remaining_count: int | None = None) -> None:
+    data = await state.get_data()
+    route_context = dict(data.get("route_context") or {})
+    question_index = int(data.get("route_context_index") or 0)
+    if question_index <= 0 and not route_context:
+        await message.answer(t(lang, "route_context_intro"), reply_markup=input_method_keyboard())
+    question = _route_context_question(question_index)
+    if not question:
+        return
+    await state.set_state(CareerFlow.ROUTE_CONTEXT)
+    await state.update_data(route_context=route_context, route_context_index=question_index, route_context_question_id=str(question.get("id") or question_index))
+    await message.answer(str(question.get("prompt") or ""), reply_markup=input_method_keyboard())
+
+
+def _route_context_next_index(current_index: int, answer: str, keys: list[str]) -> tuple[dict[str, str], int]:
+    route_context: dict[str, str] = {}
+    parts = _split_route_context_answer(answer, max(1, len(keys)))
+    if len(keys) == 1:
+        route_context[keys[0]] = answer.strip()
+    else:
+        for idx, key in enumerate(keys):
+            value = parts[idx] if idx < len(parts) else ""
+            route_context[key] = value.strip() or answer.strip()
+    return route_context, current_index + 1
+
+
+def _route_specific_reply_markup(gap_row: dict[str, object]):
+    options = gap_row.get("options", []) if isinstance(gap_row.get("options"), list) else []
+    if options:
+        return question_options_keyboard([str(item).strip() for item in options if str(item).strip()])
+    return input_method_keyboard()
+
+
+async def _maybe_start_route_specific_clarification(
+    message: Message,
+    state: FSMContext,
+    lang: str,
+    selected_route: str,
+) -> bool:
+    data = await state.get_data()
+    if bool(data.get("awaiting_route_specific_questions")):
+        return True
+
+    from services.interview_policy import get_route_specific_gaps  # noqa: PLC0415
+
+    raw_ep = data.get("evidence_profile")
+    if isinstance(raw_ep, dict):
+        try:
+            profile = CareerEvidenceProfile.model_validate(raw_ep)
+        except Exception:
+            profile = build_evidence_profile_from_analysis(data.get("story_analysis") or {})
+    else:
+        profile = build_evidence_profile_from_analysis(data.get("story_analysis") or {})
+
+    gaps = get_route_specific_gaps(selected_route, profile)
+    if not gaps:
+        return False
+
+    gap_rows = [gap.model_dump() for gap in gaps]
+    first = gap_rows[0]
+    await state.update_data(
+        awaiting_route_specific_questions=True,
+        route_specific_gaps=gap_rows,
+        route_specific_index=0,
+        route_specific_answers=[],
+        route_specific_selected_route=selected_route,
+    )
+    await _track_event(
+        message,
+        state,
+        "route_specific_clarification_started",
+        meta={"route": selected_route, "count": len(gap_rows)},
+    )
+    await message.answer(
+        "Хорошо, выбрали маршрут. Уточню только важные детали именно для него.",
+        reply_markup=_route_specific_reply_markup(first),
+    )
+    await message.answer(str(first.get("prompt") or ""), reply_markup=_route_specific_reply_markup(first))
+    return True
 
 
 def _cancel_reminder(chat_id: int) -> None:
@@ -389,10 +829,27 @@ def _ensure_public_id(data: dict, message: Message) -> str:
     return ensure_public_user_id(source_id)
 
 
-def _canonical_event_aliases(event: str, action: str) -> list[str]:
+def _canonical_event_aliases(event: str, action: str, meta: dict | None = None) -> list[str]:
     normalized_event = str(event or "").strip()
     normalized_action = str(action or "").strip()
+    meta_payload = meta if isinstance(meta, dict) else {}
     aliases: list[str] = []
+
+    if normalized_event == "story_submitted":
+        aliases.append("story_evidence_extracted")
+    if normalized_event == "question_shown":
+        aliases.append("clarifying_question_asked")
+    if normalized_event == "conflict_detected":
+        aliases.append("clarifying_question_skipped_existing_answer")
+    if normalized_event == "prelim_map_error_flagged":
+        aliases.append("profile_correction_received")
+    if normalized_event == "guardrail_violations":
+        aliases.append("report_guardrail_failed")
+    if normalized_event == "guardrail_regen_triggered":
+        aliases.append("report_regenerated")
+    if normalized_event == "interview_ready_early":
+        readiness_status = str(meta_payload.get("status") or "").strip().lower()
+        aliases.append("interview_ready" if readiness_status == "ready" else "interview_ready_with_uncertainty")
 
     if normalized_event == "answer_submitted":
         aliases.append("question_answered")
@@ -479,7 +936,7 @@ async def _track_event(
         meta=event_meta,
         session_id=str(data.get("session_id") or "").strip(),
     )
-    for alias in _canonical_event_aliases(event, action):
+    for alias in _canonical_event_aliases(event, action, event_meta):
         alias_meta = dict(event_meta)
         alias_meta["source_event"] = event
         await log_behavior_event(
@@ -832,6 +1289,468 @@ def _slugify(value: str) -> str:
     return text or "option"
 
 
+def _merge_answers_text(qa_answers: list[dict]) -> str:
+    return "\n".join(
+        f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
+        for idx, row in enumerate(qa_answers)
+        if isinstance(row, dict)
+    )
+
+
+def _load_evidence_profile(data: dict, analysis: dict | None = None) -> CareerEvidenceProfile:
+    raw = data.get("evidence_profile")
+    if isinstance(raw, dict):
+        try:
+            return CareerEvidenceProfile.model_validate(raw)
+        except Exception:
+            pass
+    return build_evidence_profile_from_analysis(analysis)
+
+
+def _question_signature(question_row: dict[str, object], data: dict) -> str:
+    primary = str(question_row.get("gap_key") or question_row.get("semantic_intent") or question_row.get("question_id") or "").strip()
+    if not primary:
+        primary = _slugify(str(question_row.get("question") or "general_clarification"))
+    route_domain = str(
+        data.get("route_specific_selected_route")
+        or data.get("selected_preliminary_route")
+        or question_row.get("source")
+        or question_row.get("block")
+        or "general"
+    ).strip()
+    return f"{_slugify(primary)}:{_slugify(route_domain)}"
+
+
+def _split_unresolved_gaps(profile: CareerEvidenceProfile) -> tuple[list[str], list[str]]:
+    unresolved = [str(item).strip() for item in list(profile.unresolved_gaps or []) if str(item).strip()]
+    if not unresolved:
+        return [], []
+    critical_keys: set[str] = set()
+    try:
+        from services.interview_policy import CRITICAL_GAP_TYPES  # noqa: PLC0415
+
+        critical_keys = {str(item).strip() for item in CRITICAL_GAP_TYPES if str(item).strip()}
+    except Exception:
+        critical_keys = {
+            "legal_access",
+            "minimum_income",
+            "income_deadline",
+            "professional_core",
+            "goal",
+        }
+
+    critical: list[str] = []
+    noncritical: list[str] = []
+    for gap in unresolved:
+        if gap in critical_keys:
+            critical.append(gap)
+            continue
+        gap_low = gap.lower()
+        if any(token in gap_low for token in ["legal", "income", "deadline", "permission", "goal"]):
+            critical.append(gap)
+        else:
+            noncritical.append(gap)
+    return critical, noncritical
+
+
+def _build_interview_context(data: dict, analysis: dict | None = None) -> InterviewContext:
+    existing_raw = data.get("interview_context")
+    existing = existing_raw if isinstance(existing_raw, dict) else {}
+    profile = _load_evidence_profile(data, analysis)
+
+    hypotheses = data.get("conversation_hypotheses") if isinstance(data.get("conversation_hypotheses"), list) else []
+    asked_signatures = existing.get("asked_question_signatures") if isinstance(existing.get("asked_question_signatures"), list) else data.get("asked_question_signatures")
+    asked_signatures = [str(item).strip() for item in (asked_signatures or []) if str(item).strip()]
+
+    readiness_status = str(existing.get("report_readiness") or "not_ready")
+    try:
+        from services.interview_policy import evaluate_report_readiness  # noqa: PLC0415
+
+        readiness = evaluate_report_readiness(profile=profile, route_hypotheses=hypotheses)
+        readiness_status = str(readiness.status)
+    except Exception:
+        pass
+
+    critical_gaps, noncritical_gaps = _split_unresolved_gaps(profile)
+
+    return InterviewContext(
+        evidence_profile=profile.model_dump(),
+        hypotheses=[row for row in hypotheses if isinstance(row, dict)],
+        current_action=str(existing.get("current_action") or "") or None,
+        current_question_id=str(existing.get("current_question_id") or "") or None,
+        current_question_goal=str(existing.get("current_question_goal") or "") or None,
+        asked_question_signatures=asked_signatures,
+        unresolved_critical_gaps=critical_gaps,
+        unresolved_noncritical_gaps=noncritical_gaps,
+        report_readiness=readiness_status,
+        questions_asked_count=int(existing.get("questions_asked_count") or 0),
+        consecutive_long_answers=int(existing.get("consecutive_long_answers") or 0),
+        user_fatigue_score=float(existing.get("user_fatigue_score") or 0.0),
+    )
+
+
+async def _save_interview_context(state: FSMContext, context: InterviewContext) -> None:
+    await state.update_data(
+        interview_context=context.model_dump(),
+        evidence_profile=context.evidence_profile,
+        conversation_hypotheses=context.hypotheses,
+        asked_question_signatures=context.asked_question_signatures,
+    )
+
+
+def _apply_answer_to_interview_context(context: InterviewContext, answer_text: str) -> InterviewContext:
+    answer_length = _classify_answer_length(answer_text)
+    if answer_length == "long":
+        context.consecutive_long_answers += 1
+        context.user_fatigue_score = min(1.0, context.user_fatigue_score + 0.2)
+    elif answer_length == "short":
+        context.consecutive_long_answers = 0
+        context.user_fatigue_score = max(0.0, context.user_fatigue_score - 0.05)
+    else:
+        context.consecutive_long_answers = 0
+        context.user_fatigue_score = max(0.0, context.user_fatigue_score - 0.02)
+
+    context.current_action = None
+    context.current_question_id = None
+    context.current_question_goal = None
+    return context
+
+
+async def _sync_interview_context_after_answer(
+    state: FSMContext,
+    data: dict,
+    evidence_payload: dict[str, object],
+    answer_text: str,
+) -> InterviewContext:
+    merged = dict(data)
+    merged["evidence_profile"] = evidence_payload
+    context = _build_interview_context(merged, merged.get("story_analysis") if isinstance(merged.get("story_analysis"), dict) else None)
+    context = _apply_answer_to_interview_context(context, answer_text)
+    await _save_interview_context(state, context)
+    return context
+
+
+def _find_next_unasked_question(
+    analysis: dict,
+    data: dict,
+    start_index: int,
+    asked_signatures: set[str],
+) -> tuple[int, dict[str, object], str] | tuple[None, None, None]:
+    questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+    idx = max(0, int(start_index or 0))
+    while idx < len(questions):
+        row = questions[idx]
+        if not isinstance(row, dict):
+            idx += 1
+            continue
+        signature = _question_signature(row, data)
+        if signature in asked_signatures:
+            idx += 1
+            continue
+        return idx, row, signature
+    return None, None, None
+
+
+async def _ask_next_interview_question(
+    message: Message,
+    state: FSMContext,
+    data: dict,
+    analysis: dict,
+    context: InterviewContext,
+    qa_index: int,
+    lang: str,
+    user_mode: str,
+) -> bool:
+    asked = {str(item).strip() for item in context.asked_question_signatures if str(item).strip()}
+    search_index = qa_index
+    next_index, row, signature = _find_next_unasked_question(analysis, data, search_index, asked)
+    questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+    while next_index is not None and row is not None and signature is not None:
+        decision_change = _decision_that_may_change(row)
+        if decision_change:
+            break
+        if signature not in context.asked_question_signatures:
+            context.asked_question_signatures.append(signature)
+            asked.add(signature)
+        await _track_event(
+            message,
+            state,
+            "question_skipped_no_decision_impact",
+            meta={
+                "question_index": next_index + 1,
+                "question_id": _question_id(row, next_index),
+                "signature": signature,
+            },
+        )
+        search_index = next_index + 1
+        next_index, row, signature = _find_next_unasked_question(analysis, data, search_index, asked)
+
+    if next_index is None or row is None or signature is None:
+        await state.update_data(qa_index=len(questions))
+        context.current_action = "show_preliminary_map"
+        await _save_interview_context(state, context)
+        return False
+
+    text = _question_prompt(analysis, next_index, lang)
+    evidence_payload = data.get("evidence_profile") if isinstance(data.get("evidence_profile"), dict) else context.evidence_profile
+    hypothesis_text, turn_meta = _apply_hypothesis_action(data, evidence_payload, next_index, text, lang, user_mode)
+    decision_change = _decision_that_may_change(row)
+    await state.update_data(qa_index=next_index)
+    await message.answer(hypothesis_text or text, reply_markup=_question_reply_markup(analysis, next_index))
+
+    turn_action = str(turn_meta.get("action") or "").strip()
+    if turn_action == "confirm_hypothesis":
+        await _track_event(
+            message,
+            state,
+            "career_hypothesis_created",
+            meta={
+                "question_index": next_index + 1,
+                "question_id": _question_id(row, next_index),
+                "hypothesis_statement": str(turn_meta.get("hypothesis_statement") or "")[:240],
+                "hypothesis_confidence": str(turn_meta.get("hypothesis_confidence") or ""),
+            },
+        )
+
+    if bool(row.get("critical_gap")):
+        await _track_event(
+            message,
+            state,
+            "critical_gap_detected",
+            meta={
+                "question_index": next_index + 1,
+                "question_id": _question_id(row, next_index),
+                "gap_key": str(row.get("gap_key") or ""),
+                "decision_that_may_change": decision_change,
+            },
+        )
+
+    if signature not in context.asked_question_signatures:
+        context.asked_question_signatures.append(signature)
+    context.current_action = "ask_question"
+    context.current_question_id = str(_question_id(row, next_index))
+    context.current_question_goal = str(row.get("internal_goal") or row.get("semantic_intent") or row.get("gap_key") or "")
+    context.questions_asked_count += 1
+    await _save_interview_context(state, context)
+    await _track_event(
+        message,
+        state,
+        "question_shown",
+        meta={
+            "question_index": next_index + 1,
+            "question_id": _question_id(row, next_index),
+            "signature": signature,
+            "decision_that_may_change": decision_change,
+        },
+    )
+    return True
+
+
+def _build_evidence_questions(profile: CareerEvidenceProfile, lang: str, user_mode: str) -> list[dict[str, object]]:
+    mode_key = str(user_mode or "calm_steps")
+    soft_cap = {
+        "fast": 3,
+        "calm_steps": 6,
+        "deep_route": 8,
+        "support": 8,
+    }.get(mode_key, 6)
+
+    questions: list[dict[str, object]] = []
+    asked_gap_keys: set[str] = set()
+    for _ in range(soft_cap):
+        question = next_question_from_profile(
+            profile,
+            language=lang,
+            asked_gap_keys=asked_gap_keys,
+            user_mode=mode_key,
+        )
+        if not question:
+            break
+        gap_key = str(question.get("gap_key") or "").strip()
+        if gap_key:
+            asked_gap_keys.add(gap_key)
+        question["id"] = len(questions) + 1
+        questions.append(question)
+    return questions
+
+
+def _update_evidence_after_answer(data: dict, question_row: dict | object, answer_text: str) -> tuple[dict[str, object], bool]:
+    analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    profile = _load_evidence_profile(data, analysis)
+    gap_key = str(question_row.get("gap_key") or "").strip() if isinstance(question_row, dict) else ""
+    if gap_key:
+        profile = apply_answer_to_profile(profile, gap_key, answer_text)
+    from services.interview_policy import is_ready_for_conclusion
+    mode = str(data.get("user_mode") or "calm_steps")
+    ready = profile_ready_for_safe_conclusion(profile) or is_ready_for_conclusion(profile, user_mode=mode)
+    return profile.model_dump(), ready
+
+
+def _readiness_status_from_payload(evidence_payload: dict[str, object]) -> str:
+    try:
+        from services.evidence_profile import CareerEvidenceProfile as _CEP_READY  # noqa: PLC0415
+        from services.interview_policy import evaluate_report_readiness  # noqa: PLC0415
+
+        profile = _CEP_READY.model_validate(evidence_payload)
+        readiness = evaluate_report_readiness(profile)
+        return str(readiness.status or "not_ready")
+    except Exception:
+        return "ready_with_uncertainty"
+
+
+async def _track_interview_ready_event(
+    message: Message,
+    state: FSMContext,
+    *,
+    question_index: int,
+    evidence_payload: dict[str, object],
+) -> None:
+    readiness_status = _readiness_status_from_payload(evidence_payload)
+    await _track_event(
+        message,
+        state,
+        "interview_ready_early",
+        meta={"question_index": question_index, "status": readiness_status},
+    )
+
+
+def _apply_hypothesis_action(
+    data: dict,
+    evidence_payload: dict,
+    qa_index: int,
+    next_question_text: str,
+    lang: str,
+    user_mode: str,
+) -> tuple[str, dict[str, str]]:
+    """Return hypothesis-framed message text, or '' to fall back to bare question."""
+    try:
+        from services.hypothesis_engine import CareerHypothesis, select_conversation_action, format_conversation_turn  # noqa: PLC0415
+        from services.evidence_profile import CareerEvidenceProfile as _CEP3  # noqa: PLC0415
+        from services.interview_policy import evaluate_report_readiness  # noqa: PLC0415
+        _profile = _CEP3.model_validate(evidence_payload)
+        _readiness = evaluate_report_readiness(_profile)
+        _hyp_dicts = data.get("conversation_hypotheses")
+        _hypotheses = [CareerHypothesis.model_validate(h) for h in (_hyp_dicts or [])] if isinstance(_hyp_dicts, list) else []
+        _turn = select_conversation_action(
+            _profile,
+            _hypotheses,
+            qa_index=qa_index,
+            readiness_status=_readiness.status,
+            user_mode=user_mode,
+        )
+        turn_meta: dict[str, str] = {
+            "action": str(_turn.action),
+            "readiness_status": str(_readiness.status),
+        }
+        if _turn.hypothesis:
+            turn_meta["hypothesis_statement"] = str(_turn.hypothesis.statement or "").strip()
+            turn_meta["hypothesis_confidence"] = str(_turn.hypothesis.confidence or "").strip()
+        if _turn.gap_key:
+            turn_meta["gap_key"] = str(_turn.gap_key or "").strip()
+        return format_conversation_turn(_turn, next_question_text=next_question_text, lang=lang), turn_meta
+    except Exception:
+        return "", {}
+    analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    profile = _load_evidence_profile(data, analysis)
+    gap_key = str(question_row.get("gap_key") or "").strip() if isinstance(question_row, dict) else ""
+    if gap_key:
+        profile = apply_answer_to_profile(profile, gap_key, answer_text)
+    from services.interview_policy import is_ready_for_conclusion
+    mode = str(data.get("user_mode") or "calm_steps")
+    ready = profile_ready_for_safe_conclusion(profile) or is_ready_for_conclusion(profile, user_mode=mode)
+    return profile.model_dump(), ready
+
+
+def _generate_preliminary_map(
+    profile: object,  # CareerEvidenceProfile
+    story_analysis: dict,
+    lang: str,
+) -> tuple[str, str, str]:
+    """
+    Build preliminary map text and extract the two route labels.
+    Returns (map_text, route1_label, route2_label).
+    """
+    lines: list[str] = ["Вот что уже видно.\n"]
+
+    # Professional core
+    core_parts: list[str] = []
+    funcs = getattr(profile, "functions", [])
+    for f in funcs[:2]:
+        name = str(getattr(f, "function_name", "") or "").strip()
+        if name:
+            core_parts.append(name)
+    if not core_parts:
+        for h in (story_analysis.get("professional_core_hypotheses") or [])[:1]:
+            text = str(h or "").strip()
+            if text:
+                core_parts.append(text)
+    if not core_parts:
+        facts = getattr(profile, "work_history_facts", [])
+        for item in facts[:1]:
+            stmt = str(getattr(item, "statement", "") or "").strip()
+            if stmt:
+                core_parts.append(stmt)
+    lines.append(f"Ваше профессиональное ядро:\n{', '.join(core_parts) if core_parts else 'уточняется'}")
+
+    # Confirmed seniority level
+    seniority_parts: list[str] = []
+    for f in funcs[:2]:
+        inferred = str(getattr(f, "inferred_seniority", "") or "").strip()
+        fname = str(getattr(f, "function_name", "") or "").strip()
+        if inferred and inferred not in {"unknown", ""}:
+            seniority_parts.append(f"{inferred} в {fname}" if fname else inferred)
+    if not seniority_parts:
+        for h in (story_analysis.get("seniority_hypotheses") or [])[:1]:
+            text = str(h or "").strip()
+            if text:
+                seniority_parts.append(text)
+    lines.append(f"\nВаш подтверждённый уровень:\n{', '.join(seniority_parts) if seniority_parts else 'не определён — нужно уточнить'}")
+
+    # What user wants to change
+    change_parts: list[str] = []
+    for item in (getattr(profile, "explicit_goal", []) or [])[:1]:
+        stmt = str(getattr(item, "statement", "") or "").strip()
+        if stmt:
+            change_parts.append(stmt)
+    for item in (getattr(profile, "explicit_refusals", []) or [])[:1]:
+        stmt = str(getattr(item, "statement", "") or "").strip()
+        if stmt:
+            change_parts.append(f"уйти от: {stmt}")
+    lines.append(f"\nЧто вы, вероятно, хотите изменить:\n{'; '.join(change_parts) if change_parts else 'уточняется'}")
+
+    # Two realistic directions — derive from hypotheses or functions
+    hypotheses = (story_analysis.get("professional_core_hypotheses") or [])
+    directions: list[str] = []
+    for h in hypotheses[:2]:
+        text = str(h or "").strip()
+        if text:
+            directions.append(text)
+    if len(directions) < 2 and funcs:
+        for f in funcs:
+            name = str(getattr(f, "function_name", "") or "").strip()
+            if name and name not in " ".join(directions):
+                directions.append(f"Роли в направлении: {name}")
+            if len(directions) >= 2:
+                break
+    route1 = directions[0] if directions else "Маршрут 1"
+    route2 = directions[1] if len(directions) > 1 else "Маршрут 2"
+    lines.append(f"\nДва реалистичных направления:\n1. {route1}\n2. {route2}")
+
+    # What's unclear
+    unresolved = list(getattr(profile, "unresolved_gaps", []) or [])[:3]
+    if unresolved:
+        gaps_text = "; ".join(unresolved)
+    else:
+        critical_gaps = (story_analysis.get("critical_gaps") or [])[:2]
+        gaps_text = "; ".join(str(g.get("gap_type") or "") for g in critical_gaps if isinstance(g, dict))
+    if not gaps_text:
+        gaps_text = "дополнительные данные прояснят точность маршрута"
+    lines.append(f"\nЧто пока неясно:\n{gaps_text}")
+
+    lines.append("\nКакой вариант разберём глубже?\n\nЭто не окончательный отчёт.")
+    return "\n".join(lines), route1, route2
+
+
 def _question_semantic_intent(question_text: str) -> str:
     q = str(question_text or "").lower()
     if "цель" in q:
@@ -892,6 +1811,29 @@ def _question_source(row: dict[str, object], mode: str, index: int) -> str:
     if index in {3, 6}:
         return "integration"
     return "route_branch"
+
+
+def _decision_that_may_change(row: dict[str, object]) -> str:
+    decision = str(row.get("decision_impact") or "").strip()
+    if decision:
+        return decision
+
+    gap_key = str(row.get("gap_key") or "").strip()
+    if gap_key:
+        return f"resolve_gap:{gap_key}"
+
+    internal_goal = str(row.get("internal_goal") or row.get("semantic_intent") or "").strip()
+    if internal_goal:
+        return internal_goal
+
+    question_text = str(row.get("question") or "").strip()
+    if question_text:
+        semantic = _question_semantic_intent(question_text)
+        if semantic and semantic != "general_clarification":
+            return semantic
+        return "clarify_profile"
+
+    return ""
 
 
 def _question_validity_status(row: dict[str, object]) -> str:
@@ -1053,10 +1995,12 @@ def _story_confirmation_text(analysis: dict, question_count: int) -> str:
     lines.append(f"Ресурс: {main_resource}")
     lines.append(f"Ограничение: {main_constraint}")
     lines.append("")
-    if question_count == 1:
+    if question_count <= 0:
+        lines.append("Данных уже достаточно для предварительной карты. Можно перейти к результату сразу или уточнить один критичный пункт позже.")
+    elif question_count == 1:
         lines.append("Дальше задам 1 уточняющий вопрос и затем покажу маршруты.")
     else:
-        lines.append(f"Дальше задам ровно {question_count} уточняющих вопросов и затем покажу маршруты.")
+        lines.append(f"Дальше задам по одному уточняющему вопросу по критичным пробелам (сейчас вижу до {question_count} приоритетных пунктов).")
     return _clip("\n".join(lines), 1600)
 
 
@@ -1088,16 +2032,8 @@ def _question_prompt(analysis: dict, index: int, lang: str) -> str:
     safe_index = max(0, min(index, total - 1))
     row = questions[safe_index]
     if not isinstance(row, dict):
-        return f"Вопрос {safe_index + 1}/{total}\n\n{row}"
-
-    q_num = row.get("id", safe_index + 1)
-    try:
-        q_num = int(q_num)
-    except Exception:
-        q_num = safe_index + 1
-    text = row.get("question", "-")
-    lines = [f"=== Вопрос {safe_index + 1}/{total} ===", f"№{q_num}. {text}"]
-    return _clip("\n\n".join(lines))
+        return _clip(str(row))
+    return _clip(str(row.get("question") or "-"))
 
 
 def _questions_fast() -> list[dict[str, object]]:
@@ -1115,7 +2051,7 @@ def _questions_fast() -> list[dict[str, object]]:
         {
             "id": 3,
             "question": "Что у вас сейчас с языком, документами и правом работать?",
-            "options": ["Язык достаточный", "Язык пока мешает", "Документы в порядке", "Нужны документы/уточнения", "Право работать неясно"],
+            "options": list(LANGUAGE_DOCUMENTS_BUTTONS),
         },
         {
             "id": 4,
@@ -1610,6 +2546,84 @@ def _known_story_fields(story_text: str) -> set[str]:
     return known
 
 
+def _country_duration_category(text: str) -> str:
+    low = _normalize_text(text)
+    if not low:
+        return ""
+    if "полтора" in low or "1.5" in low:
+        return "1_2_years"
+    if any(token in low for token in ["меньше 6 месяцев", "менее 6 месяцев", "до 6 месяцев"]):
+        return "lt_6_months"
+    if any(token in low for token in ["6-12 месяцев", "6–12 месяцев", "6 12 месяцев", "6-12 мес", "6–12 мес"]):
+        return "6_12_months"
+    if any(token in low for token in ["1-2 года", "1–2 года", "1 2 года"]):
+        return "1_2_years"
+    if any(token in low for token in ["больше 2 лет", "более 2 лет", "свыше 2 лет"]):
+        return "gt_2_years"
+
+    years_match = re.search(r"(\d{1,2})\s*(?:лет|года|год)", low)
+    if years_match:
+        try:
+            years = int(years_match.group(1))
+            if years < 1:
+                return "lt_6_months"
+            if years <= 2:
+                return "1_2_years"
+            return "gt_2_years"
+        except Exception:
+            return ""
+    return ""
+
+
+def _country_duration_label(category: str) -> str:
+    mapping = {
+        "lt_6_months": "меньше 6 месяцев",
+        "6_12_months": "6–12 месяцев",
+        "1_2_years": "1–2 года",
+        "gt_2_years": "больше 2 лет",
+    }
+    return mapping.get(category, "")
+
+
+def _extract_story_country_duration(story_text: str) -> str:
+    return _country_duration_category(str(story_text or ""))
+
+
+def _extract_selected_country_duration(data: dict, answers_text: str) -> str:
+    qa_answers = data.get("qa_answers") if isinstance(data.get("qa_answers"), list) else []
+    for row in qa_answers:
+        if not isinstance(row, dict):
+            continue
+        q = _normalize_text(str(row.get("question") or ""))
+        a = str(row.get("answer") or "")
+        if "сколько времени" in q and "стране" in q:
+            category = _country_duration_category(a)
+            if category:
+                return category
+    return _country_duration_category(str(answers_text or ""))
+
+
+def _reconcile_country_duration(story_text: str, data: dict, answers_text: str) -> tuple[str, str, str]:
+    story_category = _extract_story_country_duration(story_text)
+    selected_category = _extract_selected_country_duration(data, answers_text)
+    if not story_category:
+        return answers_text, "", ""
+
+    story_label = _country_duration_label(story_category)
+    if selected_category and selected_category != story_category:
+        note = (
+            "Вижу расхождение: в истории указано полтора года, а в ответах выбран другой срок.\n\n"
+            "Для маршрута беру полтора года. Если это ошибка — поправьте."
+        )
+        merged = (
+            str(answers_text or "").strip()
+            + f"\n\n[ПРИОРИТЕТ ФАКТА]\nСрок проживания в стране (основной): {story_label}."
+        ).strip()
+        return merged, note, story_label
+
+    return answers_text, "", story_label
+
+
 def _filter_known_questions(questions: list[dict[str, object]], story_text: str) -> list[dict[str, object]]:
     known = _known_story_fields(story_text)
     if not known:
@@ -1648,6 +2662,7 @@ def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text
     analysis = story_analysis if isinstance(story_analysis, dict) else {}
     qa_answers = data.get("qa_answers") if isinstance(data.get("qa_answers"), list) else []
     profile = data.get("interaction_profile") if isinstance(data.get("interaction_profile"), dict) else {}
+    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
 
     def _append_unique(target: list[str], value: str) -> None:
         text = str(value or "").strip()
@@ -1658,6 +2673,7 @@ def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text
     constraints: list[str] = []
     psychological_state: list[str] = []
     action_capacity: list[str] = []
+    route_preferences: list[str] = []
 
     _append_unique(career_profile, f"Текущая идентичность: {str(analysis.get('current_identity', '')).strip() or 'данных недостаточно'}")
     for item in analysis.get("experience_snapshot", []) if isinstance(analysis.get("experience_snapshot"), list) else []:
@@ -1707,6 +2723,38 @@ def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text
         if c and r:
             _append_unique(career_profile, f"Причина выбора «{c}»: {r}")
 
+    if route_context:
+        country = str(route_context.get("country") or "").strip()
+        city = str(route_context.get("city") or "").strip()
+        if country or city:
+            _append_unique(career_profile, f"География: {', '.join(item for item in [country, city] if item)}")
+        if str(route_context.get("current_language_level") or "").strip():
+            _append_unique(constraints, f"Текущий уровень языка: {route_context.get('current_language_level')}")
+        if str(route_context.get("target_language") or "").strip():
+            _append_unique(route_preferences, f"Целевой язык: {route_context.get('target_language')}")
+        if str(route_context.get("income_urgency") or "").strip():
+            _append_unique(constraints, f"Срочность дохода: {route_context.get('income_urgency')}")
+        if str(route_context.get("minimum_monthly_income") or "").strip():
+            _append_unique(constraints, f"Минимальный доход: {route_context.get('minimum_monthly_income')}")
+        if str(route_context.get("desired_monthly_income") or "").strip():
+            _append_unique(route_preferences, f"Желаемый доход: {route_context.get('desired_monthly_income')}")
+        if str(route_context.get("training_budget") or "").strip():
+            _append_unique(constraints, f"Бюджет на обучение: {route_context.get('training_budget')}")
+        if str(route_context.get("available_time_for_study") or "").strip():
+            _append_unique(action_capacity, f"Время на обучение: {route_context.get('available_time_for_study')}")
+        if str(route_context.get("career_goal_type") or "").strip():
+            _append_unique(career_profile, f"Карьерная цель: {route_context.get('career_goal_type')}")
+        if str(route_context.get("work_preferences") or "").strip():
+            _append_unique(route_preferences, f"Формат работы: {route_context.get('work_preferences')}")
+        if str(route_context.get("health_or_schedule_limits") or "").strip():
+            _append_unique(constraints, f"Ограничения по графику/здоровью: {route_context.get('health_or_schedule_limits')}")
+        if str(route_context.get("documents_and_work_rights") or "").strip():
+            _append_unique(constraints, f"Документы и право на работу: {route_context.get('documents_and_work_rights')}")
+        if str(route_context.get("diploma_status") or "").strip():
+            _append_unique(career_profile, f"Статус диплома: {route_context.get('diploma_status')}")
+        if str(route_context.get("portfolio_or_references") or "").strip():
+            _append_unique(career_profile, f"Портфолио / рекомендации: {route_context.get('portfolio_or_references')}")
+
     answers_low = str(answers_text or "").lower().replace("ё", "е")
     if any(token in answers_low for token in ["не знаю, с чего начать", "не знаю с чего начать", "слишком сложно", "устал", "тревог", "сомне"]):
         _append_unique(psychological_state, "Эмоциональный перегруз/неопределенность")
@@ -1728,7 +2776,678 @@ def _build_decision_layers(data: dict, story_analysis: dict | None, answers_text
         "constraints": constraints[:10],
         "psychological_state": psychological_state[:10],
         "action_capacity": action_capacity[:8],
+        "route_preferences": route_preferences[:8],
     }
+
+
+def _top_strategy_roles(report: dict[str, object], limit: int = 4) -> list[str]:
+    roles: list[str] = []
+    market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+    recommendations = report.get("career_recommendations") if isinstance(report.get("career_recommendations"), list) else []
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+
+    def _add(value: object) -> None:
+        text = str(value or "").strip()
+        if text and text not in roles:
+            roles.append(text)
+
+    for item in market:
+        if isinstance(item, dict):
+            _add(item.get("profession"))
+        if len(roles) >= limit:
+            return roles[:limit]
+
+    for item in recommendations:
+        if isinstance(item, dict):
+            _add(item.get("title"))
+        if len(roles) >= limit:
+            return roles[:limit]
+
+    _add(decision.get("recommended_main_path"))
+    _add(decision.get("backup_path"))
+    if not roles:
+        roles.extend(["Administrative Assistant", "Back-office Specialist", "Document Controller"])
+    return roles[:limit]
+
+
+def _extract_years_in_profession(report: dict[str, object], route_context: dict[str, str]) -> int:
+    candidates: list[str] = []
+    for key in ("years_in_profession", "profile_years", "experience_years"):
+        value = route_context.get(key)
+        if value:
+            candidates.append(str(value))
+
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    for bucket in ("explicit_facts", "resume_facts"):
+        items = facts_only.get(bucket) if isinstance(facts_only.get(bucket), list) else []
+        for item in items:
+            candidates.append(str(item or ""))
+
+    story_blob = " ".join(
+        [
+            str(((report.get("digital_human") or {}) if isinstance(report.get("digital_human"), dict) else {}).get("current_state") or ""),
+            str(((report.get("digital_human") or {}) if isinstance(report.get("digital_human"), dict) else {}).get("previous_identity") or ""),
+        ]
+    )
+    if story_blob:
+        candidates.append(story_blob)
+
+    max_years = 0
+    pattern = re.compile(r"(\d{1,2})\s*\+?\s*(?:лет|года|год|years?)", re.IGNORECASE)
+    for text in candidates:
+        for match in pattern.finditer(str(text or "")):
+            try:
+                max_years = max(max_years, int(match.group(1)))
+            except Exception:
+                continue
+    return max_years
+
+
+def _wants_return_to_profession(report: dict[str, object], route_context: dict[str, str]) -> bool:
+    chunks = [
+        str(route_context.get("career_goal_type") or ""),
+        str(route_context.get("work_preferences") or ""),
+        str((report.get("career_decision") or {}).get("why_this_path") if isinstance(report.get("career_decision"), dict) else ""),
+        str((report.get("career_decision") or {}).get("decision_summary") if isinstance(report.get("career_decision"), dict) else ""),
+    ]
+
+    facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    for bucket in ("explicit_facts", "inferences"):
+        items = facts_only.get(bucket) if isinstance(facts_only.get(bucket), list) else []
+        chunks.extend(str(item or "") for item in items)
+
+    blob = " ".join(chunks).lower().replace("ё", "е")
+    markers = [
+        "вернуться в профес",
+        "вернуться по профес",
+        "по специальност",
+        "сохранить профессиональный статус",
+        "ближе к моему опыту",
+        "вернуться в строительную сфер",
+        "работать по профилю",
+    ]
+    return any(marker in blob for marker in markers)
+
+
+def _is_generic_assistant_role(role: str) -> bool:
+    text = str(role or "").strip().lower().replace("ё", "е")
+    if not text:
+        return True
+    parts = [part.strip() for part in text.split("/") if part.strip()]
+    if len(parts) > 1:
+        # If every slash-separated fragment is generic assistant/back-office, treat whole role as generic.
+        if all(_is_generic_assistant_role(part) for part in parts):
+            return True
+    if "administrative assistant" in text and "construction" not in text and "engineering" not in text:
+        return True
+    if "generic back-office specialist" in text:
+        return True
+    if text == "back-office specialist":
+        return True
+    return False
+
+
+def _professional_bridge_goal_pack(profile_domain: str) -> tuple[str, str]:
+    if profile_domain == "construction_engineering_cost_estimation":
+        return (
+            "сохранить доход и начать возвращение в строительную сферу",
+            "выйти на assistant / junior роль рядом со сметами, строительной документацией или project coordination",
+        )
+    return (
+        "сохранить доход и начать возвращение в профессиональную сферу",
+        "выйти на assistant / junior роль рядом с профильными задачами, документацией или project coordination",
+    )
+
+
+def _build_fast_income_bundle(report: dict[str, object], route_context: dict[str, str]) -> dict[str, object]:
+    roles = _top_strategy_roles(report, 4)
+    market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    profile_domain = str(report.get("profile_domain") or "").strip()
+    years_in_profession = _extract_years_in_profession(report, route_context)
+    wants_return = _wants_return_to_profession(report, route_context)
+    is_professional_bridge = years_in_profession >= 5 and wants_return
+
+    if is_professional_bridge:
+        filtered_roles = [role for role in roles if not _is_generic_assistant_role(role)]
+        if profile_domain == "construction_engineering_cost_estimation":
+            for role in _CONSTRUCTION_BRIDGE_ROLES:
+                if role not in filtered_roles:
+                    filtered_roles.append(role)
+        roles = (filtered_roles or roles)[:5]
+
+    country = str(route_context.get("country") or "").strip()
+    city = str(route_context.get("city") or "").strip()
+    target_place = ", ".join(part for part in [city, country] if part) or "вашем городе"
+
+    minimum_requirements: list[str] = []
+    for item in market[:3]:
+        if not isinstance(item, dict):
+            continue
+        for requirement in item.get("requirements", []) if isinstance(item.get("requirements", []), list) else []:
+            text = str(requirement or "").strip()
+            if text and text not in minimum_requirements:
+                minimum_requirements.append(text)
+            if len(minimum_requirements) >= 6:
+                break
+        if len(minimum_requirements) >= 6:
+            break
+    for extra in [
+        f"Текущий язык: {route_context.get('current_language_level') or 'данных недостаточно'}",
+        f"Целевой язык: {route_context.get('target_language') or 'данных недостаточно'}",
+        f"Документы и право на работу: {route_context.get('documents_and_work_rights') or 'данных недостаточно'}",
+        f"Формат работы: {route_context.get('work_preferences') or 'данных недостаточно'}",
+    ]:
+        if extra not in minimum_requirements:
+            minimum_requirements.append(extra)
+
+    role_line = ", ".join(roles[:3])
+    bundle = {
+        "goal_30_days": f"Закрепиться на одной из быстрых входных ролей в {target_place}, не уходя в тупиковую временную занятость.",
+        "realistic_entry_roles": roles,
+        "minimum_requirements": minimum_requirements,
+        "cv_version_for_fast_entry": f"1-страничное CV под {role_line or _safe_default(decision.get('recommended_main_path'))} с акцентом на документы, сроки, координацию и готовность к старту.",
+        "application_plan_7_days": [
+            f"День 1: собрать 10 вакансий {role_line or 'по целевым ролям'} и выписать повторяющиеся требования.",
+            "День 2: сделать 1-страничную версию CV под быстрый вход.",
+            "День 3: подготовить 2 коротких самопрезентации под отклик и звонок.",
+            "День 4: отправить 5 тестовых откликов.",
+            "День 5: проверить 3 ответы рынка и скорректировать заголовок CV.",
+            "День 6: собрать список из 5 компаний с внутренним ростом в operations/compliance/project coordination.",
+            "День 7: отправить ещё 5 откликов и зафиксировать, где нужен донастрой CV.",
+        ],
+        "application_plan_30_days": [
+            "Неделя 1: 10-15 откликов и 1 адаптированная версия CV.",
+            "Неделя 2: 2-3 коротких скрининга или ответы от рынка.",
+            "Неделя 3: исправить CV по факту откликов и сузить список до 2-3 ролей.",
+            "Неделя 4: повторить цикл откликов и выбрать ближайший внутренний ростовой трек.",
+        ],
+        "bridge_to_next_role": "Через 3-6 месяцев цель — перейти из стартовой роли в operations, project coordination или compliance внутри той же компании или рядом с ней.",
+        "risk_of_dead_end_roles": [
+            "Временные позиции без обучения и без понятного внутреннего роста.",
+            "Разовые подработки, которые не дают локального опыта и рекомендаций.",
+            "Работа, где нельзя показать документы, сроки, координацию и результат.",
+        ],
+        "today_action": {
+            "action": "Соберите 10 вакансий по выбранным быстрым ролям и выпишите 3 повторяющихся требования.",
+            "timebox": "15 минут",
+            "result": "Есть короткий список рынка и видны первые требования для версии CV.",
+        },
+    }
+
+    if is_professional_bridge:
+        short_term_goal, main_goal_3_6_months = _professional_bridge_goal_pack(profile_domain)
+        bundle["route_type"] = "professional_bridge_with_income"
+        bundle["short_term_goal"] = short_term_goal
+        bundle["main_goal_3_6_months"] = main_goal_3_6_months
+        bundle["bridge_to_next_role"] = (
+            "Через 3-6 месяцев закрепиться в assistant/junior роли по профилю и двигаться к более полной роли в домене."
+        )
+        bundle["goal_30_days"] = (
+            f"Сохранить доход в {target_place} и запустить возвращение в профильную профессию без ухода в generic assistant."
+        )
+
+    return bundle
+
+
+def _build_upskill_bundle(report: dict[str, object], route_context: dict[str, str]) -> dict[str, object]:
+    roles = _top_strategy_roles(report, 3)
+    market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    what_not_reset = report.get("what_not_reset") if isinstance(report.get("what_not_reset"), list) else []
+    current_language = str(route_context.get("current_language_level") or "данных недостаточно").strip()
+    target_language = str(route_context.get("target_language") or "данных недостаточно").strip()
+    diploma_status = str(route_context.get("diploma_status") or "данных недостаточно").strip()
+
+    existing = [str(item).strip() for item in what_not_reset[:4] if str(item).strip() and str(item).strip() != "-"]
+    if not existing:
+        existing = ["Документы и формальные процедуры", "Контроль сроков", "Координация людей и задач"]
+
+    rows = [
+        {
+            "already_have": existing[0] if len(existing) > 0 else "Данные из истории и резюме",
+            "need_to_add": f"Локальный язык для {target_language if target_language != 'данных недостаточно' else 'работы'}",
+            "how_to_confirm": "10-минутный mock interview и 10 рабочих фраз на целевом языке",
+        },
+        {
+            "already_have": existing[1] if len(existing) > 1 else "Контроль сроков и задач",
+            "need_to_add": "Excel / Google Sheets и локальный рабочий словарь",
+            "how_to_confirm": "1 практическое задание и 2 примера из CV",
+        },
+        {
+            "already_have": existing[2] if len(existing) > 2 else "Документооборот",
+            "need_to_add": "Локальные процессы, нормы и правила обработки документов",
+            "how_to_confirm": "Мини-кейс по вакансии и чек-лист из 5 пунктов",
+        },
+        {
+            "already_have": existing[3] if len(existing) > 3 else "Координация людей и задач",
+            "need_to_add": "Подтверждение роли в целевой компании через отклики и собеседования",
+            "how_to_confirm": "2 скрининга или 5 тестовых откликов",
+        },
+    ]
+
+    market_requirements: list[str] = []
+    for item in market[:3]:
+        if not isinstance(item, dict):
+            continue
+        for requirement in item.get("requirements", []) if isinstance(item.get("requirements", []), list) else []:
+            text = str(requirement or "").strip()
+            if text and text not in market_requirements:
+                market_requirements.append(text)
+            if len(market_requirements) >= 6:
+                break
+        if len(market_requirements) >= 6:
+            break
+    for extra in [
+        f"Текущий язык: {current_language}",
+        f"Целевой язык: {target_language}",
+        f"Статус диплома: {diploma_status}",
+    ]:
+        if extra not in market_requirements:
+            market_requirements.append(extra)
+
+    return {
+        "target_roles_6_months": roles,
+        "gap_analysis": rows,
+        "language_target": f"Перейти от {current_language} к рабочему уровню {target_language} для собеседований и переписки.",
+        "required_tools_and_skills": market_requirements,
+        "recommended_certificates": ["данных недостаточно: сначала проверить реальные вакансии и требования рынка"],
+        "diploma_or_license_check": f"Проверить признание диплома и лицензий для целевых ролей; текущий статус: {diploma_status}.",
+        "training_plan_12_weeks": {
+            "0_4_weeks": [
+                "Собрать 10 вакансий по целевым ролям и выписать общие требования.",
+                "Обновить CV под 1-2 близкие роли и сделать короткий профиль на целевом языке.",
+            ],
+            "5_8_weeks": [
+                "Добрать 1 практический навык, который чаще всего встречается в вакансиях.",
+                "Сделать 1 мини-кейс или рабочий пример для портфолио.",
+            ],
+            "9_12_weeks": [
+                "Проверить отклики, исправить CV и расширить список до 2-3 целевых ролей.",
+                "Провести 2-3 собеседования или mock interview и зафиксировать пробелы.",
+            ],
+            "3_6_months": [
+                "Собрать устойчивую языковую и профессиональную базу для перехода в target role.",
+                "Перейти в смежную роль через внутренний рост или более точный рынок вакансий.",
+            ],
+        },
+        "parallel_income_options": [
+            "Временная administrative support / back-office роль в компании с внутренним ростом.",
+            "Document control / operations support как мост к целевой роли.",
+            "Частичная занятость, если она не ломает план обучения и даёт локальный опыт.",
+        ],
+        "portfolio_or_case_plan": [
+            "Сделать 1 страницу с 2-3 кейсами по документообороту, срокам и координации.",
+            "Подготовить 1 пример рабочей переписки на целевом языке.",
+            "Собрать 1 чек-лист из реального задания вакансии и показать, как вы его решали.",
+        ],
+        "checkpoints": [
+            "Через 2 недели: есть список из 10 вакансий и обновлённое CV.",
+            "Через 4 недели: есть 3-5 откликов и 1-2 ответа от рынка.",
+            "Через 8 недель: есть 1 мини-кейс или портфолио-образец.",
+            "Через 12 недель: понятно, какие 2-3 роли реалистичны для перехода.",
+        ],
+        "today_action": {
+            "action": "Выберите 3 целевые роли и сравните их по требованиям из 10 вакансий.",
+            "timebox": "15 минут",
+            "result": "Есть короткий список ролей и видны пробелы для добора навыков.",
+        },
+    }
+
+
+def _build_long_transition_bundle(report: dict[str, object], route_context: dict[str, str]) -> dict[str, object]:
+    roles = _top_strategy_roles(report, 3)
+    market = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+    country = str(route_context.get("country") or "").strip()
+    city = str(route_context.get("city") or "").strip()
+    current_lang = str(route_context.get("current_language_level") or "данных недостаточно").strip()
+    target_lang = str(route_context.get("target_language") or "данных недостаточно").strip()
+    has_market_check = bool(country and city and len(market) >= 3)
+
+    options = [
+        "Project coordination",
+        "Compliance / GDPR",
+        "HR operations",
+    ]
+
+    comparison_table = [
+        {
+            "direction": "Project coordination",
+            "time_to_entry": "4–8 месяцев",
+            "language": "зависит от рынка",
+            "cost": "средняя",
+            "income_at_start": "средний",
+            "income_growth_potential": "высокий",
+            "risk": "нужен опыт",
+        },
+        {
+            "direction": "Compliance / GDPR",
+            "time_to_entry": "6–12 месяцев",
+            "language": "выше среднего",
+            "cost": "средняя",
+            "income_at_start": "средний",
+            "income_growth_potential": "высокий",
+            "risk": "нужны локальные знания",
+        },
+        {
+            "direction": "HR operations",
+            "time_to_entry": "4–9 месяцев",
+            "language": "средний–высокий",
+            "cost": "средняя",
+            "income_at_start": "средний",
+            "income_growth_potential": "средний–высокий",
+            "risk": "много конкуренции",
+        },
+    ]
+
+    if has_market_check and market:
+        by_role = {str(item.get("profession") or "").lower(): item for item in market if isinstance(item, dict)}
+        mapping = {
+            "project coordination": ["project coordinator", "operations coordinator"],
+            "compliance / gdpr": ["compliance", "document control"],
+            "hr operations": ["hr", "operations"],
+        }
+        for row in comparison_table:
+            key = str(row.get("direction") or "").lower()
+            candidates = mapping.get(key, [])
+            picked = None
+            for role_name, item in by_role.items():
+                if any(token in role_name for token in candidates):
+                    picked = item
+                    break
+            if picked:
+                row["income_at_start"] = _safe_default(picked.get("salary_range"), str(row.get("income_at_start") or "средний"))
+                row["risk"] = _safe_default(picked.get("competition"), str(row.get("risk") or "средний"))
+
+    documents = [
+        _safe_default(route_context.get("documents_and_work_rights"), "данных недостаточно"),
+        _safe_default(route_context.get("diploma_status"), "данных недостаточно"),
+    ]
+    test_tasks = {
+        "Project coordination": "Соберите 1 мини-план проекта на 2 недели с задачами, сроками и рисками.",
+        "Compliance / GDPR": "Разберите 1 вакансию и составьте чек-лист из 10 требований комплаенса/документов.",
+        "HR operations": "Сделайте 1 процесс-карту onboarding/recruitment на 1 страницу.",
+    }
+
+    checkpoint = (
+        "Это предварительная гипотеза. Перед вложением денег мы проверим 15–20 актуальных вакансий и уточним требования работодателей."
+        if not has_market_check
+        else "Перед вложением денег всё равно проверьте 15–20 вакансий по городу и уточните реальные требования по языку и документам."
+    )
+
+    return {
+        "new_career_options": options,
+        "comparison_table": comparison_table,
+        "time_to_entry": {row["direction"]: row["time_to_entry"] for row in comparison_table},
+        "training_cost": {row["direction"]: row["cost"] for row in comparison_table},
+        "language_requirement": {
+            "current": current_lang,
+            "target": target_lang,
+            "by_path": {row["direction"]: row["language"] for row in comparison_table},
+        },
+        "income_at_start": {row["direction"]: row["income_at_start"] for row in comparison_table},
+        "income_growth_potential": {row["direction"]: row["income_growth_potential"] for row in comparison_table},
+        "required_documents": documents,
+        "test_task_for_each_path": test_tasks,
+        "decision_checkpoint": checkpoint,
+        "today_action": {
+            "action": "Выберите 2 направления из таблицы и сравните их по 15–20 вакансиям в вашем городе.",
+            "timebox": "15 минут",
+            "result": "Есть короткий shortlist и факты рынка перед затратами на обучение.",
+        },
+    }
+
+
+def _build_need_decision_bundle(report: dict[str, object], route_context: dict[str, str]) -> dict[str, object]:
+    missing = [field for field in _route_context_missing({"route_context": route_context}) if field]
+    preliminary_route = _safe_default((report.get("career_decision") or {}).get("recommended_main_path"))
+    return {
+        "message": "Сейчас у вас не одна проблема «где найти работу», а выбор между скоростью, стабильностью и карьерным ростом.",
+        "comparison_table": [
+            {
+                "path": "Быстрый доход",
+                "gain": "Деньги и местный опыт",
+                "tradeoff": "Может быть ниже статус и зарплата",
+                "first_result": "2–6 недель",
+            },
+            {
+                "path": "Добрать навыки",
+                "gain": "Работа ближе к опыту",
+                "tradeoff": "Понадобится дисциплина и время",
+                "first_result": "3–6 месяцев",
+            },
+            {
+                "path": "Переучиться",
+                "gain": "Новая карьерная траектория",
+                "tradeoff": "Дольше и дороже",
+                "first_result": "6–18 месяцев",
+            },
+        ],
+        "decision_questions": list(_NEED_DECISION_QUESTIONS),
+        "missing_fields": missing,
+        "preliminary_route": preliminary_route,
+        "today_action": {
+            "action": "Ответьте на 3 коротких вопроса выбора стратегии. После этого зафиксируем путь и только потом выберем конкретный маршрут.",
+            "timebox": "10 минут",
+            "result": "Появится осознанная стратегия: быстрый доход, добор навыков или долгий переход.",
+        },
+    }
+
+
+def _recommend_strategy_from_need_decision_answers(answers: list[str]) -> str:
+    blob = " ".join(str(item or "").lower().replace("ё", "е") for item in answers)
+    if not blob:
+        return "upskill_for_profile"
+
+    short_runway = any(token in blob for token in ["1 месяц", "2 месяц", "2 недели", "срочно", "немед", "нет запаса", "без доход"])
+    status_important = any(token in blob for token in ["важно сохранить", "статус важ", "важно статус", "проф статус"])
+    ready_to_study = any(token in blob for token in ["готов", "да,", "учиться", "регулярно", "3-6 месяцев", "дисциплина"])
+    no_study = any(token in blob for token in ["не готов", "не могу учиться", "нет времени", "сложно учиться"])
+
+    if short_runway or no_study:
+        return "fast_income"
+    if ready_to_study and status_important:
+        return "upskill_for_profile"
+    if ready_to_study and not status_important:
+        return "long_transition"
+    return "upskill_for_profile"
+
+
+def _collect_specialist_signals(report: dict[str, object], data: dict[str, object]) -> tuple[list[str], list[str]]:
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    answers_blob = " ".join(
+        [
+            str(data.get("answers_text") or ""),
+            str(decision.get("why_not_other_paths") or ""),
+            str(decision.get("why_this_path") or ""),
+            str((report.get("facts_only") or {}).get("unknowns") or ""),
+        ]
+    ).lower().replace("ё", "е")
+
+    career_rules = [
+        ("не может выбрать между несколькими карьерными направлениями", ["не могу выбрать", "несколько направ", "сомневаюсь между"]),
+        ("не понимает, как перевести прошлый опыт на язык нового рынка", ["перевести опыт", "как назвать опыт", "язык рынка"]),
+        ("нужно переписать CV или LinkedIn под конкретную страну", ["cv", "резюме", "linkedin"]),
+        ("есть опыт, но нет понятного профессионального позиционирования", ["не понимаю кем", "позиционирован", "как себя представить"]),
+        ("нужно подготовиться к интервью", ["собесед", "интервью"]),
+        ("не понимает, какие сертификаты реально нужны", ["сертификат", "какой курс", "что из обучения нужно"]),
+        ("не понимает, нужна ли нострификация диплома", ["диплом", "ностриф", "признание квалификации"]),
+        ("много откликов, но нет приглашений", ["много откликов", "нет приглаш", "нет ответов"]),
+        ("нужно проверить стратегию поиска работы", ["стратегия поиска", "как искать", "план поиска"]),
+    ]
+
+    psych_rules = [
+        ("паника или сильная тревога при откликах и собеседованиях", ["паник", "сильная трев", "страшно отклик", "страшно собесед"]),
+        ("выгорание и отсутствие сил начать поиск", ["выгор", "нет сил", "устал", "истощ"]),
+        ("стыд, самоуничижение, ощущение 'я никто'", ["стыд", "я никто", "самоуничиж", "бесполезен"]),
+        ("человек избегает действий несмотря на понятный план", ["избегаю", "не делаю", "не могу начать", "прокрастин"]),
+        ("сон, аппетит, концентрация или повседневное функционирование заметно ухудшились", ["сон", "аппетит", "концентра", "функционирован"]),
+        ("переживание потери статуса, эмиграции или профессиональной идентичности", ["потеря статуса", "эмиграц", "идентичност"]),
+        ("депрессивные симптомы или выраженное чувство безнадёжности", ["безнадеж", "депресс", "нет смысла"]),
+    ]
+
+    career_hits = [label for label, markers in career_rules if any(marker in answers_blob for marker in markers)]
+    psych_hits = [label for label, markers in psych_rules if any(marker in answers_blob for marker in markers)]
+
+    if not career_hits and str(data.get("career_strategy") or "") in {"need_decision", "upskill_for_profile", "long_transition"}:
+        career_hits.append("нужно проверить стратегию поиска работы")
+    if not psych_hits and any(token in answers_blob for token in ["тревог", "страх", "не знаю с чего начать", "перегруз"]):
+        psych_hits.append("человек избегает действий несмотря на понятный план")
+
+    return career_hits[:6], psych_hits[:6]
+
+
+async def _handle_crisis_detected(message: Message, state: FSMContext, lang: str) -> None:
+    """Handle crisis/safety signals by switching to crisis support mode."""
+    data = await state.get_data()
+    source = str(data.get("crisis_detected_source") or "unknown")
+    await state.update_data(career_planning_paused=True, crisis_detected=True)
+    await state.set_state(CareerFlow.CRISIS_SUPPORT)
+    crisis_msg = t(lang, "crisis_detected_message")
+    await message.answer(crisis_msg)
+    
+    # Show hotline info
+    hotline_msg = t(lang, "crisis_hotline_info")
+    await message.answer(hotline_msg)
+    
+    # Ask for next action
+    support_msg = t(lang, "crisis_support_step")
+    keyboard = crisis_support_keyboard()
+    await message.answer(support_msg, reply_markup=keyboard)
+    
+    # Track crisis signal
+    await _track_event(message, state, "crisis_signal_detected", meta={"source": source, "career_planning_paused": True})
+
+
+def _specialist_guidance_text(report: dict[str, object], data: dict[str, object]) -> tuple[str, str, str, list[str], list[str]]:
+    career_hits, psych_hits = _collect_specialist_signals(report, data)
+    today_step = str(((report.get("action_plan") or {}).get("today") or {}).get("action") or "Сделайте один шаг 10-15 минут по плану.").strip()
+    if len(career_hits) >= 2 and len(psych_hits) >= 2:
+        title = "Здесь есть две разные задачи"
+        body = (
+            "Карьерный консультант поможет собрать внешний маршрут: целевые роли, CV, вакансии и стратегию поиска. "
+            "Психолог поможет справиться с внутренним стопором: тревогой, выгоранием, стыдом или потерей уверенности. "
+            "Не обязательно начинать с двух специалистов. Можно выбрать того, чей барьер сейчас сильнее."
+        )
+        mode = "both"
+    elif len(career_hits) >= 2:
+        title = "Сейчас основной барьер — карьерный"
+        body = (
+            "У вас уже есть опыт и понятная профессиональная база. Сейчас нужно перевести опыт на язык местного рынка, "
+            "уточнить целевые роли и проверить резюме. Разовая консультация карьерного специалиста может ускорить этап."
+        )
+        mode = "career"
+    elif len(psych_hits) >= 2:
+        title = "Сейчас основной барьер — эмоциональный стопор"
+        body = (
+            "У вас есть понятный карьерный маршрут, но тревога и самокритика могут мешать им воспользоваться. "
+            "Психологическая поддержка может помочь снизить внутренний стопор и вернуть способность действовать небольшими шагами."
+        )
+        mode = "psych"
+    else:
+        title = "Можно продолжать самостоятельно"
+        body = "Сигналы к обязательной внешней поддержке сейчас не выражены. Двигайтесь по шагам и периодически проверяйте прогресс."
+        mode = "self"
+
+    text = (
+        f"{title}.\n\n"
+        f"Сегодня сначала практический шаг: {today_step}\n\n"
+        f"{body}\n\n"
+        "Выберите, какая помощь сейчас актуальнее:"
+    )
+    return text, mode, today_step, career_hits, psych_hits
+
+
+def _apply_strategy_outputs(report: dict[str, object], route_context: dict[str, str], strategy_code: str) -> None:
+    if not isinstance(report, dict):
+        return
+    chosen = str(strategy_code or "").strip()
+    if chosen not in {"fast_income", "upskill_for_profile", "long_transition", "need_decision"}:
+        chosen = "need_decision"
+
+    strategy_label = {
+        "fast_income": "Нужен доход в ближайшие 1–2 месяца",
+        "upskill_for_profile": "Готов(а) добрать навыки 3–6 месяцев",
+        "long_transition": "Готов(а) вложиться в переобучение и смену траектории",
+        "need_decision": "Не уверен(а), помоги выбрать",
+    }[chosen]
+
+    bundles = {
+        "fast_income": _build_fast_income_bundle(report, route_context),
+        "upskill_for_profile": _build_upskill_bundle(report, route_context),
+        "long_transition": _build_long_transition_bundle(report, route_context),
+        "need_decision": _build_need_decision_bundle(report, route_context),
+    }
+
+    report["career_strategy"] = chosen
+    report["career_strategy_label"] = strategy_label
+    report[chosen] = bundles[chosen]
+
+
+def _build_strategy_bundles(report: dict[str, object], route_context: dict[str, str]) -> dict[str, dict[str, object]]:
+    return {
+        "fast_income": _build_fast_income_bundle(report, route_context),
+        "upskill_for_profile": _build_upskill_bundle(report, route_context),
+        "long_transition": _build_long_transition_bundle(report, route_context),
+    }
+
+
+def _minimum_strategy_divergence(strategy_bundles: dict[str, dict[str, object]]) -> tuple[bool, int, dict[str, bool]]:
+    items = [(code, bundle) for code, bundle in strategy_bundles.items() if isinstance(bundle, dict)]
+    if len(items) < 2:
+        return True, 6, {
+            "target_roles": True,
+            "timeline": True,
+            "skills": True,
+            "education": True,
+            "income_path": True,
+            "today_action": True,
+        }
+
+    min_score = 6
+    min_compare = {
+        "target_roles": True,
+        "timeline": True,
+        "skills": True,
+        "education": True,
+        "income_path": True,
+        "today_action": True,
+    }
+    for idx in range(len(items)):
+        for jdx in range(idx + 1, len(items)):
+            _, left = items[idx]
+            _, right = items[jdx]
+            is_divergent, score, compare = _validate_route_divergence(left, right)
+            if score < min_score:
+                min_score = score
+                min_compare = compare
+            if not is_divergent:
+                return False, score, compare
+    return True, min_score, min_compare
+
+
+def _route_divergence_regen_instruction() -> str:
+    return (
+        "Маршрут слишком похож на другой сценарий. "
+        "Перестрой ответ с учётом выбранной стратегии, сроков, бюджета, "
+        "языка, целевой профессии и ограничений пользователя."
+    )
+
+
+def _strategy_summary_text(report: dict[str, object]) -> str:
+    code = str(report.get("career_strategy") or "").strip()
+    bundle = report.get(code) if code and isinstance(report.get(code), dict) else {}
+    if not code or not isinstance(bundle, dict):
+        return ""
+    if code == "fast_income":
+        return f"Быстрый доход: {str(bundle.get('goal_30_days') or '').strip()}"
+    if code == "upskill_for_profile":
+        return f"Добор навыков 3-6 месяцев: {str(bundle.get('language_target') or '').strip()}"
+    if code == "long_transition":
+        return f"Долгий переход: {str(bundle.get('goal_30_days') or '').strip()}"
+    if code == "need_decision":
+        return str(bundle.get("message") or "Пока доступен только предварительный маршрут.").strip()
+    return ""
 
 
 def _set_mvp_questions(
@@ -1894,7 +3613,8 @@ def _validate_answer(question_row: dict | object, answer: str, qa_answers: list[
     is_hours_question = "сколько часов" in question_text
     is_detail_question = any(token in question_text for token in ["чего точно не хотите", "какие ограничения", "какие направления", "какие варианты"])
 
-    if low in {"не знаю", "ничего", "ав", "ячзщык", "-"}:
+    # Gibberish / empty signals — "не знаю" is handled separately via _is_dont_know_response
+    if low in {"ничего", "ав", "ячзщык", "-"}:
         return "answer_validation_random"
 
     if len(clean) <= 3 and re.fullmatch(r"[a-zA-Zа-яА-Я]+", clean):
@@ -1909,9 +3629,10 @@ def _validate_answer(question_row: dict | object, answer: str, qa_answers: list[
         if not _looks_like_duration_answer(clean) and len(clean) > 40:
             return "answer_validation_need_choice"
 
-    if options:
+    # Long narrative answers are accepted as story; fact extraction runs on them.
+    if options and len(clean) <= 80:
         normalized = [str(item).strip().lower() for item in options if str(item).strip()]
-        if normalized and all(opt not in low for opt in normalized) and len(clean) > 80:
+        if normalized and all(opt not in low for opt in normalized) and len(clean) < 4:
             return "answer_validation_need_choice"
 
     if is_detail_question and len(clean) < 8:
@@ -1944,6 +3665,47 @@ def _is_known_previous_button(questions: list[dict], current_index: int, answer_
             if str(option).strip().lower() == candidate:
                 return True
     return False
+
+
+_DONT_KNOW_TOKENS: frozenset[str] = frozenset({
+    "не знаю", "не знаю как", "хз", "затрудняюсь", "затрудняюсь ответить",
+    "не понимаю", "непонятно", "сложно сказать", "трудно сказать",
+    "не уверен", "не уверена", "пока не знаю", "не могу сказать",
+    "понятия не имею", "сложно", "не могу ответить",
+    "пропустить / не знаю", "пропустить",
+})
+
+
+def _is_dont_know_response(text: str) -> bool:
+    # Only short bare "don't know" signals; narratives starting with "не знаю," are overload answers.
+    low = (text or "").strip().lower().replace("ё", "е")
+    return low in _DONT_KNOW_TOKENS
+
+
+def _dont_know_simpler_question(current: dict, lang: str) -> tuple[str, list[str]]:
+    """Return (intro_text, simplified_options) when user said 'не знаю'."""
+    from services.interview_policy import _GAP_REGISTRY  # noqa: PLC0415
+    gap_key = str(current.get("gap_key") or "").strip()
+    original_options = current.get("options", []) if isinstance(current.get("options"), list) else []
+    skip_option = "Пропустить / не знаю"
+
+    if gap_key and gap_key in _GAP_REGISTRY and original_options:
+        intro = "Тогда попробуем проще — выберите самое близкое:"
+        return intro, [str(o) for o in original_options] + [skip_option]
+
+    # Hypothesis prompts per gap without predefined options
+    _hypothesis: dict[str, str] = {
+        "personal_contribution": "Хорошо. Скажите самое простое: в последней работе — больше выполняли задачи по инструкции или сами решали, как их делать?",
+        "demonstrated_result": "Понятно. Тогда просто: есть хоть один момент в работе, которым вы гордитесь? Не важно, насколько большой.",
+        "explicit_refusal": "Понятно, тогда пропускаем. Если позже поймёте, что точно не хотите — просто скажите.",
+        "regulated_profession_access": "Хорошо, пропускаем. Если позже появятся вопросы по документам — уточним.",
+        "health_or_load_constraint": "Принято. Если есть что-то важное — скажите в любой момент.",
+    }
+    if gap_key in _hypothesis:
+        return _hypothesis[gap_key], []
+
+    # Generic fallback: just acknowledge and advance
+    return "Понятно, пропускаем этот вопрос. Двигаемся дальше.", []
 
 
 def _free_text_signal(question_row: dict | object, answer_text: str) -> dict[str, str] | None:
@@ -2528,7 +4290,314 @@ def _route_income_label(raw: str) -> str:
     return "средний"
 
 
+def _is_construction_estimation_domain(report: dict) -> bool:
+    return str(report.get("profile_domain") or "").strip() == "construction_engineering_cost_estimation"
+
+
+def _contains_any(text: str, terms: list[str]) -> bool:
+    low = _normalize_text(text)
+    return any(_normalize_text(term) in low for term in terms if str(term or "").strip())
+
+
+def validate_final_report(profile_domain: str, selected_route: str, first_step: str, report_text: str) -> None:
+    domain_required_terms = {
+        "construction_engineering_cost_estimation": [
+            "смет",
+            "строитель",
+            "проектной документац",
+            "construction",
+            "cost estimator",
+            "quantity surveyor",
+            "technical assistant",
+        ]
+    }
+
+    domain_forbidden_terms = {
+        "construction_engineering_cost_estimation": [
+            "плитка",
+            "гипсокартон",
+            "мебель",
+            "sales-метрики",
+            "удержание клиентов",
+            "мастер смены",
+            "старший участка",
+            "любая офисная работа",
+        ]
+    }
+
+    required = domain_required_terms.get(str(profile_domain or "").strip(), [])
+    forbidden = domain_forbidden_terms.get(str(profile_domain or "").strip(), [])
+    full_text = "\n".join([str(selected_route or ""), str(first_step or ""), str(report_text or "")])
+
+    if required and not _contains_any(full_text, required):
+        raise ValueError("Report lost professional domain")
+
+    if forbidden and _contains_any(full_text, forbidden):
+        raise ValueError("Report contains foreign-domain template")
+
+
+def _construction_final_case_block() -> str:
+    return (
+        "Ваш основной маршрут — не уход в любую офисную работу, а возвращение в строительную сферу через адаптационный мост.\n\n"
+        "Ближайшая цель на 3–6 месяцев: выйти на одну из ролей:\n"
+        "- Assistant Cost Estimator;\n"
+        "- Junior Quantity Surveyor;\n"
+        "- Technical Assistant Construction;\n"
+        "- Construction Documentation Specialist;\n"
+        "- Construction Project Assistant.\n\n"
+        "Что нужно добрать:\n"
+        "- польский B1 с профессиональной строительной лексикой;\n"
+        "- польские строительные нормы;\n"
+        "- структура проектной документации;\n"
+        "- Excel для смет;\n"
+        "- программы, которые повторяются в вакансиях;\n"
+        "- CV под construction / cost estimation.\n\n"
+        "Временная работа: если доход нужен сейчас, ищите не любую офисную позицию, а вход в строительную компанию:\n"
+        "- site office assistant;\n"
+        "- technical assistant;\n"
+        "- back-office in construction company;\n"
+        "- documentation assistant.\n\n"
+        "Первый шаг: за 15 минут найдите 10 вакансий по строительным запросам и выпишите повторяющиеся требования. Это покажет, чему учиться первым."
+    )
+
+
+def _rebuild_construction_report_for_final(report: dict) -> None:
+    route_type = str(report.get("route_type") or "").strip()
+    if route_type == "route_stable":
+        payload = dict(_construction_route_stable())
+        payload["risks"] = ["может быть ниже статус", "может быть ниже стартовый доход"]
+        payload["specialist_recommendation"] = "карьерный консультант для ускорения откликов и адаптации CV под стройкомпании"
+        _apply_selected_route_regeneration(report, payload, "route_stable")
+        return
+
+    payload = dict(_construction_route_upskill())
+    payload["main_roles"] = [
+        "Assistant Cost Estimator",
+        "Junior Quantity Surveyor",
+        "Technical Assistant Construction",
+        "Construction Documentation Specialist",
+        "Construction Project Assistant",
+    ]
+    payload["risks"] = ["нужно учить нормы и язык", "дольше до первого оффера"]
+    payload["specialist_recommendation"] = "карьерный консультант + предметный разбор вакансий для ускорения возврата к сметам"
+    _apply_selected_route_regeneration(report, payload, "route_upskill")
+
+
+def _construction_route_stable() -> dict[str, object]:
+    return {
+        "main_roles": [
+            "Site Office Assistant",
+            "Construction Documentation Assistant",
+            "Back-office Specialist in construction company",
+            "Technical Assistant Construction",
+        ],
+        "goal": "быстрее войти в строительную компанию, даже не сразу сметчиком",
+        "timeline": "1-3 месяца",
+        "first_step": "найти 10 вакансий в строительных компаниях с низким порогом входа",
+    }
+
+
+def _construction_route_upskill() -> dict[str, object]:
+    return {
+        "main_roles": [
+            "Assistant Cost Estimator",
+            "Junior Quantity Surveyor",
+            "Construction Project Assistant",
+            "Construction Documentation Specialist",
+        ],
+        "goal": "за 3-6 месяцев добрать язык, нормы, программы и вернуться ближе к профессии",
+        "skills_to_learn": [
+            "польский B1 с профессиональной строительной лексикой",
+            "польские строительные нормы",
+            "структура проектной документации в Польше",
+            "Excel для смет",
+            "программы, которые повторяются в вакансиях",
+            "CV и LinkedIn под construction / cost estimation",
+        ],
+        "timeline": "3-6 месяцев",
+        "first_step": "собрать 10 вакансий и выписать требования",
+    }
+
+
+def _apply_selected_route_regeneration(report: dict, route_payload: dict[str, object], route_id: str) -> None:
+    if not isinstance(report, dict):
+        return
+
+    roles = [str(item).strip() for item in route_payload.get("main_roles", []) if str(item).strip()] if isinstance(route_payload.get("main_roles"), list) else []
+    skills = [str(item).strip() for item in route_payload.get("skills_to_learn", []) if str(item).strip()] if isinstance(route_payload.get("skills_to_learn"), list) else []
+    risks = [str(item).strip() for item in route_payload.get("risks", []) if str(item).strip()] if isinstance(route_payload.get("risks"), list) else []
+    timeline = str(route_payload.get("timeline") or "-").strip()
+    first_step = str(route_payload.get("first_step") or "-").strip()
+    goal = str(route_payload.get("goal") or "-").strip()
+    specialist_reco = str(route_payload.get("specialist_recommendation") or "").strip()
+
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    if roles:
+        decision["recommended_main_path"] = " / ".join(roles[:2])
+        if len(roles) > 2:
+            decision["backup_path"] = " / ".join(roles[2:4])
+    decision["why_this_path"] = goal
+    decision["why_not_other_paths"] = risks[:3] if risks else ["Сначала нужен маршрут с прогнозируемым входом и подтверждаемыми требованиями."]
+    report["career_decision"] = decision
+
+    action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+    action_plan["today"] = {
+        "action": first_step,
+        "timebox": "15 минут",
+        "result": "Сделан первый измеримый шаг по выбранному маршруту.",
+    }
+    action_plan["this_week"] = [
+        f"День 1: {first_step}",
+        "День 2: адаптировать CV под выбранные роли",
+        "День 3: собрать 10 ключевых требований и примеры формулировок",
+        "День 4: отправить 3-5 прицельных откликов",
+        "День 5: зафиксировать обратную связь и обновить CV",
+        "День 6: усилить профиль LinkedIn под маршрут",
+        "День 7: скорректировать план на следующую неделю",
+    ]
+    action_plan["this_month"] = [
+        f"Закрепиться в выбранном маршруте ({timeline})",
+        "Стабилизировать поток откликов и интервью",
+        "Закрыть ключевые пробелы по требованиям рынка",
+        "Получить измеримый прогресс: интервью/оффер/финальные этапы",
+    ]
+    report["action_plan"] = action_plan
+
+    report["weekly_plan"] = [
+        {
+            "day": idx + 1,
+            "focus": "Маршрут выбран и зафиксирован",
+            "task": task,
+            "time": "30-50 минут",
+            "result": "Есть прогресс по выбранному маршруту",
+            "why": "Чтобы маршрут превращался в измеримый результат",
+        }
+        for idx, task in enumerate(action_plan["this_week"][:7])
+    ]
+
+    development_map = report.get("development_map") if isinstance(report.get("development_map"), dict) else {}
+    development_map["goal"] = goal
+    development_map["gap"] = skills[:6] if skills else ["Уточнить требования вакансий и закрыть пробелы по ним."]
+    development_map["first_month"] = [
+        {"week": 1, "focus": "Рынок", "tasks": [first_step, "Собрать требования"], "output": "Карта рынка и требований"},
+        {"week": 2, "focus": "Профиль", "tasks": ["Обновить CV", "Обновить LinkedIn"], "output": "Готовый профиль под маршрут"},
+        {"week": 3, "focus": "Отклики", "tasks": ["5 откликов в день", "Трекер откликов"], "output": "Первые интервью"},
+        {"week": 4, "focus": "Корректировка", "tasks": ["Разбор фидбэка", "Обновление тактики"], "output": "Улучшенная конверсия"},
+    ]
+    report["development_map"] = development_map
+
+    if roles:
+        report["market_analysis"] = [
+            {
+                "profession": role,
+                "fit_percent": max(70, 88 - idx * 4),
+                "demand": "средний",
+                "entry_speed": "средняя" if idx > 0 else "быстрая",
+                "competition": "средняя",
+                "requirements": skills[:5] if skills else ["релевантный опыт", "язык", "документация"],
+                "salary_range": "данных недостаточно",
+                "profile_match_reason": goal,
+            }
+            for idx, role in enumerate(roles[:4])
+        ]
+        report["career_recommendations"] = [
+            {
+                "title": role,
+                "match_percent": max(72, 90 - idx * 4),
+                "why_fit": goal,
+                "pros": ["понятный вход", "маршрут согласован пользователем"],
+                "risks": risks[:3] if risks else ["нужна адаптация под рынок"],
+                "entry_timeline": timeline,
+                "income_range": "данных недостаточно",
+            }
+            for idx, role in enumerate(roles[:4])
+        ]
+
+    if skills:
+        report["upskill_for_profile"] = {
+            "target_roles_6_months": roles[:4] if roles else [],
+            "required_tools_and_skills": skills[:6],
+            "today_action": {"action": first_step, "timebox": "15 минут", "result": "Собраны требования рынка"},
+        }
+
+    report["route_selected_id"] = route_id
+    if specialist_reco:
+        report["specialist_recommendation"] = specialist_reco
+
+
+def _construction_route_comparison() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "Быстрый вход в строительную компанию",
+            "speed": "быстрее",
+            "risk": "ниже",
+            "roles": ["Site Office Assistant", "Technical Assistant"],
+            "cost": "может быть ниже статус",
+        },
+        {
+            "name": "Возврат к сметам через обучение",
+            "speed": "средне",
+            "risk": "средний",
+            "roles": ["Assistant Cost Estimator", "Junior Quantity Surveyor"],
+            "cost": "нужно учить нормы и язык",
+        },
+        {
+            "name": "Переход в project coordination в строительстве",
+            "speed": "средне",
+            "risk": "средний",
+            "roles": ["Construction Project Assistant", "Project Coordinator"],
+            "cost": "нужны коммуникация и локальные процессы",
+        },
+    ]
+
+
 def _build_route_comparison_rows(report: dict) -> list[dict[str, str]]:
+    if _is_construction_estimation_domain(report):
+        stable = _construction_route_stable()
+        upskill = _construction_route_upskill()
+        comparison = _construction_route_comparison()
+        report["route_stable"] = stable
+        report["route_upskill"] = upskill
+        report["route_comparison"] = comparison
+        return [
+            {
+                "route": str(comparison[0].get("name") or "Быстрый вход в строительную компанию"),
+                "income": "средний",
+                "speed": str(comparison[0].get("speed") or "быстрее"),
+                "risk": str(comparison[0].get("risk") or "ниже"),
+                "need": str(comparison[0].get("cost") or "может быть ниже статус"),
+                "why": str(stable.get("goal") or "Быстрее войти в строительную компанию."),
+                "good": "Быстрый вход в строительную компанию с низким порогом входа.",
+                "obstacle": str(comparison[0].get("cost") or "может быть ниже статус"),
+                "first_step": str(stable.get("first_step") or "найти 10 вакансий в строительных компаниях с низким порогом входа"),
+                "uncertainty": "низкая",
+            },
+            {
+                "route": str(comparison[1].get("name") or "Возврат к сметам через обучение"),
+                "income": "средний",
+                "speed": str(comparison[1].get("speed") or "средне"),
+                "risk": str(comparison[1].get("risk") or "средний"),
+                "need": str(comparison[1].get("cost") or "нужно учить нормы и язык"),
+                "why": str(upskill.get("goal") or "Вернуться ближе к профессии через добор навыков."),
+                "good": "Ближе к профилю инженера-сметчика и выше долгосрочный потолок.",
+                "obstacle": str(comparison[1].get("cost") or "нужно учить нормы и язык"),
+                "first_step": str(upskill.get("first_step") or "собрать 10 вакансий и выписать требования"),
+                "uncertainty": "средняя",
+            },
+            {
+                "route": str(comparison[2].get("name") or "Переход в project coordination в строительстве"),
+                "income": "средний",
+                "speed": str(comparison[2].get("speed") or "средне"),
+                "risk": str(comparison[2].get("risk") or "средний"),
+                "need": str(comparison[2].get("cost") or "нужны коммуникация и локальные процессы"),
+                "why": "Компромиссный трек между быстрым входом и возвратом к профильной инженерной среде.",
+                "good": "Можно расти в координацию проектов в строительной компании.",
+                "obstacle": str(comparison[2].get("cost") or "нужны коммуникация и локальные процессы"),
+                "first_step": "собрать 10 вакансий Construction Project Assistant / Project Coordinator и выписать локальные требования",
+                "uncertainty": "средняя",
+            },
+        ]
+
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
     recs = report.get("career_recommendations") if isinstance(report.get("career_recommendations"), list) else []
     solutions = report.get("real_solutions") if isinstance(report.get("real_solutions"), list) else []
@@ -2619,10 +4688,150 @@ def _format_route_comparison(rows: list[dict[str, str]]) -> str:
     return "\n\n".join(blocks)
 
 
+def _format_alternative_route(route: dict[str, object]) -> str:
+    name = str(route.get("name") or route.get("route") or "-").strip()
+    roles = route.get("roles") if isinstance(route.get("roles"), list) else []
+    skills = route.get("skills") if isinstance(route.get("skills"), list) else []
+    risks = route.get("risks") if isinstance(route.get("risks"), list) else []
+    return _clip(
+        "\n".join(
+            [
+                f"Маршрут: {name}",
+                f"Роли: {', '.join(str(item).strip() for item in roles if str(item).strip()) or '-'}",
+                f"Срок: {str(route.get('timeline') or '-').strip()}",
+                f"Первый шаг: {str(route.get('first_step') or '-').strip()}",
+                f"Навыки: {', '.join(str(item).strip() for item in skills if str(item).strip()) or '-'}",
+                f"Риски: {', '.join(str(item).strip() for item in risks if str(item).strip()) or '-'}",
+            ]
+        ),
+        900,
+    )
+
+
+def _build_alternative_routes(report: dict, rows: list[dict[str, str]]) -> list[dict[str, object]]:
+    if _is_construction_estimation_domain(report):
+        stable = report.get("route_stable") if isinstance(report.get("route_stable"), dict) else _construction_route_stable()
+        upskill = report.get("route_upskill") if isinstance(report.get("route_upskill"), dict) else _construction_route_upskill()
+        comparison = report.get("route_comparison") if isinstance(report.get("route_comparison"), list) else _construction_route_comparison()
+
+        route_project_coordination = {
+            "name": "Переход в project coordination в строительстве",
+            "roles": ["Construction Project Assistant", "Project Coordinator"],
+            "timeline": "2-6 месяцев",
+            "first_step": "собрать 10 вакансий Construction Project Assistant / Project Coordinator и выписать локальные процессы",
+            "skills": [
+                "коммуникация с подрядчиками",
+                "локальные процессы строительной компании",
+                "ведение задач и сроков",
+            ],
+            "risks": ["нужна быстрая адаптация к локальным процессам", "часто нужен уверенный рабочий польский"],
+        }
+        route_documentation = {
+            "name": "Вход через строительную документацию",
+            "roles": ["Construction Documentation Specialist", "Construction Documentation Assistant"],
+            "timeline": "1-3 месяца",
+            "first_step": "найти 10 вакансий по строительной документации и выписать повторяющиеся требования к документам и нормам",
+            "skills": ["структура проектной документации", "строительные нормы", "Excel и аккуратный документооборот"],
+            "risks": ["требуется точность и скорость", "может быть ниже стартовый статус"],
+        }
+
+        return [
+            {
+                "name": "Быстрый вход в строительную компанию",
+                "roles": list(stable.get("main_roles", [])) if isinstance(stable.get("main_roles"), list) else [],
+                "timeline": str(stable.get("timeline") or "1-3 месяца"),
+                "first_step": str(stable.get("first_step") or "найти 10 вакансий в строительных компаниях с низким порогом входа"),
+                "skills": ["базовый польский для рабочих задач", "документооборот в стройке", "базовый Excel"],
+                "risks": ["может быть ниже статус", "может быть ниже стартовый доход"],
+            },
+            {
+                "name": "Возврат к сметам через обучение",
+                "roles": list(upskill.get("main_roles", [])) if isinstance(upskill.get("main_roles"), list) else [],
+                "timeline": str(upskill.get("timeline") or "3-6 месяцев"),
+                "first_step": str(upskill.get("first_step") or "собрать 10 вакансий и выписать требования"),
+                "skills": list(upskill.get("skills_to_learn", [])) if isinstance(upskill.get("skills_to_learn"), list) else [],
+                "risks": ["нужно учить нормы и язык", "более длинный путь до профильной роли"],
+            },
+            route_project_coordination,
+            route_documentation,
+        ]
+
+    alternatives: list[dict[str, object]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        alternatives.append(
+            {
+                "name": str(row.get("route") or "-").strip(),
+                "roles": [str(row.get("route") or "-").strip()],
+                "timeline": "-",
+                "first_step": str(row.get("first_step") or "-").strip(),
+                "skills": [str(row.get("need") or "-").strip()],
+                "risks": [str(row.get("obstacle") or "-").strip()],
+            }
+        )
+    return alternatives
+
+
 def _apply_route_choice_to_report(report: dict, action: str, rows: list[dict[str, str]]) -> str:
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
     if not decision:
         return ""
+
+    if _is_construction_estimation_domain(report):
+        stable = _construction_route_stable()
+        upskill = _construction_route_upskill()
+        comparison = _construction_route_comparison()
+        report["route_stable"] = stable
+        report["route_upskill"] = upskill
+        report["route_comparison"] = comparison
+
+        action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+        today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+
+        if action == ROUTE_CHOICE_STABLE:
+            roles = stable.get("main_roles") if isinstance(stable.get("main_roles"), list) else []
+            main_path = " / ".join(str(item).strip() for item in roles[:2] if str(item).strip()) or "Site Office Assistant / Construction Documentation Assistant"
+            decision["recommended_main_path"] = main_path
+            decision["backup_path"] = "Assistant Cost Estimator / Junior Quantity Surveyor"
+            decision["why_this_path"] = str(stable.get("goal") or "быстрее войти в строительную компанию, даже не сразу сметчиком")
+            today["action"] = str(stable.get("first_step") or "найти 10 вакансий в строительных компаниях с низким порогом входа")
+            today["timebox"] = "15 минут"
+            today["result"] = "Есть список из 10 вакансий в строительных компаниях с низким порогом входа."
+            action_plan["today"] = today
+            report["action_plan"] = action_plan
+            report["route_type"] = "route_stable"
+            stable_payload = dict(stable)
+            stable_payload["risks"] = ["может быть ниже статус", "может быть ниже стартовый доход"]
+            stable_payload["specialist_recommendation"] = "карьерный консультант для ускорения откликов и адаптации CV под стройкомпании"
+            _apply_selected_route_regeneration(report, stable_payload, "route_stable")
+        elif action == ROUTE_CHOICE_RETRAIN:
+            roles = upskill.get("main_roles") if isinstance(upskill.get("main_roles"), list) else []
+            main_path = " / ".join(str(item).strip() for item in roles[:2] if str(item).strip()) or "Assistant Cost Estimator / Junior Quantity Surveyor"
+            decision["recommended_main_path"] = main_path
+            decision["backup_path"] = "Site Office Assistant / Construction Documentation Assistant"
+            decision["why_this_path"] = str(upskill.get("goal") or "за 3-6 месяцев добрать язык, нормы, программы и вернуться ближе к профессии")
+            today["action"] = str(upskill.get("first_step") or "собрать 10 вакансий и выписать требования")
+            today["timebox"] = "15 минут"
+            today["result"] = "Есть 10 вакансий и выписаны повторяющиеся требования по возврату к сметной роли."
+            action_plan["today"] = today
+            report["action_plan"] = action_plan
+            report["route_type"] = "route_upskill"
+            upskill_payload = dict(upskill)
+            upskill_payload["risks"] = ["нужно учить нормы и язык", "дольше до первого оффера"]
+            upskill_payload["specialist_recommendation"] = "карьерный консультант + предметный разбор вакансий для ускорения возврата к сметам"
+            _apply_selected_route_regeneration(report, upskill_payload, "route_upskill")
+        elif action == ROUTE_CHOICE_HELP:
+            report["route_type"] = "route_comparison"
+            report["career_decision"] = decision
+            return ""
+
+        decision_summary = str(decision.get("decision_summary") or "").strip()
+        suffix = "Маршрут зафиксирован совместно с пользователем на этапе выбора перед финальной картой."
+        if suffix not in decision_summary:
+            decision["decision_summary"] = f"{decision_summary} {suffix}".strip()
+        report["career_decision"] = decision
+        return str(decision.get("recommended_main_path") or "").strip()
 
     selected_route = str(decision.get("recommended_main_path") or "").strip()
     if action == ROUTE_CHOICE_STABLE:
@@ -2744,6 +4953,47 @@ def _written_conclusion_from_report(report: dict) -> str:
             f"- {label}: {row.get('route', '-')}; плюс: {row.get('good', '-')}; риск: {row.get('obstacle', '-')}; условие: {row.get('need', '-')}."
         )
 
+    is_construction_domain = _is_construction_estimation_domain(report)
+    route_stable = report.get("route_stable") if isinstance(report.get("route_stable"), dict) else {}
+    route_upskill = report.get("route_upskill") if isinstance(report.get("route_upskill"), dict) else {}
+    route_comparison = report.get("route_comparison") if isinstance(report.get("route_comparison"), list) else []
+
+    if is_construction_domain:
+        if not route_stable:
+            route_stable = _construction_route_stable()
+        if not route_upskill:
+            route_upskill = _construction_route_upskill()
+        if not route_comparison:
+            route_comparison = _construction_route_comparison()
+
+    route_stable_block = ""
+    route_upskill_block = ""
+    route_comparison_block = ""
+    if is_construction_domain:
+        stable_roles = ", ".join(str(item).strip() for item in (route_stable.get("main_roles") if isinstance(route_stable.get("main_roles"), list) else []) if str(item).strip()) or "-"
+        upskill_roles = ", ".join(str(item).strip() for item in (route_upskill.get("main_roles") if isinstance(route_upskill.get("main_roles"), list) else []) if str(item).strip()) or "-"
+        upskill_skills = ", ".join(str(item).strip() for item in (route_upskill.get("skills_to_learn") if isinstance(route_upskill.get("skills_to_learn"), list) else []) if str(item).strip()) or "-"
+        comparison_rows = []
+        for item in route_comparison[:3]:
+            if not isinstance(item, dict):
+                continue
+            roles = ", ".join(str(role).strip() for role in (item.get("roles") if isinstance(item.get("roles"), list) else []) if str(role).strip()) or "-"
+            comparison_rows.append(
+                f"- {str(item.get('name') or '-').strip()}: speed={str(item.get('speed') or '-').strip()}, risk={str(item.get('risk') or '-').strip()}, roles={roles}, cost={str(item.get('cost') or '-').strip()}."
+            )
+        route_stable_block = (
+            "route_stable:\n"
+            f"main_roles={stable_roles}; goal={str(route_stable.get('goal') or '-').strip()}; "
+            f"timeline={str(route_stable.get('timeline') or '-').strip()}; first_step={str(route_stable.get('first_step') or '-').strip()}."
+        )
+        route_upskill_block = (
+            "route_upskill:\n"
+            f"main_roles={upskill_roles}; goal={str(route_upskill.get('goal') or '-').strip()}; "
+            f"skills_to_learn={upskill_skills}; timeline={str(route_upskill.get('timeline') or '-').strip()}; "
+            f"first_step={str(route_upskill.get('first_step') or '-').strip()}."
+        )
+        route_comparison_block = "route_comparison:\n" + (" ".join(comparison_rows) if comparison_rows else "-")
+
     today_task = str(today.get("action") or "").strip() or "Сделайте 1 проверяемый шаг по маршруту сегодня (5-20 минут)."
     today_time = str(today.get("timebox") or "").strip() or "5-20 минут"
     week_goals = [str(item.get("focus") or item.get("task") or "").strip() for item in weekly_plan if isinstance(item, dict)][:4]
@@ -2817,14 +5067,39 @@ def _written_conclusion_from_report(report: dict) -> str:
             "11. Что может быть не так в выводе: карта меняется при новых данных о языке, документах, резюме, приоритетах, контактах и рынке. "
             "Кнопки: Всё похоже на правду / Исправить факт / Изменить приоритет / Не согласен с маршрутом."
         ),
+        (f"12. Отдельный блок route_stable: {route_stable_block}" if route_stable_block else ""),
+        (f"13. Отдельный блок route_upskill: {route_upskill_block}" if route_upskill_block else ""),
+        (f"14. Отдельный блок route_comparison: {route_comparison_block}" if route_comparison_block else ""),
+        (f"15. Финал для construction-кейса:\n{_construction_final_case_block()}" if is_construction_domain else ""),
         f"Приоритеты сейчас: {', '.join([str(item).strip() for item in priorities if str(item).strip()][:4]) or 'данных пока недостаточно'}.",
     ]
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if str(line).strip())
 
 
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
+
+    selected_route = str((report.get("career_decision") or {}).get("recommended_main_path") if isinstance(report.get("career_decision"), dict) else "").strip()
+    first_step = _today_task_from_report(report)
+    validation_text = _written_conclusion_from_report(report)
+    try:
+        validate_final_report(str(report.get("profile_domain") or "").strip(), selected_route, first_step, validation_text)
+    except ValueError:
+        if not _is_construction_estimation_domain(report):
+            raise
+        _rebuild_construction_report_for_final(report)
+        selected_route = str((report.get("career_decision") or {}).get("recommended_main_path") if isinstance(report.get("career_decision"), dict) else "").strip()
+        first_step = _today_task_from_report(report)
+        validation_text = _written_conclusion_from_report(report)
+        validate_final_report(str(report.get("profile_domain") or "").strip(), selected_route, first_step, validation_text)
+        await _track_event(
+            message,
+            state,
+            "final_report_validated_after_rebuild",
+            meta={"profile_domain": str(report.get("profile_domain") or ""), "selected_route": selected_route},
+        )
+
     await state.set_state(CareerFlow.FINAL_READY)
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
@@ -2917,6 +5192,10 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
             docx_report_path=docx_report_path,
         )
 
+    # After route selection and report delivery, move user to action stage:
+    # continue in bot steps, specialist route, or support group.
+    await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+
 
 def _shorten_first_step_for_overload(report: dict) -> None:
     action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
@@ -2936,8 +5215,16 @@ def _shorten_first_step_for_overload(report: dict) -> None:
 async def _present_route_selection(message: Message, state: FSMContext, lang: str, report: dict) -> None:
     rows = _build_route_comparison_rows(report)
     compare_text = _format_route_comparison(rows)
-    await state.update_data(route_compare_rows=rows)
+    await state.update_data(route_compare_rows=rows, alternative_routes=_build_alternative_routes(report, rows), current_route_index=-1)
+    data = await state.get_data()
+    strategy_code = str(data.get("career_strategy") or "").strip()
     await state.set_state(CareerFlow.ROUTE_SELECTION)
+    if strategy_code not in {"fast_income", "upskill_for_profile", "long_transition", "need_decision"}:
+        await state.update_data(awaiting_career_strategy_choice=True)
+        await message.answer(t(lang, "career_strategy_intro"), reply_markup=career_strategy_keyboard())
+        return
+
+    await state.update_data(awaiting_career_strategy_choice=False)
     await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
     await _answer_safe(message, f"{t(lang, 'route_compare_title')}\n\n{compare_text}", reply_markup=route_choice_keyboard())
     await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
@@ -3009,6 +5296,7 @@ def report_chunks(report: dict, lang: str) -> dict[str, str]:
                 f"Запасной маршрут:\n{decision.get('backup_path') or '-'}",
                 f"Пока не стоит делать:\n{decision.get('avoid_for_now') or '-'}",
                 f"Итог:\n{decision.get('decision_summary') or '-'}",
+                f"Стратегия:\n{_strategy_summary_text(report) or '-'}",
             ]
         )
     )
@@ -3155,8 +5443,21 @@ async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext,
     )
     await _track_event(message, state, "extended_diag_forced_start", meta={"stage": "post_fast_questions"})
     await message.answer(t(lang, "extended_diag_started"))
-    await message.answer(_question_prompt(analysis_ext, 0, lang), reply_markup=_question_reply_markup(analysis_ext, 0))
-    await _track_event(message, state, "question_shown", meta={"question_index": 1, "question_id": 1, "stage": "extended_forced"})
+    data_fresh = await state.get_data()
+    context = _build_interview_context(data_fresh, analysis_ext)
+    await _save_interview_context(state, context)
+    asked = await _ask_next_interview_question(
+        message,
+        state,
+        data_fresh,
+        analysis_ext,
+        context,
+        qa_index=0,
+        lang=lang,
+        user_mode=user_mode,
+    )
+    if not asked:
+        await _start_barriers_module(message, state, lang)
     return True
 
 
@@ -3179,16 +5480,11 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     profile = data.get("interaction_profile") or _build_interaction_profile(story_text, data)
     user_mode = str(data.get("user_mode") or "calm_steps")
     user_segment = str(data.get("user_segment") or _detect_user_segment(story_text, analysis_raw))
-    mode_max = _question_count_for_mode(user_mode, data.get("promised_question_count") or data.get("max_questions"))
     cv_uploaded = bool(data.get("cv_uploaded"))
-    q_count = max(1, mode_max)
-    analysis = _set_mvp_questions(
-        analysis_raw,
-        limit=q_count,
-        mode=user_mode,
-        story_text=story_text,
-        user_segment=user_segment,
-    )
+    evidence_profile = _load_evidence_profile(data, analysis_raw)
+    questions = _build_evidence_questions(evidence_profile, lang, user_mode)
+    analysis = dict(analysis_raw)
+    analysis["follow_up_questions"] = questions
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
     # Mandatory requirement: barrier analysis must run in every mode.
     quick_report_after_questions = False
@@ -3224,8 +5520,22 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         mandatory_diagnostics_in_progress=False,
         mandatory_diagnostics_done=False,
         extended_diagnostics_done=False,
-        promised_question_count=q_count,
+        promised_question_count=len(questions),
+        evidence_profile=evidence_profile.model_dump(),
+        asked_question_signatures=[],
     )
+
+    # PATCH-29: initialize dynamic interview context in session data.
+    interview_context = _build_interview_context(
+        {
+            **data,
+            "story_analysis": analysis,
+            "evidence_profile": evidence_profile.model_dump(),
+            "asked_question_signatures": [],
+        },
+        analysis,
+    )
+    await _save_interview_context(state, interview_context)
 
     if not questions:
         await state.set_state(CareerFlow.INTERVIEW)
@@ -3238,33 +5548,66 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
 
     await state.set_state(CareerFlow.INTERVIEW)
     if cv_uploaded:
-        await message.answer(t(lang, "step_questions_resume_fast"))
-    elif user_mode == "fast":
-        await message.answer(t(lang, "step_questions_short"))
+        await message.answer(t(lang, "step_questions_dynamic"))
     else:
-        await message.answer(t(lang, "step_questions"))
-    await message.answer(_question_prompt(analysis, 0, lang), reply_markup=_question_reply_markup(analysis, 0))
-    first_question = questions[0] if questions and isinstance(questions[0], dict) else {}
-    await _track_event(
+        await message.answer(t(lang, "step_questions_dynamic"))
+
+    # PATCH-26: build initial hypotheses.
+    from services.hypothesis_engine import build_hypotheses_from_analysis  # noqa: PLC0415
+    _hypotheses = build_hypotheses_from_analysis(analysis_raw)
+    _hyps_payload = [h.model_dump() for h in _hypotheses]
+    await state.update_data(conversation_hypotheses=_hyps_payload)
+    if _hyps_payload:
+        await _track_event(
+            message,
+            state,
+            "career_hypothesis_created",
+            meta={
+                "count": len(_hyps_payload),
+                "seed_statement": str((_hyps_payload[0] or {}).get("statement") or "")[:240],
+            },
+        )
+    data_after_hyp = await state.get_data()
+    interview_context = _build_interview_context(data_after_hyp, analysis)
+    await _save_interview_context(state, interview_context)
+    asked = await _ask_next_interview_question(
         message,
         state,
-        "question_shown",
-        meta={
-            "question_index": 1,
-            "question_id": _question_id(first_question, 0) if first_question else 1,
-        },
+        data_after_hyp,
+        analysis,
+        interview_context,
+        qa_index=0,
+        lang=lang,
+        user_mode=user_mode,
     )
+    if not asked:
+        await state.update_data(answers_text=t(lang, "resume_continue_without"))
+        await _start_barriers_module(message, state, lang)
+        return
+
+    first_question = questions[0] if questions and isinstance(questions[0], dict) else {}
     if cv_uploaded:
         _resume_debug_log(message, "question_1_sent", question_id=first_question.get("id", 1))
 
 
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
+    
+    # Check for crisis signals before proceeding
+    answers_text = str(data.get("answers_text") or "").strip()
+    story_text = str(data.get("story_text") or "").strip()
+    combined_input = f"{story_text} {answers_text}"
+    
+    if await _maybe_switch_to_crisis_support(message, state, lang, combined_input, source="report_build"):
+        return
+    
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     if report_generation_id:
         stored = get_report_by_generation_id(report_generation_id)
         stored_report = (stored or {}).get("report") if isinstance(stored, dict) else {}
         if isinstance(stored_report, dict) and stored_report:
+            route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+            _apply_strategy_outputs(stored_report, {str(key): str(value) for key, value in route_context.items()}, str(data.get("career_strategy") or ""))
             chunks = report_chunks(stored_report, lang)
             await state.update_data(
                 final_report=stored_report,
@@ -3341,6 +5684,22 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     memory_context = str(data.get("memory_context") or "").strip()
     if memory_context:
         answers_text = (answers_text + "\n\nКонтекст предыдущих сессий:\n" + memory_context).strip()
+    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    answers_text, duration_note, story_duration_label = _reconcile_country_duration(story_text, data, answers_text)
+    if duration_note:
+        await message.answer(duration_note)
+    if story_duration_label:
+        route_context = {str(key): str(value) for key, value in route_context.items()}
+        route_context["country_duration_primary"] = story_duration_label
+        await state.update_data(route_context=route_context)
+    if route_context:
+        route_context_block = _route_context_section_text({str(key): str(value) for key, value in route_context.items()})
+        if route_context_block:
+            answers_text = (answers_text + "\n\nМинимальные данные для маршрута:\n" + route_context_block).strip()
+    if _route_context_missing({**data, "route_context": route_context}):
+        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
+        await _start_route_context_intake(message, state, lang)
+        return
     user_mode = str(data.get("user_mode") or "calm_steps")
     decision_layers = _build_decision_layers(data, story_analysis, answers_text)
     report_generation_id = report_generation_id or str(uuid.uuid4())
@@ -3368,9 +5727,88 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         )
         if isinstance(resume_analysis, dict) and resume_analysis:
             report["resume_analysis"] = resume_analysis
+        _apply_strategy_outputs(report, {str(key): str(value) for key, value in route_context.items()}, str(data.get("career_strategy") or ""))
+
+        # Ensure different strategies lead to truly different route blueprints.
+        career_strategy = str(data.get("career_strategy") or "")
+        if career_strategy in {"fast_income", "upskill_for_profile", "long_transition", "need_decision"}:
+            bundles = _build_strategy_bundles(report, {str(key): str(value) for key, value in route_context.items()})
+            is_divergent, score, compare = _minimum_strategy_divergence(bundles)
+            if not is_divergent:
+                await _track_event(message, state, "route_divergence_warning", meta={"score": score, "compare": compare})
+                regenerated_answers = (
+                    answers_text
+                    + "\n\n[КОНТРОЛЬ РАСХОЖДЕНИЯ МАРШРУТОВ]\n"
+                    + _route_divergence_regen_instruction()
+                )
+                regenerated = await ai_client.build_report(
+                    story_text,
+                    story_analysis,
+                    regenerated_answers,
+                    decision_layers=decision_layers,
+                    resume_analysis=resume_analysis,
+                    selected_barriers=selected_barriers,
+                    selected_fears=selected_fears,
+                    selected_psych_markers=selected_psych_markers,
+                    selected_energy_sources=energy_sources,
+                    selected_career_priorities=career_priorities,
+                    user_segment=str(data.get("user_segment") or ""),
+                    user_segment_label=str(data.get("user_segment_label") or ""),
+                    language=lang,
+                )
+                if isinstance(resume_analysis, dict) and resume_analysis:
+                    regenerated["resume_analysis"] = resume_analysis
+                _apply_strategy_outputs(regenerated, {str(key): str(value) for key, value in route_context.items()}, str(data.get("career_strategy") or ""))
+
+                regen_bundles = _build_strategy_bundles(regenerated, {str(key): str(value) for key, value in route_context.items()})
+                regen_divergent, regen_score, regen_compare = _minimum_strategy_divergence(regen_bundles)
+                await _track_event(
+                    message,
+                    state,
+                    "route_divergence_recheck",
+                    meta={"score": regen_score, "is_divergent": regen_divergent, "compare": regen_compare},
+                )
+                report = regenerated
     except Exception as exc:
         await _track_event(message, state, "report_failed", meta={"error": type(exc).__name__})
         raise
+
+    # ── PATCH-25: guardrail validation ──────────────────────────────────────
+    try:
+        from services.career_guardrails import validate_career_report, has_critical_errors  # noqa: PLC0415
+        from services.evidence_profile import CareerEvidenceProfile as _CEP2, build_evidence_profile_from_analysis as _bep  # noqa: PLC0415
+        _raw_ep = data.get("evidence_profile")
+        _profile_ep = _CEP2.model_validate(_raw_ep) if isinstance(_raw_ep, dict) else _bep(story_analysis)
+        _gr_errors = validate_career_report(_profile_ep, report)
+        if _gr_errors:
+            await _track_event(message, state, "guardrail_violations", meta={"errors": _gr_errors[:8]})
+        if has_critical_errors(_gr_errors) and not data.get("guardrail_retry_done"):
+            # One re-generation attempt with guardrail correction instruction
+            _critical = [e for e in _gr_errors if e.startswith("[CRITICAL]")]
+            _correction_note = "\n\n[GUARDRAIL CORRECTION REQUIRED]\n" + "\n".join(_critical)
+            await _track_event(message, state, "guardrail_regen_triggered", meta={"critical_count": len(_critical)})
+            await state.update_data(guardrail_retry_done=True)
+            report = await ai_client.build_report(
+                story_text,
+                story_analysis,
+                answers_text + _correction_note,
+                decision_layers=decision_layers,
+                resume_analysis=resume_analysis,
+                selected_barriers=selected_barriers,
+                selected_fears=selected_fears,
+                selected_psych_markers=selected_psych_markers,
+                selected_energy_sources=energy_sources,
+                selected_career_priorities=career_priorities,
+                user_segment=str(data.get("user_segment") or ""),
+                user_segment_label=str(data.get("user_segment_label") or ""),
+                language=lang,
+            )
+            if isinstance(resume_analysis, dict) and resume_analysis:
+                report["resume_analysis"] = resume_analysis
+            _apply_strategy_outputs(report, {str(key): str(value) for key, value in route_context.items()}, str(data.get("career_strategy") or ""))
+    except Exception:
+        pass  # guardrail failures must never block the user
+
     chunks = report_chunks(report, lang)
     await state.update_data(
         final_report=report,
@@ -3398,6 +5836,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             "selected_psych_markers": selected_psych_markers,
             "selected_career_priorities": career_priorities,
             "selected_energy_sources": energy_sources,
+            "route_context": route_context,
+            "career_strategy": str(data.get("career_strategy") or ""),
         },
         session_id=session_id,
     )
@@ -3434,7 +5874,10 @@ def _question_reply_markup(analysis: dict, index: int):
             options = list(options) + [done_text]
         return question_options_keyboard(options if isinstance(options, list) else [])
     q_text = str(row.get("question", "")).lower()
-    if any(token in q_text for token in ["формат работы", "ближе", "50/50", "документ", "люд"]):
+    semantic_intent = str(row.get("semantic_intent") or "").strip()
+    if semantic_intent == "language_documents_work_right" or "языком, документами и правом работать" in q_text:
+        return question_options_keyboard(list(LANGUAGE_DOCUMENTS_BUTTONS))
+    if any(token in q_text for token in ["формат работы", "ближе", "50/50", "люд"]):
         return interview_work_format_keyboard()
     if "поддерж" in q_text:
         return interview_support_keyboard()
@@ -3460,6 +5903,9 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     clean = (text or "").strip()
     data = await state.get_data()
     lang = _user_language(data)
+
+    if clean and await _maybe_switch_to_crisis_support(message, state, lang, clean, source="story_input"):
+        return
 
     if clean in ALL_SHORT_STORY_OPTIONS:
         mapped_story = {
@@ -3522,24 +5968,52 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         )
     analysis = await ai_client.analyze_story(analysis_input, lang)
     user_segment = _detect_user_segment(clean, analysis)
-    q_count = _question_count_for_mode(selected_mode, data.get("max_questions"))
-    analysis = _set_mvp_questions(
-        analysis,
-        limit=q_count,
-        mode=selected_mode,
-        story_text=clean,
-        user_segment=user_segment,
-    )
+    evidence_profile = build_evidence_profile_from_analysis(analysis)
+    questions = _build_evidence_questions(evidence_profile, lang, selected_mode)
+    analysis = dict(analysis)
+    analysis["follow_up_questions"] = questions
+    q_count = len(questions)
     await state.update_data(
         story_analysis=analysis,
         user_segment=user_segment,
         user_segment_label=_segment_label(user_segment),
         promised_question_count=q_count,
         awaiting_story_correction=False,
+        evidence_profile=evidence_profile.model_dump(),
     )
     await state.set_state(CareerFlow.CONFIRMING_STORY)
     await message.answer(_story_confirmation_text(analysis, q_count), reply_markup=story_confirmation_keyboard())
     await message.answer(t(lang, "story_confirmation_prompt"), reply_markup=story_confirmation_keyboard())
+
+
+@router.message(StateFilter("*"), F.text.func(_is_restart_intent))
+async def restart_from_any_state(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    _cancel_reminder(message.chat.id)
+    _cancel_pdf_task(message.chat.id)
+
+    await state.clear()
+    await state.update_data(
+        public_user_id=public_user_id,
+        language=lang,
+        lang=lang,
+        interaction_profile={},
+        interview_context={},
+        asked_question_signatures=[],
+        preferred_input="unknown",
+        user_mode="calm_steps",
+        max_questions=10,
+        support_level="medium",
+        support_need="medium",
+        pace="normal",
+        detail_preference="balanced",
+    )
+    await state.set_state(CareerFlow.SELECTING_PACE)
+    await message.answer(t(lang, "restart_prompt"))
+    await message.answer(t(lang, "start_intro"))
+    await message.answer(t(lang, "pace_prompt"), reply_markup=pace_keyboard())
 
 
 @router.message(CareerFlow.CONFIRMING_STORY, F.text.in_(ALL_STORY_CONFIRM_ACTIONS))
@@ -3570,6 +6044,9 @@ async def handle_story_confirmation_text(message: Message, state: FSMContext) ->
     lang = _user_language(data)
     clean = (message.text or "").strip()
 
+    if clean and await _maybe_switch_to_crisis_support(message, state, lang, clean, source="story_confirmation"):
+        return
+
     if not clean:
         await message.answer(t(lang, "story_confirmation_fallback"), reply_markup=story_confirmation_keyboard())
         return
@@ -3581,24 +6058,22 @@ async def handle_story_confirmation_text(message: Message, state: FSMContext) ->
     story_text = (data.get("story_text") or "").strip()
     updated_story = (story_text + "\n\nУточнение пользователя:\n" + clean).strip()
     user_mode = str(data.get("user_mode") or "calm_steps")
-    q_count = _question_count_for_mode(user_mode, data.get("promised_question_count") or data.get("max_questions"))
     await state.update_data(story_text=updated_story, awaiting_story_correction=False)
     await message.answer(t(lang, "story_correction_applied"))
     await message.answer(t(lang, "processing_story"))
     analysis = await ai_client.analyze_story(updated_story, lang)
     user_segment = _detect_user_segment(updated_story, analysis)
-    analysis = _set_mvp_questions(
-        analysis,
-        limit=q_count,
-        mode=user_mode,
-        story_text=updated_story,
-        user_segment=user_segment,
-    )
+    evidence_profile = build_evidence_profile_from_analysis(analysis)
+    questions = _build_evidence_questions(evidence_profile, lang, user_mode)
+    analysis = dict(analysis)
+    analysis["follow_up_questions"] = questions
+    q_count = len(questions)
     await state.update_data(
         story_analysis=analysis,
         user_segment=user_segment,
         user_segment_label=_segment_label(user_segment),
         promised_question_count=q_count,
+        evidence_profile=evidence_profile.model_dump(),
     )
     await message.answer(_story_confirmation_text(analysis, q_count), reply_markup=story_confirmation_keyboard())
     await message.answer(t(lang, "story_confirmation_prompt"), reply_markup=story_confirmation_keyboard())
@@ -3608,7 +6083,12 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
     clean = (text or "").strip()
     data = await state.get_data()
     lang = _user_language(data)
+
+    if clean and await _maybe_switch_to_crisis_support(message, state, lang, clean, source="answers_input"):
+        return
+
     analysis = data.get("story_analysis") or {}
+    context = _build_interview_context(data, analysis if isinstance(analysis, dict) else None)
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
     qa_index = int(data.get("qa_index", 0))
     qa_answers = list(data.get("qa_answers") or [])
@@ -3623,6 +6103,101 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
     interaction_profile["structure_level"] = _detect_structure_level(clean)
     interaction_profile["agency_level"] = _detect_agency_level(clean)
     await state.update_data(interaction_profile=interaction_profile, interaction_turn=interaction_turn)
+
+    if clean and _is_preliminary_result_intent(clean):
+        merged_answers = _merge_answers_text(qa_answers)
+        await state.update_data(answers_text=merged_answers)
+        await _track_event(message, state, "interview_stopped_by_user", meta={"question_index": qa_index + 1})
+        await _advance_after_questions(message, state, lang)
+        return
+
+    if clean == CLARIFY_MORE:
+        # User chose to continue; show next question without re-offering
+        await state.update_data(preliminary_offer_shown=True)
+        if questions and qa_index < len(questions):
+            data_fresh = await state.get_data()
+            context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+            await _ask_next_interview_question(
+                message,
+                state,
+                data_fresh,
+                analysis,
+                context,
+                qa_index=qa_index,
+                lang=lang,
+                user_mode=user_mode,
+            )
+        return
+
+    # PATCH-27: preliminary map button responses
+    if clean == PRELIM_LOOKS_LIKE_ME:
+        await _track_event(message, state, "prelim_map_confirmed")
+        await _track_event(
+            message,
+            state,
+            "career_hypothesis_confirmed",
+            meta={"source": "preliminary_map", "question_index": qa_index + 1},
+        )
+        merged = _merge_answers_text(qa_answers)
+        await state.update_data(answers_text=merged)
+        await _advance_after_questions(message, state, lang)
+        return
+
+    if clean == PRELIM_HAS_ERROR:
+        await _track_event(message, state, "prelim_map_error_flagged")
+        await _track_event(
+            message,
+            state,
+            "career_hypothesis_rejected",
+            meta={"source": "preliminary_map", "question_index": qa_index + 1},
+        )
+        await state.update_data(preliminary_offer_shown=False)
+        await message.answer(
+            "Понял. Расскажите, что не так — я исправлю и покажу обновлённый вариант.",
+            reply_markup=input_method_keyboard(),
+        )
+        return
+
+    if clean == PRELIM_ADD_DETAIL:
+        await _track_event(message, state, "prelim_map_add_detail")
+        await state.update_data(preliminary_offer_shown=False)
+        if questions and qa_index < len(questions):
+            data_fresh = await state.get_data()
+            context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+            await _ask_next_interview_question(
+                message,
+                state,
+                data_fresh,
+                analysis,
+                context,
+                qa_index=qa_index,
+                lang=lang,
+                user_mode=user_mode,
+            )
+        return
+
+    # Route selection from preliminary map: store route and advance to report
+    _route1_label = str(data.get("preliminary_map_route1") or "")
+    _route2_label = str(data.get("preliminary_map_route2") or "")
+    if (
+        clean
+        and (_route1_label or _route2_label)
+        and (
+            (_route1_label and _route1_label[:20].lower() in clean.lower())
+            or (_route2_label and _route2_label[:20].lower() in clean.lower())
+            or "разобрать" in clean.lower()
+        )
+    ):
+        _sel_route = _route1_label if (_route1_label and _route1_label[:20].lower() in clean.lower()) else _route2_label
+        await _track_event(message, state, "prelim_map_route_selected", meta={"route": _sel_route[:60]})
+        merged = _merge_answers_text(qa_answers + [{"question": "Выбранный маршрут", "answer": _sel_route}])
+        await state.update_data(
+            answers_text=merged,
+            selected_preliminary_route=_sel_route,
+            preliminary_route_selected=True,
+        )
+        await _advance_after_questions(message, state, lang)
+        return
 
     if clean:
         await _track_event(
@@ -3650,8 +6225,21 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 extended_diagnostics_done=True,
             )
             await message.answer(t(lang, "extended_diag_started"))
-            await message.answer(_question_prompt(analysis_ext, 0, lang), reply_markup=_question_reply_markup(analysis_ext, 0))
-            await _track_event(message, state, "question_shown", meta={"question_index": 1, "question_id": 1, "stage": "extended_fast"})
+            data_fresh = await state.get_data()
+            context = _build_interview_context(data_fresh, analysis_ext)
+            await _save_interview_context(state, context)
+            asked = await _ask_next_interview_question(
+                message,
+                state,
+                data_fresh,
+                analysis_ext,
+                context,
+                qa_index=0,
+                lang=lang,
+                user_mode=user_mode,
+            )
+            if not asked:
+                await _advance_after_questions(message, state, lang)
             return
 
         if clean == EXTENDED_DIAG_SKIP:
@@ -3695,16 +6283,44 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
             qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean})
             qa_index += 1
-            await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={}, pending_question_append={})
+            evidence_payload, is_ready = _update_evidence_after_answer(data, current, clean)
+            await state.update_data(
+                qa_answers=qa_answers,
+                qa_index=qa_index,
+                pending_answer_review={},
+                pending_question_append={},
+                evidence_profile=evidence_payload,
+            )
+            await _sync_interview_context_after_answer(state, data, evidence_payload, clean)
+            if is_ready:
+                merged_answers = _merge_answers_text(qa_answers)
+                await state.update_data(answers_text=merged_answers)
+                await _track_interview_ready_event(
+                    message,
+                    state,
+                    question_index=qa_index,
+                    evidence_payload=evidence_payload,
+                )
+                await _advance_after_questions(message, state, lang)
+                return
             if qa_index < len(questions):
-                await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+                data_fresh = await state.get_data()
+                context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+                asked = await _ask_next_interview_question(
+                    message,
+                    state,
+                    data_fresh,
+                    analysis,
+                    context,
+                    qa_index=qa_index,
+                    lang=lang,
+                    user_mode=user_mode,
+                )
+                if asked:
+                    return
                 return
 
-            merged_answers = "\n".join(
-                f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
-                for idx, row in enumerate(qa_answers)
-                if isinstance(row, dict)
-            )
+            merged_answers = _merge_answers_text(qa_answers)
             await state.update_data(answers_text=merged_answers)
             await _advance_after_questions(message, state, lang)
             return
@@ -3727,7 +6343,18 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
         await state.update_data(selected_choice_reasons=selected_choice_reasons, pending_choice_reason={})
         await message.answer(t(lang, "career_switch_reason_saved", reason=reason_value))
         if questions and qa_index < len(questions):
-            await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+            data_fresh = await state.get_data()
+            context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+            await _ask_next_interview_question(
+                message,
+                state,
+                data_fresh,
+                analysis,
+                context,
+                qa_index=qa_index,
+                lang=lang,
+                user_mode=user_mode,
+            )
         return
 
     if not clean:
@@ -3846,11 +6473,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                             )
                         break
                 qa_index += 1
+                answer_blob = ", ".join(selected_values[:max_select])
+                evidence_payload, is_ready = _update_evidence_after_answer(data, current, answer_blob)
                 update_payload: dict[str, object] = {
                     "qa_answers": qa_answers,
                     "qa_index": qa_index,
                     "pending_answer_review": {},
                     selected_key: [],
+                    "evidence_profile": evidence_payload,
                 }
                 if multi_key == "psych":
                     update_payload["selected_psych_markers"] = selected_values[:5]
@@ -3869,22 +6499,36 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 if multi_key == "priorities":
                     update_payload["selected_career_priorities"] = selected_values[:4]
                 await state.update_data(**update_payload)
-                if qa_index < len(questions):
-                    await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
-                    next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
-                    await _track_event(
+                await _sync_interview_context_after_answer(state, data, evidence_payload, answer_blob)
+                if is_ready:
+                    merged_answers = _merge_answers_text(qa_answers)
+                    await state.update_data(answers_text=merged_answers)
+                    await _track_interview_ready_event(
                         message,
                         state,
-                        "question_shown",
-                        meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                        question_index=qa_index,
+                        evidence_payload=evidence_payload,
                     )
+                    await _advance_after_questions(message, state, lang)
+                    return
+                if qa_index < len(questions):
+                    data_fresh = await state.get_data()
+                    context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+                    asked = await _ask_next_interview_question(
+                        message,
+                        state,
+                        data_fresh,
+                        analysis,
+                        context,
+                        qa_index=qa_index,
+                        lang=lang,
+                        user_mode=user_mode,
+                    )
+                    if asked:
+                        return
                     return
 
-                merged_answers = "\n".join(
-                    f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
-                    for idx, row in enumerate(qa_answers)
-                    if isinstance(row, dict)
-                )
+                merged_answers = _merge_answers_text(qa_answers)
                 await state.update_data(answers_text=merged_answers)
                 await _advance_after_questions(message, state, lang)
                 return
@@ -3939,6 +6583,39 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 await message.answer(t(lang, "multi_select_finish_hint", done=done_text), reply_markup=_question_reply_markup(analysis, qa_index))
                 return
 
+        # "не знаю" — never repeat the question; offer simpler choice or skip
+        if _is_dont_know_response(clean):
+            await _track_event(message, state, "dont_know_answer", meta={"question_index": qa_index + 1, "gap_key": current.get("gap_key") if isinstance(current, dict) else ""})
+            intro, simpler_opts = _dont_know_simpler_question(current, lang)
+            if simpler_opts:
+                await message.answer(intro, reply_markup=question_options_keyboard(simpler_opts))
+                return
+            # No options — mark gap unknown and advance
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": "не уточнено"})
+            qa_index += 1
+            evidence_payload, is_ready = _update_evidence_after_answer(data, current, "не уточнено")
+            await state.update_data(qa_answers=qa_answers, qa_index=qa_index, evidence_profile=evidence_payload)
+            await _sync_interview_context_after_answer(state, data, evidence_payload, "не уточнено")
+            await message.answer(intro)
+            if is_ready or qa_index >= len(questions):
+                merged = _merge_answers_text(qa_answers)
+                await state.update_data(answers_text=merged)
+                await _advance_after_questions(message, state, lang)
+            else:
+                data_fresh = await state.get_data()
+                context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+                await _ask_next_interview_question(
+                    message,
+                    state,
+                    data_fresh,
+                    analysis,
+                    context,
+                    qa_index=qa_index,
+                    lang=lang,
+                    user_mode=user_mode,
+                )
+            return
+
         issue_key = _validate_answer(current, clean, qa_answers)
         if issue_key:
             await _track_event(
@@ -3970,7 +6647,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             qa_answers[-1]["meaning"] = signal_payload["meaning"]
             qa_answers[-1]["not_equal_to"] = signal_payload["not_equal_to"]
         qa_index += 1
-        await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={})
+        evidence_payload, is_ready = _update_evidence_after_answer(data, current, clean)
+        await state.update_data(
+            qa_answers=qa_answers,
+            qa_index=qa_index,
+            pending_answer_review={},
+            evidence_profile=evidence_payload,
+        )
+        context = await _sync_interview_context_after_answer(state, data, evidence_payload, clean)
 
         if interaction_turn % 3 == 0:
             if interaction_profile.get("support_need") == "high":
@@ -3980,22 +6664,55 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             elif interaction_profile.get("answer_length") == "long":
                 await message.answer(t(lang, "adaptive_transition_detailed"))
 
-        if qa_index < len(questions):
-            await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
-            next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
-            await _track_event(
+        if is_ready:
+            merged_answers = _merge_answers_text(qa_answers)
+            await state.update_data(answers_text=merged_answers)
+            await _track_interview_ready_event(
                 message,
                 state,
-                "question_shown",
-                meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                question_index=qa_index,
+                evidence_payload=evidence_payload,
             )
+            await _advance_after_questions(message, state, lang)
             return
 
-        merged_answers = "\n".join(
-            f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
-            for idx, row in enumerate(qa_answers)
-            if isinstance(row, dict)
-        )
+        # PATCH-27: show preliminary map (replaces simple offer from PATCH-24)
+        if qa_index >= 2 and not data.get("preliminary_offer_shown"):
+            from services.interview_policy import evaluate_report_readiness  # noqa: PLC0415
+            from services.evidence_profile import CareerEvidenceProfile as _CEP  # noqa: PLC0415
+            _profile_check = _CEP.model_validate(evidence_payload)
+            _readiness = evaluate_report_readiness(_profile_check)
+            if _readiness.status in {"ready_with_uncertainty", "ready"}:
+                _prelim_text, _r1, _r2 = _generate_preliminary_map(
+                    _profile_check, data.get("story_analysis") or {}, lang
+                )
+                await state.update_data(
+                    preliminary_offer_shown=True,
+                    evidence_profile=evidence_payload,
+                    preliminary_map_route1=_r1,
+                    preliminary_map_route2=_r2,
+                )
+                await _track_event(message, state, "preliminary_map_shown", meta={"qa_index": qa_index, "status": _readiness.status})
+                await message.answer(_prelim_text, reply_markup=preliminary_map_keyboard(_r1, _r2))
+                return
+
+        if qa_index < len(questions):
+            data_fresh = await state.get_data()
+            context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+            asked = await _ask_next_interview_question(
+                message,
+                state,
+                data_fresh,
+                analysis,
+                context,
+                qa_index=qa_index,
+                lang=lang,
+                user_mode=user_mode,
+            )
+            if asked:
+                return
+
+        merged_answers = _merge_answers_text(qa_answers)
         await state.update_data(answers_text=merged_answers)
         await _advance_after_questions(message, state, lang)
         return
@@ -4138,7 +6855,54 @@ async def complete_barriers(message: Message, state: FSMContext) -> None:
     if not selected:
         selected = ["Не указано"]
     await state.update_data(selected_psych_markers=selected, selected_fears=selected[:6])
+    if _route_context_missing(data):
+        await state.update_data(awaiting_route_context=True, route_context_index=int(data.get("route_context_index") or 0))
+        await _start_route_context_intake(message, state, lang)
+        return
     await _build_and_send_report(message, state, lang)
+
+
+@router.message(CareerFlow.ROUTE_CONTEXT, F.text)
+async def handle_route_context_input(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    raw = (message.text or "").strip()
+
+    if raw and await _maybe_switch_to_crisis_support(message, state, lang, raw, source="route_context"):
+        return
+
+    if not raw:
+        await _start_route_context_intake(message, state, lang)
+        return
+
+    index = int(data.get("route_context_index") or 0)
+    question = _route_context_question(index)
+    keys = [str(item) for item in question.get("keys", []) if str(item).strip()] if isinstance(question.get("keys", []), list) else []
+    route_context = dict(data.get("route_context") or {})
+    parsed_values, next_index = _route_context_next_index(index, raw, keys)
+    route_context.update(parsed_values)
+    await state.update_data(route_context=route_context, route_context_index=next_index, awaiting_route_context=True)
+
+    if next_index >= len(_ROUTE_CONTEXT_FIELDS):
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+        session_id = str(data.get("session_id") or "").strip()
+        await state.update_data(awaiting_route_context=False)
+        save_profile_version(
+            public_user_id,
+            "route_context_selected",
+            {
+                "route_context": route_context,
+                "user_mode": str(data.get("user_mode") or ""),
+                "report_generation_id": str(data.get("report_generation_id") or ""),
+            },
+            session_id=session_id,
+        )
+        await message.answer(t(lang, "route_context_complete"))
+        await _build_and_send_report(message, state, lang)
+        return
+
+    await message.answer(t(lang, "route_context_saved", remaining_count=len(_ROUTE_CONTEXT_FIELDS) - next_index))
+    await _start_route_context_intake(message, state, lang)
 
 
 @router.message(CareerFlow.waiting_for_barriers, F.text)
@@ -4248,10 +7012,17 @@ async def restart_flow(message: Message, state: FSMContext) -> None:
         pending_choice_reason={},
         awaiting_extended_diagnostics_choice=False,
         extended_diagnostics_done=False,
+        interview_context={},
+        asked_question_signatures=[],
         reminder_due_at="",
+        career_planning_paused=False,
+        crisis_detected=False,
+        crisis_detected_source="",
     )
-    await state.set_state(CareerFlow.WAITING_STORY)
-    await message.answer(t(lang, "restart_prompt"), reply_markup=input_method_keyboard())
+    await state.set_state(CareerFlow.SELECTING_PACE)
+    await message.answer(t(lang, "restart_prompt"))
+    await message.answer(t(lang, "start_intro"))
+    await message.answer(t(lang, "pace_prompt"), reply_markup=pace_keyboard())
 
 
 @router.message(CareerFlow.waiting_for_story, F.text.in_(ALL_INPUT_TEXT))
@@ -4320,6 +7091,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     if review_type == "context_mismatch":
         qa_index = int(data.get("qa_index", 0))
         analysis = data.get("story_analysis") or {}
+        questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
         qa_answers = list(data.get("qa_answers") or [])
         user_mode = str(data.get("user_mode") or "calm_steps")
         quick_report_after_questions = bool(data.get("quick_report_after_questions"))
@@ -4327,44 +7099,69 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         if action == ANSWER_CONTEXT_NO:
             await state.update_data(pending_answer_review={})
             await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
-            questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
             next_q = questions[qa_index] if qa_index < len(questions) and isinstance(questions[qa_index], dict) else {}
             await _track_event(
                 message,
                 state,
                 "question_shown",
-                meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                meta={
+                    "question_index": qa_index + 1,
+                    "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1,
+                    "decision_that_may_change": _decision_that_may_change(next_q) if isinstance(next_q, dict) else "",
+                },
             )
             return
 
         if action == ANSWER_CONTEXT_YES:
+            accepted_answer = str(pending.get("normalized_answer") or str(pending.get("answer", "")).strip())
             qa_answers.append(
                 {
                     "question": str(pending.get("question", f"Вопрос {qa_index + 1}")),
                     "question_id": int(pending.get("question_id", qa_index + 1)),
-                    "answer": str(pending.get("normalized_answer") or str(pending.get("answer", "")).strip()),
+                    "answer": accepted_answer,
                 }
             )
             qa_index += 1
-            await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={})
+            evidence_payload, is_ready = _update_evidence_after_answer(data, questions[qa_index - 1] if qa_index - 1 < len(questions) else {}, accepted_answer)
+            await state.update_data(
+                qa_answers=qa_answers,
+                qa_index=qa_index,
+                pending_answer_review={},
+                evidence_profile=evidence_payload,
+            )
+            await _sync_interview_context_after_answer(state, data, evidence_payload, accepted_answer)
+
+            if is_ready:
+                merged_answers = _merge_answers_text(qa_answers)
+                await state.update_data(answers_text=merged_answers)
+                await _track_interview_ready_event(
+                    message,
+                    state,
+                    question_index=qa_index,
+                    evidence_payload=evidence_payload,
+                )
+                await _start_barriers_module(message, state, lang)
+                return
 
             questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
             if qa_index < len(questions):
-                await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
-                next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
-                await _track_event(
+                data_fresh = await state.get_data()
+                context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+                asked = await _ask_next_interview_question(
                     message,
                     state,
-                    "question_shown",
-                    meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+                    data_fresh,
+                    analysis,
+                    context,
+                    qa_index=qa_index,
+                    lang=lang,
+                    user_mode=user_mode,
                 )
+                if asked:
+                    return
                 return
 
-            merged_answers = "\n".join(
-                f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
-                for idx, row in enumerate(qa_answers)
-                if isinstance(row, dict)
-            )
+            merged_answers = _merge_answers_text(qa_answers)
             await state.update_data(answers_text=merged_answers)
             await _start_barriers_module(message, state, lang)
             return
@@ -4379,6 +7176,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     qa_answers = list(data.get("qa_answers") or [])
     qa_index = int(data.get("qa_index", 0))
     analysis = data.get("story_analysis") or {}
+    questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
     user_mode = str(data.get("user_mode") or "calm_steps")
     quick_report_after_questions = bool(data.get("quick_report_after_questions"))
 
@@ -4391,7 +7189,11 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
             message,
             state,
             "question_shown",
-            meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+            meta={
+                "question_index": qa_index + 1,
+                "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1,
+                "decision_that_may_change": _decision_that_may_change(next_q) if isinstance(next_q, dict) else "",
+            },
         )
         return
 
@@ -4412,25 +7214,45 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         }
     )
     qa_index += 1
-    await state.update_data(qa_answers=qa_answers, qa_index=qa_index, pending_answer_review={})
+    evidence_payload, is_ready = _update_evidence_after_answer(data, questions[qa_index - 1] if qa_index - 1 < len(questions) else {}, answer_text)
+    await state.update_data(
+        qa_answers=qa_answers,
+        qa_index=qa_index,
+        pending_answer_review={},
+        evidence_profile=evidence_payload,
+    )
+    await _sync_interview_context_after_answer(state, data, evidence_payload, answer_text)
 
-    questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    if qa_index < len(questions):
-        await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
-        next_q = questions[qa_index] if isinstance(questions[qa_index], dict) else {}
-        await _track_event(
+    if is_ready:
+        merged_answers = _merge_answers_text(qa_answers)
+        await state.update_data(answers_text=merged_answers)
+        await _track_interview_ready_event(
             message,
             state,
-            "question_shown",
-            meta={"question_index": qa_index + 1, "question_id": _question_id(next_q, qa_index) if next_q else qa_index + 1},
+            question_index=qa_index,
+            evidence_payload=evidence_payload,
         )
+        await _advance_after_questions(message, state, lang)
         return
 
-    merged_answers = "\n".join(
-        f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
-        for idx, row in enumerate(qa_answers)
-        if isinstance(row, dict)
-    )
+    if qa_index < len(questions):
+        data_fresh = await state.get_data()
+        context = _build_interview_context(data_fresh, analysis if isinstance(analysis, dict) else None)
+        asked = await _ask_next_interview_question(
+            message,
+            state,
+            data_fresh,
+            analysis,
+            context,
+            qa_index=qa_index,
+            lang=lang,
+            user_mode=user_mode,
+        )
+        if asked:
+            return
+        return
+
+    merged_answers = _merge_answers_text(qa_answers)
     await state.update_data(answers_text=merged_answers)
     await _advance_after_questions(message, state, lang)
 
@@ -4449,48 +7271,252 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
     rows = data.get("route_compare_rows") if isinstance(data.get("route_compare_rows"), list) else _build_route_comparison_rows(report)
     action = (message.text or "").strip()
 
+    if action and await _maybe_switch_to_crisis_support(message, state, lang, action, source="route_selection"):
+        return
+
+    if bool(data.get("awaiting_route_specific_questions")):
+        gaps = data.get("route_specific_gaps") if isinstance(data.get("route_specific_gaps"), list) else []
+        idx = int(data.get("route_specific_index", 0))
+        if idx < 0:
+            idx = 0
+        if not gaps or idx >= len(gaps):
+            await state.update_data(awaiting_route_specific_questions=False)
+            report_ready = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+            await _send_final_map_bundle(message, state, lang, report_ready)
+            return
+
+        current = gaps[idx] if isinstance(gaps[idx], dict) else {}
+        answers = data.get("route_specific_answers") if isinstance(data.get("route_specific_answers"), list) else []
+        answers.append(
+            {
+                "gap_key": str(current.get("gap_key") or f"route_specific_{idx + 1}"),
+                "question": str(current.get("prompt") or ""),
+                "answer": action,
+            }
+        )
+        idx += 1
+        await state.update_data(route_specific_answers=answers, route_specific_index=idx)
+
+        if idx < len(gaps):
+            nxt = gaps[idx] if isinstance(gaps[idx], dict) else {}
+            await message.answer(str(nxt.get("prompt") or ""), reply_markup=_route_specific_reply_markup(nxt))
+            return
+
+        summary = "\n".join(
+            f"- {str(item.get('gap_key') or '')}: {str(item.get('answer') or '')}"
+            for item in answers
+            if isinstance(item, dict)
+        )
+        merged_answers = str(data.get("answers_text") or "").strip()
+        merged_answers = (merged_answers + "\n\nМаршрутные уточнения:\n" + summary).strip()
+        await state.update_data(
+            awaiting_route_specific_questions=False,
+            answers_text=merged_answers,
+            route_specific_done=True,
+        )
+        await _track_event(
+            message,
+            state,
+            "route_specific_clarification_done",
+            meta={"count": len(answers), "route": str(data.get('route_specific_selected_route') or '')},
+        )
+        report_ready = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+        await _send_final_map_bundle(message, state, lang, report_ready)
+        return
+
+    if bool(data.get("awaiting_need_decision_questions")):
+        answers = data.get("need_decision_answers") if isinstance(data.get("need_decision_answers"), list) else []
+        q_index = int(data.get("need_decision_question_index", 0))
+        if action:
+            answers.append(action)
+        q_index += 1
+        if q_index < len(_NEED_DECISION_QUESTIONS):
+            await state.update_data(need_decision_answers=answers, need_decision_question_index=q_index)
+            await message.answer(_NEED_DECISION_QUESTIONS[q_index])
+            return
+
+        recommended_strategy = _recommend_strategy_from_need_decision_answers([str(item) for item in answers])
+        recommended_action = _career_strategy_action_from_code(recommended_strategy)
+        strategy_code, strategy_label = _career_strategy_from_action(recommended_action)
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+        session_id = str(data.get("session_id") or "").strip()
+        await state.update_data(
+            career_strategy=strategy_code,
+            career_strategy_label=strategy_label,
+            awaiting_career_strategy_choice=False,
+            awaiting_need_decision_questions=False,
+            need_decision_answers=answers,
+            need_decision_question_index=len(_NEED_DECISION_QUESTIONS),
+        )
+        save_profile_version(
+            public_user_id,
+            "career_strategy_selected",
+            {
+                "career_strategy": strategy_code,
+                "career_strategy_label": strategy_label,
+                "report_generation_id": str(data.get("report_generation_id") or ""),
+                "user_mode": str(data.get("user_mode") or ""),
+                "source": "need_decision_questions",
+            },
+            session_id=session_id,
+        )
+        await _track_event(
+            message,
+            state,
+            "career_strategy_selected",
+            meta={"career_strategy": strategy_code, "career_strategy_label": strategy_label, "source": "need_decision_questions"},
+        )
+        route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+        _apply_strategy_outputs(report, {str(key): str(value) for key, value in route_context.items()}, strategy_code)
+        await state.update_data(final_report=report, report_chunks=report_chunks(report, lang))
+        await message.answer(
+            f"Предварительная рекомендация: {strategy_label}. Если захотите, позже можно сменить стратегию кнопкой.",
+            reply_markup=career_strategy_keyboard(),
+        )
+        await message.answer(t(lang, "career_strategy_saved", choice=strategy_label), reply_markup=career_strategy_keyboard())
+        await _present_route_selection(message, state, lang, report)
+        return
+
+    if bool(data.get("awaiting_career_strategy_choice")) or action in ALL_CAREER_STRATEGY_ACTIONS:
+        if action not in ALL_CAREER_STRATEGY_ACTIONS:
+            await message.answer(t(lang, "career_strategy_intro"), reply_markup=career_strategy_keyboard())
+            return
+
+        if action == CAREER_STRATEGY_HELP:
+            bundle = _build_need_decision_bundle(
+                report if isinstance(report, dict) else {},
+                data.get("route_context") if isinstance(data.get("route_context"), dict) else {},
+            )
+            mini_table = _need_decision_comparison_text(bundle)
+            intro = _safe_default(bundle.get("message"), "Сравним три пути и выберем стратегию по вашим ограничениям.")
+            await state.update_data(
+                awaiting_need_decision_questions=True,
+                need_decision_question_index=0,
+                need_decision_answers=[],
+            )
+            await message.answer(f"{intro}\n\n{mini_table}".strip())
+            await message.answer(_NEED_DECISION_QUESTIONS[0])
+            return
+
+        strategy_code, strategy_label = _career_strategy_from_action(action)
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+        session_id = str(data.get("session_id") or "").strip()
+        await state.update_data(
+            career_strategy=strategy_code,
+            career_strategy_label=strategy_label,
+            awaiting_career_strategy_choice=False,
+        )
+        save_profile_version(
+            public_user_id,
+            "career_strategy_selected",
+            {
+                "career_strategy": strategy_code,
+                "career_strategy_label": strategy_label,
+                "report_generation_id": str(data.get("report_generation_id") or ""),
+                "user_mode": str(data.get("user_mode") or ""),
+            },
+            session_id=session_id,
+        )
+        await _track_event(
+            message,
+            state,
+            "career_strategy_selected",
+            meta={"career_strategy": strategy_code, "career_strategy_label": strategy_label},
+        )
+        route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+        _apply_strategy_outputs(report, {str(key): str(value) for key, value in route_context.items()}, strategy_code)
+        await state.update_data(final_report=report, report_chunks=report_chunks(report, lang))
+        await message.answer(t(lang, "career_strategy_saved", choice=strategy_label), reply_markup=career_strategy_keyboard())
+        await _present_route_selection(message, state, lang, report)
+        return
+
     if action in {ROUTE_CHOICE_HELP, ROUTE_CHOICE_NO_LOGIC}:
+        if _is_construction_estimation_domain(report) and action == ROUTE_CHOICE_HELP:
+            _apply_route_choice_to_report(report, ROUTE_CHOICE_HELP, rows)
+            await state.update_data(final_report=report, report_chunks=report_chunks(report, lang), route_compare_rows=rows)
+            await message.answer(t(lang, "route_compare_intro"), reply_markup=route_choice_keyboard())
+            await _answer_safe(message, f"{t(lang, 'route_compare_title')}\n\n{_format_route_comparison(rows)}", reply_markup=route_choice_keyboard())
+            await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+            await _track_event(message, state, "route_help_requested", action=action, meta={"route_count": len(rows)})
+            return
         await message.answer(t(lang, "route_choice_help"), reply_markup=route_choice_keyboard())
         return
 
     if action == ROUTE_CHOICE_OTHER:
-        alternate = rows[1] if len(rows) > 1 else (rows[0] if rows else {})
-        if alternate:
-            await message.answer(_format_route_comparison([alternate]), reply_markup=route_choice_keyboard())
+        alternatives = data.get("alternative_routes") if isinstance(data.get("alternative_routes"), list) else _build_alternative_routes(report, rows)
+        if alternatives:
+            current_idx = int(data.get("current_route_index", -1)) + 1
+            if current_idx >= len(alternatives):
+                current_idx = 0
+            await state.update_data(alternative_routes=alternatives, current_route_index=current_idx)
+            route_payload = alternatives[current_idx] if isinstance(alternatives[current_idx], dict) else {}
+            await message.answer(_format_alternative_route(route_payload), reply_markup=route_choice_keyboard())
         else:
             await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
-        await _track_event(message, state, "route_other_requested", meta={"route_count": len(rows)})
+        await _track_event(message, state, "route_other_requested", meta={"route_count": len(rows), "alternatives_count": len(alternatives) if isinstance(alternatives, list) else 0})
         return
 
     if action == ROUTE_CHOICE_CLOSE:
         selected_route = _apply_route_choice_to_report(report, ROUTE_CHOICE_STABLE, rows)
         chunks = report_chunks(report, lang)
+        new_report_generation_id = str(uuid.uuid4())
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+        session_id = str(data.get("session_id") or "").strip()
+        save_report_version(new_report_generation_id, public_user_id, report, session_id=session_id)
+        save_profile_version(
+            public_user_id,
+            "route_selected_report_regenerated",
+            {
+                "selected_route": selected_route,
+                "route_choice": action,
+                "report_generation_id": new_report_generation_id,
+            },
+            session_id=session_id,
+        )
         await state.update_data(
             final_report=report,
             report_chunks=chunks,
             final_report_generated=True,
             user_route_choice=action,
             route_compare_rows=rows,
+            report_generation_id=new_report_generation_id,
         )
         await _track_event(
             message,
             state,
             "route_selected",
             action=action,
-            meta={"selected_route": selected_route or ""},
+            meta={"selected_route": selected_route or "", "report_regenerated": True, "new_report_generation_id": new_report_generation_id},
         )
         await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
+        if await _maybe_start_route_specific_clarification(message, state, lang, selected_route or action):
+            return
         await _send_final_map_bundle(message, state, lang, report)
         return
 
     selected_route = _apply_route_choice_to_report(report, action, rows)
     chunks = report_chunks(report, lang)
+    new_report_generation_id = str(uuid.uuid4())
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    session_id = str(data.get("session_id") or "").strip()
+    save_report_version(new_report_generation_id, public_user_id, report, session_id=session_id)
+    save_profile_version(
+        public_user_id,
+        "route_selected_report_regenerated",
+        {
+            "selected_route": selected_route,
+            "route_choice": action,
+            "report_generation_id": new_report_generation_id,
+        },
+        session_id=session_id,
+    )
     await state.update_data(
         final_report=report,
         report_chunks=chunks,
         final_report_generated=True,
         user_route_choice=action,
         route_compare_rows=rows,
+        report_generation_id=new_report_generation_id,
     )
 
     await _track_event(
@@ -4498,16 +7524,100 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
         state,
         "route_selected",
         action=action,
-        meta={"selected_route": selected_route or ""},
+        meta={"selected_route": selected_route or "", "report_regenerated": True, "new_report_generation_id": new_report_generation_id},
     )
     await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
+    if await _maybe_start_route_specific_clarification(message, state, lang, selected_route or action):
+        return
     await _send_final_map_bundle(message, state, lang, report)
 
 
 @router.message(CareerFlow.ROUTE_SELECTION, F.text)
 async def handle_route_selection_fallback(message: Message, state: FSMContext) -> None:
-    lang = _user_language(await state.get_data())
+    data = await state.get_data()
+    lang = _user_language(data)
+    if bool(data.get("awaiting_route_specific_questions")):
+        gaps = data.get("route_specific_gaps") if isinstance(data.get("route_specific_gaps"), list) else []
+        idx = int(data.get("route_specific_index", 0))
+        if gaps and idx < len(gaps):
+            current = gaps[idx] if isinstance(gaps[idx], dict) else {}
+            await message.answer(str(current.get("prompt") or ""), reply_markup=_route_specific_reply_markup(current))
+            return
+    if bool(data.get("awaiting_need_decision_questions")):
+        q_index = int(data.get("need_decision_question_index", 0))
+        if q_index < len(_NEED_DECISION_QUESTIONS):
+            await message.answer(_NEED_DECISION_QUESTIONS[q_index])
+            return
+    if bool(data.get("awaiting_career_strategy_choice")):
+        await message.answer(t(lang, "career_strategy_intro"), reply_markup=career_strategy_keyboard())
+        return
     await message.answer(t(lang, "route_compare_question"), reply_markup=route_choice_keyboard())
+
+
+@router.message(CareerFlow.CRISIS_SUPPORT, F.text.in_(ALL_CRISIS_SUPPORT_ACTIONS))
+async def handle_crisis_support_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    action = (message.text or "").strip()
+    request_id = _ensure_public_id(data, message)
+    await state.update_data(public_user_id=request_id)
+    
+    if action == CRISIS_HELP_HOTLINE:
+        hotline_msg = t(lang, "crisis_hotline_info")
+        await message.answer(hotline_msg)
+        await message.answer("После того, как позвоните и почувствуете поддержку, дайте мне знать, и я помогу с карьерным маршрутом.", reply_markup=crisis_support_keyboard())
+        await _track_event(message, state, "crisis_action_selected", action="hotline", meta={})
+    
+    elif action == CRISIS_SPECIALIST:
+        await message.answer("Специалист поможет разобраться в том, что сейчас происходит. Это может быть психолог, психиатр или counselor в вашей стране.\n\nПосле консультации мы продолжим работу над карьерным маршрутом.", reply_markup=crisis_support_keyboard())
+        await _track_event(message, state, "crisis_action_selected", action="specialist", meta={})
+    
+    elif action == CRISIS_TRUSTED_PERSON:
+        await message.answer("Разговор с человеком, которому вы доверяете, может помочь почувствовать поддержку. Не стесняйтесь рассказать о том, что вы переживаете.\n\nВ любой момент вы можете вернуться к карьерному маршруту.", reply_markup=crisis_support_keyboard())
+        await _track_event(message, state, "crisis_action_selected", action="trusted_person", meta={})
+    
+    elif action == CRISIS_CONTINUE_LATER:
+        await message.answer("Договорились. Позаботьтесь о себе, и когда будете готовы, я помогу с карьерным маршрутом.\n\nМожете написать /start когда будете готовы начать заново.", reply_markup=ReplyKeyboardRemove())
+        await _track_event(message, state, "crisis_action_selected", action="continue_later", meta={})
+        await state.clear()
+
+
+@router.message(CareerFlow.CRISIS_SUPPORT, F.text)
+async def handle_crisis_support_fallback(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    text = (message.text or "").strip()
+    if text and _detect_crisis_risk(text):
+        await message.answer(t(lang, "crisis_hotline_info"))
+    await message.answer(t(lang, "crisis_support_step"), reply_markup=crisis_support_keyboard())
+
+
+@router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_SPECIALIST_ROUTING_ACTIONS))
+@router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_SPECIALIST_ROUTING_ACTIONS))
+async def handle_specialist_routing_actions(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    action = (message.text or "").strip()
+    request_id = _ensure_public_id(data, message)
+    await state.update_data(public_user_id=request_id, awaiting_specialist_routing_choice=False)
+
+    if action == SPECIALIST_ROUTE_SELF:
+        await message.answer("Договорились. Двигаемся самостоятельно: начните с ближайшего практического шага в карте.", reply_markup=result_actions_keyboard())
+        return
+
+    notify_action = "career_consultant"
+    followup = t(lang, "specialist_contact_intro", request_id=request_id)
+    if action == SPECIALIST_ROUTE_PSYCH:
+        notify_action = "psychologist"
+        followup = f"{t(lang, 'specialist_contact_intro', request_id=request_id)}\n\nОтдельно отметил(а), что нужен психологический фокус: тревога/выгорание/внутренний стопор."
+    elif action == SPECIALIST_ROUTE_BOTH:
+        notify_action = "career_and_psychologist"
+        followup = f"{t(lang, 'specialist_contact_intro', request_id=request_id)}\n\nЗафиксировал(а), что важны оба трека: карьерный маршрут и психологическая устойчивость."
+
+    await _track_event(message, state, "specialist_routing_selected", action=action, meta={"notify_action": notify_action})
+    await _notify_specialist_request_owner(message, state, notify_action)
+    await state.set_state(CareerFlow.FINAL_READY)
+    await message.answer(followup, reply_markup=result_actions_keyboard())
 
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_RESULT_ACTIONS))
@@ -4646,11 +7756,16 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT}:
         await _track_event(message, state, "specialist_clicked", action=action)
-        request_id = _ensure_public_id(data, message)
-        await state.update_data(public_user_id=request_id)
-        await _notify_specialist_request_owner(message, state, action)
-        await state.set_state(CareerFlow.FINAL_READY)
-        await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=result_actions_keyboard())
+        report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+        guidance_text, mode, today_step, career_hits, psych_hits = _specialist_guidance_text(report, data)
+        await state.update_data(
+            awaiting_specialist_routing_choice=True,
+            specialist_guidance_mode=mode,
+            specialist_today_step=today_step,
+            career_consultant_signals=career_hits,
+            psychologist_signals=psych_hits,
+        )
+        await message.answer(guidance_text, reply_markup=specialist_routing_keyboard())
         return
 
     if action in {RESULT_SUPPORT_GROUP, RESULT_GROUP_EXPLICIT}:
@@ -4965,6 +8080,10 @@ async def process_route_changes_input(message: Message, state: FSMContext, text:
     change_text = (text or "").strip()
     data = await state.get_data()
     lang = _user_language(data)
+
+    if change_text and await _maybe_switch_to_crisis_support(message, state, lang, change_text, source="route_changes"):
+        return
+
     if not change_text:
         await message.answer(t(lang, "route_changes_prompt"), reply_markup=result_actions_keyboard())
         return

@@ -24,6 +24,10 @@ class FakeState:
     async def get_state(self) -> str | None:
         return self.current_state
 
+    async def clear(self) -> None:
+        self.data = {}
+        self.current_state = None
+
 
 class FakeMessage:
     def __init__(self, text: str = "") -> None:
@@ -103,6 +107,30 @@ class RecoveryIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.data.get("html_report_path"), "reports/r1.html")
         self.assertEqual(state.data.get("pdf_report_path"), "reports/r1.pdf")
         message.answer.assert_awaited()
+
+    async def test_recovery_respects_restart_intent_and_starts_fresh(self) -> None:
+        state = FakeState(data={}, current_state=None)
+        message = FakeMessage(text="Хочу пройти сначала")
+
+        bundle = {
+            "session": {
+                "session_id": "sess-1",
+                "state_name": "FINAL_READY",
+                "user_mode": "calm_steps",
+                "language": "ru",
+            },
+            "report": {
+                "report": {"career_decision": {"recommended_main_path": "Administrative Assistant"}},
+            },
+        }
+
+        with patch("handlers.start.ensure_public_user_id", return_value="pub-1"):
+            with patch("handlers.start.load_recovery_bundle", return_value=bundle):
+                await recover_without_fsm_state(message, state)
+
+        self.assertEqual(state.current_state, CareerFlow.SELECTING_PACE.state)
+        self.assertFalse(bool(state.data.get("final_report_generated")))
+        self.assertGreaterEqual(message.answer.await_count, 2)
 
 
 if __name__ == "__main__":

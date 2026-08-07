@@ -128,6 +128,25 @@ def _extract_start_source(message_text: str) -> str:
     return source[:120]
 
 
+def _is_restart_intent(text: str) -> bool:
+    low = str(text or "").strip().lower().replace("ё", "е")
+    if not low:
+        return False
+    markers = [
+        "пройти заново",
+        "начать заново",
+        "начать сначала",
+        "пройти сначала",
+        "хочу пройти сначала",
+        "хочу начать сначала",
+        "сначала",
+        "с начала",
+        "restart",
+        "start over",
+    ]
+    return any(marker in low for marker in markers)
+
+
 def _apply_mode_settings(mode_key: str, preferred_input: str = "text") -> dict:
     mapping = {
         "fast": {
@@ -403,6 +422,14 @@ async def dont_know_start(message: Message, state: FSMContext) -> None:
 async def recover_without_fsm_state(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text or text.startswith("/"):
+        return
+
+    if _is_restart_intent(text):
+        await state.clear()
+        await state.update_data(language=LANG_RU, lang=LANG_RU)
+        await state.set_state(CareerFlow.SELECTING_PACE)
+        await message.answer(t(LANG_RU, "start_intro"))
+        await message.answer(t(LANG_RU, "pace_prompt"), reply_markup=pace_keyboard())
         return
 
     public_user_id = ensure_public_user_id(message.from_user.id if message.from_user else message.chat.id)

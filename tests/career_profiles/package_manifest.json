@@ -1,0 +1,40 @@
+{
+  "package_name": "nextyou_career_profiles",
+  "package_version": "career_profiles_v1",
+  "profile_count": 9,
+  "files": [
+    {
+      "path": "NextYou_test_inputs_v1_0.zip",
+      "required": true,
+      "alternatives": [
+        "inputs"
+      ]
+    },
+    {
+      "path": "NextYou_expected_results_v1_0.zip",
+      "required": true,
+      "alternatives": [
+        "expected"
+      ]
+    },
+    {
+      "path": "baseline/baseline_lock.json",
+      "required": true
+    },
+    {
+      "path": "schemas/input_profile.schema.json",
+      "required": true
+    },
+    {
+      "path": "schemas/expected_profile.schema.json",
+      "required": true
+    },
+    {
+      "path": "schemas/evaluation_result.schema.json",
+      "required": true
+    }
+  ],
+  "workflow": {
+    "note": "Baseline completion requires either both ZIP archives or unpacked equivalents with complete input/expected profile sets."
+  }
+}

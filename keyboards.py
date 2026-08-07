@@ -49,6 +49,21 @@ RESUME_CONTINUE = "➡️ Продолжить без резюме"
 STORY_CONFIRM_OK = "✅ Да, вы поняли верно"
 STORY_CONFIRM_FIX = "✍️ Хочу поправить"
 
+CAREER_STRATEGY_FAST_INCOME = "Нужен доход в ближайшие 1–2 месяца"
+CAREER_STRATEGY_UPSKILL = "Готов(а) готовиться 3–6 месяцев ради работы ближе к моему опыту"
+CAREER_STRATEGY_LONG = "Готов(а) вложиться в переобучение и смену траектории"
+CAREER_STRATEGY_HELP = "Не уверен(а), помоги выбрать"
+
+SPECIALIST_ROUTE_CAREER = "Мне нужна помощь с карьерным маршрутом"
+SPECIALIST_ROUTE_PSYCH = "Мне трудно начать из-за тревоги или выгорания"
+SPECIALIST_ROUTE_BOTH = "Мне важно и то, и другое"
+SPECIALIST_ROUTE_SELF = "Пока хочу двигаться самостоятельно"
+
+CRISIS_HELP_HOTLINE = "☎️ Позвонить на горячую линию"
+CRISIS_CONTINUE_LATER = "⏸️ Вернёшься позже"
+CRISIS_SPECIALIST = "🏥 Обратиться к специалисту"
+CRISIS_TRUSTED_PERSON = "👥 Поговорить с кем-то близким"
+
 PSYCH_BARRIER_OPTIONS = [
     "Боюсь отказов",
     "Боюсь выглядеть глупо",
@@ -135,7 +150,12 @@ STEP_OTHER_STEP = "Другой шаг"
 
 RESULT_DOWNLOAD_PDF = "📄 Скачать PDF"
 RESULT_DOWNLOAD_DOCX = "📝 Скачать DOCX"
-QUESTION_ADD_TEXT = "✍️ Я запишу сам"
+QUESTION_ADD_TEXT = "✍️ Другое / расскажу своими словами"
+SHOW_MAP_NOW = "🗺 Показать карту"
+CLARIFY_MORE = "🔍 Уточнить ещё один момент"
+PRELIM_LOOKS_LIKE_ME = "✅ Похоже на меня"
+PRELIM_HAS_ERROR = "✏️ Есть важная ошибка"
+PRELIM_ADD_DETAIL = "➕ Добавить деталь"
 EXTENDED_DIAG_YES = "🧩 Пройти расширенную диагностику"
 EXTENDED_DIAG_SKIP = "➡️ Продолжить без неё"
 ANSWER_RETRY = "✍️ Ответить заново"
@@ -224,6 +244,25 @@ ALL_ROUTE_CHOICE_ACTIONS = {
     ROUTE_CHOICE_CLOSE,
     ROUTE_CHOICE_OTHER,
     ROUTE_CHOICE_NO_LOGIC,
+}
+
+ALL_CAREER_STRATEGY_ACTIONS = {
+    CAREER_STRATEGY_FAST_INCOME,
+    CAREER_STRATEGY_UPSKILL,
+    CAREER_STRATEGY_LONG,
+    CAREER_STRATEGY_HELP,
+}
+ALL_SPECIALIST_ROUTING_ACTIONS = {
+    SPECIALIST_ROUTE_CAREER,
+    SPECIALIST_ROUTE_PSYCH,
+    SPECIALIST_ROUTE_BOTH,
+    SPECIALIST_ROUTE_SELF,
+}
+ALL_CRISIS_SUPPORT_ACTIONS = {
+    CRISIS_HELP_HOTLINE,
+    CRISIS_SPECIALIST,
+    CRISIS_TRUSTED_PERSON,
+    CRISIS_CONTINUE_LATER,
 }
 ALL_VOICE_PACE_OPTIONS = {VOICE_PACE_FAST, VOICE_PACE_NORMAL, VOICE_PACE_SUPPORT}
 ALL_SHORT_STORY_OPTIONS = {SHORT_NEED_JOB, SHORT_NO_DIRECTION, SHORT_LANGUAGE, SHORT_FEAR, SHORT_TIRED, SHORT_RESUME}
@@ -438,6 +477,31 @@ def question_options_keyboard(options: list[str]) -> ReplyKeyboardMarkup | None:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
+def preliminary_result_offer_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=SHOW_MAP_NOW)],
+            [KeyboardButton(text=CLARIFY_MORE)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def preliminary_map_keyboard(route1: str = "", route2: str = "") -> ReplyKeyboardMarkup:
+    r1 = route1.strip() or "🛣 Разобрать первый маршрут"
+    r2 = route2.strip() or "🛣 Разобрать второй маршрут"
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=PRELIM_LOOKS_LIKE_ME)],
+            [KeyboardButton(text=PRELIM_HAS_ERROR)],
+            [KeyboardButton(text=r1)],
+            [KeyboardButton(text=r2)],
+            [KeyboardButton(text=PRELIM_ADD_DETAIL)],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def restart_keyboard(lang: str = LANG_RU) -> ReplyKeyboardMarkup:
     button = RESTART_BE if lang == LANG_BE else RESTART
     return ReplyKeyboardMarkup(
@@ -597,6 +661,7 @@ def step_tracking_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=STEP_MAKE_EASIER), KeyboardButton(text=STEP_OTHER_STEP)],
             [KeyboardButton(text=STEP_DONE), KeyboardButton(text=STEP_NOT_DONE)],
             [KeyboardButton(text=STEP_BARRIERS), KeyboardButton(text=STEP_NEXT_DAY)],
+            [KeyboardButton(text=RESTART)],
             [KeyboardButton(text=RESULT_BACK_TO_MENU)],
         ],
         resize_keyboard=True,
@@ -650,6 +715,42 @@ def route_choice_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=ROUTE_CHOICE_STABLE)],
             [KeyboardButton(text=ROUTE_CHOICE_PRIVATE)],
             [KeyboardButton(text=ROUTE_CHOICE_RETRAIN)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def career_strategy_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=CAREER_STRATEGY_FAST_INCOME)],
+            [KeyboardButton(text=CAREER_STRATEGY_UPSKILL)],
+            [KeyboardButton(text=CAREER_STRATEGY_LONG)],
+            [KeyboardButton(text=CAREER_STRATEGY_HELP)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def specialist_routing_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=SPECIALIST_ROUTE_CAREER)],
+            [KeyboardButton(text=SPECIALIST_ROUTE_PSYCH)],
+            [KeyboardButton(text=SPECIALIST_ROUTE_BOTH)],
+            [KeyboardButton(text=SPECIALIST_ROUTE_SELF)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def crisis_support_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=CRISIS_HELP_HOTLINE)],
+            [KeyboardButton(text=CRISIS_SPECIALIST)],
+            [KeyboardButton(text=CRISIS_TRUSTED_PERSON)],
+            [KeyboardButton(text=CRISIS_CONTINUE_LATER)],
         ],
         resize_keyboard=True,
     )

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CareerBaselineInputProfile",
+  "type": "object",
+  "required": [
+    "profile_id",
+    "story",
+    "story_analysis",
+    "answers"
+  ],
+  "properties": {
+    "profile_id": {"type": "string"},
+    "language": {"type": "string"},
+    "story": {"type": "string"},
+    "story_analysis": {"type": "object"},
+    "answers": {"type": "string"},
+    "resume_analysis": {"type": "object"},
+    "decision_layers": {"type": "object"},
+    "selected_barriers": {"type": "array", "items": {"type": "string"}},
+    "selected_fears": {"type": "array", "items": {"type": "string"}},
+    "selected_psych_markers": {"type": "array", "items": {"type": "string"}},
+    "selected_energy_sources": {"type": "array", "items": {"type": "string"}},
+    "selected_career_priorities": {"type": "array", "items": {"type": "string"}},
+    "user_segment": {"type": "string"},
+    "user_segment_label": {"type": "string"}
+  },
+  "additionalProperties": true
+}

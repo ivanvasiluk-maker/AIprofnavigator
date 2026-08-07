@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CareerBaselineEvaluationResult",
+  "type": "object",
+  "required": [
+    "profile_id",
+    "evaluation_status",
+    "passed",
+    "critical_error_detected",
+    "total_score",
+    "max_score",
+    "score_breakdown"
+  ],
+  "properties": {
+    "profile_id": {"type": "string"},
+    "evaluation_status": {"type": "string"},
+    "passed": {"type": "boolean"},
+    "critical_error_detected": {"type": "boolean"},
+    "total_score": {"type": "integer"},
+    "max_score": {"type": "integer"},
+    "score_breakdown": {"type": "object", "additionalProperties": true},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "supporting_fragments": {"type": "array", "items": {"type": "string"}},
+    "missing_elements": {"type": "array", "items": {"type": "string"}},
+    "critical_findings": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "evaluator_comment": {"type": "string"}
+  },
+  "additionalProperties": true
+}

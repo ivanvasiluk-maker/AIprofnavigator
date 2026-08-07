@@ -10,9 +10,100 @@ from openai import OpenAI
 from config import settings
 from prompts import FINAL_REPORT_PROMPT, RESUME_ANALYSIS_PROMPT, STORY_ANALYSIS_PROMPT, SYSTEM_PROMPT
 
+
+CONSTRUCTION_ESTIMATION_DOMAIN = "construction_engineering_cost_estimation"
+CONSTRUCTION_ESTIMATION_ROLES = [
+    "Assistant Cost Estimator",
+    "Junior Quantity Surveyor",
+    "Construction Documentation Specialist",
+    "Technical Assistant Construction",
+    "Construction Project Assistant",
+    "Site Office Assistant",
+    "Project Coordinator in construction company",
+    "Back-office Specialist in construction / engineering company",
+]
+CONSTRUCTION_FORBIDDEN_FIRST_STEP_TERMS = [
+    "плитка",
+    "гипсокартон",
+    "мебель",
+    "покраска",
+    "отделка",
+    "частные заказы",
+    "подработка на объекте руками",
+]
+CONSTRUCTION_DOMAIN_FIRST_STEP_ACTION = (
+    "Сегодня за 15 минут найдите 10 вакансий по запросам:\n"
+    "Assistant Cost Estimator, Junior Quantity Surveyor, Technical Assistant Construction,\n"
+    "Construction Documentation Specialist, Construction Project Assistant.\n\n"
+    "Выпишите повторяющиеся требования:\n"
+    "польский язык, программы, строительные нормы, Excel,\n"
+    "работа с проектной документацией,\n"
+    "опыт в Польше, сертификаты.\n\n"
+    "Пока не покупайте курсы — сначала проверяем рынок."
+)
+CONSTRUCTION_DOMAIN_FIRST_STEP_BUTTONS = [
+    "Сделал",
+    "Слишком сложно",
+    "Сделать проще",
+    "Помоги составить таблицу",
+    "Хочу примеры запросов",
+]
+
 STORY_ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
+        # ── v2 evidence fields ──────────────────────────────────────────────
+        "facts_extracted": {"type": "array", "items": {"type": "string"}},
+        "functions_detected": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "evidence": {"type": "array", "items": {"type": "string"}},
+                    "frequency": {"type": "string"},
+                    "autonomy": {"type": "string"},
+                    "scale": {"type": "string"},
+                    "results": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {"type": "string"},
+                },
+                "required": ["name", "evidence", "frequency", "autonomy", "scale", "results", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+        "professional_core_hypotheses": {"type": "array", "items": {"type": "string"}},
+        "seniority_hypotheses": {"type": "array", "items": {"type": "string"}},
+        "explicit_refusals": {"type": "array", "items": {"type": "string"}},
+        "legal_access_questions": {"type": "array", "items": {"type": "string"}},
+        "contradictions": {"type": "array", "items": {"type": "string"}},
+        "critical_gaps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "gap_type": {"type": "string"},
+                    "why_it_matters": {"type": "string"},
+                    "decision_that_may_change": {"type": "string"},
+                    "priority": {"type": "integer"},
+                },
+                "required": ["gap_type", "why_it_matters", "decision_that_may_change", "priority"],
+                "additionalProperties": False,
+            },
+        },
+        "next_question": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "internal_goal": {"type": "string"},
+                "expected_information": {"type": "array", "items": {"type": "string"}},
+                "skip_if": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["question", "internal_goal", "expected_information", "skip_if"],
+            "additionalProperties": False,
+        },
+        "ready_for_preliminary_result": {"type": "boolean"},
+        "readiness_reason": {"type": "string"},
+        # ── legacy bridge fields (backward compat) ──────────────────────────
         "story_summary": {"type": "string"},
         "current_identity": {"type": "string"},
         "experience_snapshot": {"type": "array", "items": {"type": "string"}},
@@ -38,11 +129,22 @@ STORY_ANALYSIS_SCHEMA = {
         "confidence_note": {"type": "string"},
     },
     "required": [
+        "facts_extracted",
+        "functions_detected",
+        "professional_core_hypotheses",
+        "seniority_hypotheses",
+        "explicit_refusals",
+        "constraints",
+        "legal_access_questions",
+        "contradictions",
+        "critical_gaps",
+        "next_question",
+        "ready_for_preliminary_result",
+        "readiness_reason",
         "story_summary",
         "current_identity",
         "experience_snapshot",
         "skills",
-        "constraints",
         "goals",
         "missing_data",
         "follow_up_questions",
@@ -254,6 +356,33 @@ FINAL_REPORT_SCHEMA = {
             "required": ["recommended_main_path", "why_this_path", "why_not_other_paths", "backup_path", "avoid_for_now", "decision_summary"],
             "additionalProperties": False,
         },
+        "route_evidence_blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "route": {"type": "string"},
+                    "why_it_fits": {"type": "array", "items": {"type": "string"}},
+                    "evidence_from_user": {"type": "array", "items": {"type": "string"}},
+                    "missing_competencies": {"type": "array", "items": {"type": "string"}},
+                    "entry_level": {"type": "string"},
+                    "income_role": {"type": "string", "enum": ["primary", "transition", "quick", "emergency"]},
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "what_may_disprove_this_route": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "route",
+                    "why_it_fits",
+                    "evidence_from_user",
+                    "missing_competencies",
+                    "entry_level",
+                    "income_role",
+                    "risks",
+                    "what_may_disprove_this_route",
+                ],
+                "additionalProperties": False,
+            },
+        },
         "development_map": {
             "type": "object",
             "properties": {
@@ -424,6 +553,7 @@ FINAL_REPORT_SCHEMA = {
         "career_recommendations",
         "real_solutions",
         "career_decision",
+        "route_evidence_blocks",
         "development_map",
         "action_plan",
         "weekly_plan",
@@ -479,13 +609,35 @@ RESUME_ANALYSIS_SCHEMA = {
 }
 
 STORY_ANALYSIS_FALLBACK = {
+    # ── v2 evidence fields ──────────────────────────────────────────────────
+    "facts_extracted": ["Есть профессиональный опыт до переезда", "Текущая ситуация требует нового карьерного ориентира"],
+    "functions_detected": [],
+    "professional_core_hypotheses": ["Профессиональное ядро требует уточнения через конкретные функции"],
+    "seniority_hypotheses": [],
+    "explicit_refusals": [],
+    "legal_access_questions": ["Какое право на работу и признание квалификации есть сейчас?"],
+    "contradictions": [],
+    "critical_gaps": [
+        {"gap_type": "minimum_income", "why_it_matters": "Влияет на допустимые маршруты", "decision_that_may_change": "Быстрый vs долгосрочный маршрут", "priority": 95},
+        {"gap_type": "income_deadline", "why_it_matters": "Определяет темп и срочность", "decision_that_may_change": "Темп перехода", "priority": 92},
+        {"gap_type": "legal_access", "why_it_matters": "Ограничивает допустимые роли", "decision_that_may_change": "Набор профессий в маршруте", "priority": 88},
+    ],
+    "next_question": {
+        "question": "Какой минимальный доход в месяц вам нужен, чтобы стабилизировать ситуацию?",
+        "internal_goal": "Зафиксировать финансовое ограничение для выбора маршрута",
+        "expected_information": ["Конкретная сумма или диапазон"],
+        "skip_if": ["Пользователь уже назвал сумму"],
+    },
+    "ready_for_preliminary_result": False,
+    "readiness_reason": "Недостаточно данных о профессиональных функциях и финансовых ограничениях.",
+    # ── legacy bridge fields ────────────────────────────────────────────────
     "story_summary": "Пока видно общий карьерный переход после переезда и запрос на новую опору.",
     "current_identity": "Мигрант в переходе с профессиональным опытом и потребностью в новом карьерном маршруте.",
     "experience_snapshot": ["Есть профессиональный опыт до переезда", "Сейчас нужен новый карьерный ориентир"],
     "skills": ["коммуникация", "адаптивность", "ответственность"],
     "constraints": ["нужно уточнить язык", "нужно уточнить документы", "нужно уточнить срочность дохода"],
     "goals": ["понять подходящие карьерные направления", "получить реалистичный план перехода"],
-    "missing_data": ["уровень языка", "срок до первого дохода", "готовность к обучению"],
+    "missing_data": ["minimum_income", "income_deadline", "legal_access"],
     "follow_up_questions": [
         {
             "id": 1,
@@ -553,13 +705,34 @@ STORY_ANALYSIS_FALLBACK = {
 }
 
 STORY_ANALYSIS_FALLBACK_BE = {
+    # ── v2 evidence fields ──────────────────────────────────────────────────
+    "facts_extracted": ["Ёсць прафесійны досвед да пераезду", "Зараз патрэбны новы кар'ерны арыенцір"],
+    "functions_detected": [],
+    "professional_core_hypotheses": ["Прафесійнае ядро патрабуе ўдакладнення праз канкрэтныя функцыі"],
+    "seniority_hypotheses": [],
+    "explicit_refusals": [],
+    "legal_access_questions": ["Якое права на працу і прызнанне кваліфікацыі ёсць зараз?"],
+    "contradictions": [],
+    "critical_gaps": [
+        {"gap_type": "minimum_income", "why_it_matters": "Уплывае на дапушчальныя маршруты", "decision_that_may_change": "Хуткі vs доўгатэрміновы маршрут", "priority": 95},
+        {"gap_type": "income_deadline", "why_it_matters": "Вызначае тэмп і тэрміновасць", "decision_that_may_change": "Тэмп пераходу", "priority": 92},
+    ],
+    "next_question": {
+        "question": "Які мінімальны даход у месяц вам патрэбны, каб стабілізаваць сітуацыю?",
+        "internal_goal": "Зафіксаваць фінансавае абмежаванне для выбару маршруту",
+        "expected_information": ["Канкрэтная сума або дыяпазон"],
+        "skip_if": ["Карыстальнік ужо назваў суму"],
+    },
+    "ready_for_preliminary_result": False,
+    "readiness_reason": "Недастаткова дадзеных аб прафесійных функцыях і фінансавых абмежаваннях.",
+    # ── legacy bridge fields ────────────────────────────────────────────────
     "story_summary": "Пакуль бачны агульны кар'ерны пераход пасля пераезду і запыт на новую апору.",
     "current_identity": "Мігрант у пераходзе з прафесійным досведам і патрэбай у новым кар'ерным маршруце.",
     "experience_snapshot": ["Ёсць прафесійны досвед да пераезду", "Зараз патрэбны новы кар'ерны арыенцір"],
     "skills": ["камунікацыя", "адаптыўнасць", "адказнасць"],
     "constraints": ["трэба ўдакладніць мову", "трэба ўдакладніць дакументы", "трэба ўдакладніць тэрміновасць даходу"],
     "goals": ["зразумець прыдатныя кар'ерныя напрамкі", "атрымаць рэалістычны план пераходу"],
-    "missing_data": ["узровень мовы", "тэрмін да першага даходу", "гатоўнасць вучыцца"],
+    "missing_data": ["minimum_income", "income_deadline", "legal_access"],
     "follow_up_questions": copy.deepcopy(STORY_ANALYSIS_FALLBACK["follow_up_questions"]),
     "confidence_note": "Частка профілю сабраная з агульнай гісторыі, некалькі ключавых параметраў трэба ўдакладніць.",
 }
@@ -778,6 +951,48 @@ FINAL_REPORT_FALLBACK = {
         "avoid_for_now": "Полная смена на long-track профессию без промежуточного доходного шага.",
         "decision_summary": "Сначала быстрый вход через смежный трек, затем наращивание компетенций для долгосрочного роста.",
     },
+    "route_evidence_blocks": [
+        {
+            "route": "Administrative Assistant / Back-office Specialist",
+            "why_it_fits": ["Опирается на подтвержденный административный и процессный опыт."],
+            "evidence_from_user": ["Опыт документооборота", "Опыт координации задач"],
+            "missing_competencies": ["Локальный словарь вакансий", "Адаптация CV под польский рынок"],
+            "entry_level": "junior-middle",
+            "income_role": "primary",
+            "risks": ["Конкуренция на массовых ролях", "Требуется стабильный польский для коммуникации"],
+            "what_may_disprove_this_route": ["Прямой отказ от административных функций", "Новые ограничения по графику/доступности"],
+        },
+        {
+            "route": "Operations Coordinator / Sales Operations Assistant",
+            "why_it_fits": ["Использует переносимые навыки координации и контроля сроков."],
+            "evidence_from_user": ["Опыт организации процесса", "Работа с внутренними задачами"],
+            "missing_competencies": ["Более сильный английский/польский", "Демонстрация KPI-кейсов"],
+            "entry_level": "strong_junior-middle",
+            "income_role": "transition",
+            "risks": ["Требования к локальному опыту"],
+            "what_may_disprove_this_route": ["Недостаточный уровень языка для координационных задач"],
+        },
+        {
+            "route": "Смежные роли с быстрым входом (assistant/back-office)",
+            "why_it_fits": ["Дает короткий путь к доходу и не требует полного переобучения."],
+            "evidence_from_user": ["Есть релевантный бэк-офис опыт"],
+            "missing_competencies": ["Локальная адаптация откликов"],
+            "entry_level": "entry-junior",
+            "income_role": "quick",
+            "risks": ["Ниже стартовый доход"],
+            "what_may_disprove_this_route": ["Рынок подтвердит отсутствие релевантных вакансий"],
+        },
+        {
+            "route": "Временный стабилизирующий трек с минимальным порогом входа",
+            "why_it_fits": ["Снижает риск затяжного периода без дохода."],
+            "evidence_from_user": ["Финансовое давление"],
+            "missing_competencies": ["Уточнение допустимых условий"],
+            "entry_level": "entry",
+            "income_role": "emergency",
+            "risks": ["Слабая связь с долгосрочной траекторией"],
+            "what_may_disprove_this_route": ["Если основной маршрут дает быстрый доход без аварийного трека"],
+        },
+    ],
     "development_map": {
         "current_state": "Есть релевантный опыт, но профиль и подача не адаптированы под локальный рынок.",
         "goal": "Получить первый оффер в смежном направлении за короткий срок.",
@@ -1326,6 +1541,10 @@ class CareerOpenAIClient:
         if preferred_titles:
             self._normalize_admin_backoffice_roles(report, preferred_titles)
 
+        profile_domain = self._detect_profile_domain(story_analysis, answers_text, story_text)
+        if profile_domain:
+            report["profile_domain"] = profile_domain
+
         self._deduplicate_directions(report)
         self._enrich_layers_and_non_reset(report, story_analysis, answers_text)
         self._inject_signal_roles(report, story_analysis, answers_text)
@@ -1340,6 +1559,7 @@ class CareerOpenAIClient:
         self._enforce_segment_routes(report, user_segment, user_segment_label)
         normalized_layers = self._normalize_decision_layers(decision_layers)
         self._enforce_route_change_guardrails(report, story_analysis, answers_text, normalized_layers)
+        self._enforce_domain_specific_routes(report, profile_domain)
         self._sanitize_unconfirmed_claims(report, normalized_facts)
 
         return report
@@ -1404,6 +1624,7 @@ class CareerOpenAIClient:
         decision_layers: dict[str, list[str]],
     ) -> None:
         report["decision_layers"] = decision_layers
+        profile_domain = self._detect_profile_domain(story_analysis, answers_text)
         facts_only_payload = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
         contradictions = facts_only_payload.get("contradictions", []) if isinstance(facts_only_payload, dict) else []
         has_contradictions = isinstance(contradictions, list) and any(str(item).strip() for item in contradictions)
@@ -1413,9 +1634,12 @@ class CareerOpenAIClient:
         if overload:
             action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
             today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+            example_roles = "плитка, гипсокартон, мебель"
+            if profile_domain == CONSTRUCTION_ESTIMATION_DOMAIN:
+                example_roles = "сметы, проверка проектной документации, расчёт объёмов работ"
             today["action"] = (
                 "Напишите в заметках три вида работ, которые вы реально умеете делать лучше всего "
-                "(например: плитка, гипсокартон, мебель)."
+                f"(например: {example_roles})."
             )
             today["timebox"] = "10 минут"
             today["result"] = "Есть список из 3 конкретных типов работ без смены текущего маршрута."
@@ -2006,6 +2230,22 @@ class CareerOpenAIClient:
             today["timebox"] = "15 минут"
             today["result"] = "Первые рыночные данные и список требований для доработки CV."
 
+    def _today_action_profile_hint(self, report: dict[str, Any]) -> str:
+        decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+        recommended = str(decision.get("recommended_main_path") or "").strip()
+        if recommended:
+            return recommended
+
+        solutions = report.get("real_solutions") if isinstance(report.get("real_solutions"), list) else []
+        for row in solutions:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or "").strip()
+            if title:
+                return title
+
+        return "вашему текущему профилю"
+
     def _ensure_barrier_driven_today_action(self, report: dict[str, Any], answers_text: str = "") -> None:
         action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
         today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
@@ -2024,8 +2264,8 @@ class CareerOpenAIClient:
                 {
                     "action": (
                         "Шаг на сегодня, 10 минут: напишите одному знакомому:\n"
-                        "«Привет. Я работаю по отделке: плитка, гипсокартон, покраска, мелкий ремонт. "
-                        "Если услышишь о подработке или объекте — буду благодарен за контакт».\n"
+                        f"«Привет. Ищу работу по направлению: {self._today_action_profile_hint(report)}. "
+                        "Если услышишь о подходящей вакансии или задаче — буду благодарен за контакт».\n"
                         "[Скопировать текст] [Сделал] [Слишком страшно] [Сделать проще]"
                     ),
                     "timebox": "10 минут",
@@ -2232,6 +2472,191 @@ class CareerOpenAIClient:
                 integration[key] = []
         report["social_integration"] = integration
 
+    def _detect_profile_domain(
+        self,
+        story_analysis: dict[str, Any],
+        answers_text: str = "",
+        story_text: str = "",
+    ) -> str:
+        chunks = [
+            str(story_analysis.get("current_identity", "")),
+            str(story_analysis.get("story_summary", "")),
+            " ".join(str(item) for item in story_analysis.get("experience_snapshot", []) if isinstance(item, str)),
+            " ".join(str(item) for item in story_analysis.get("skills", []) if isinstance(item, str)),
+            str(answers_text or ""),
+            str(story_text or ""),
+        ]
+        blob = " ".join(chunks).lower().replace("ё", "е")
+
+        core_signals = [
+            "инженер-сметчик",
+            "инженер сметчик",
+            "сметчик",
+            "смет",
+            "quantity surveyor",
+            "cost estimator",
+        ]
+        support_signals = [
+            "строитель",
+            "construction",
+            "проектная документац",
+            "документац",
+            "материал",
+            "обьем работ",
+            "объем работ",
+            "подрядчик",
+            "проектировщик",
+            "строительные нормы",
+            "помощник инженера",
+            "координатор строительных проектов",
+            "site office",
+            "construction project assistant",
+        ]
+
+        core_hits = {token for token in core_signals if token in blob}
+        support_hits = {token for token in support_signals if token in blob}
+
+        if core_hits and (support_hits or len(core_hits) >= 2):
+            return CONSTRUCTION_ESTIMATION_DOMAIN
+        return ""
+
+    def _is_forbidden_construction_main_path(self, value: str) -> bool:
+        text = str(value or "").strip().lower().replace("ё", "е")
+        if not text:
+            return True
+
+        allowed_markers = [
+            "assistant cost estimator",
+            "junior quantity surveyor",
+            "construction documentation specialist",
+            "technical assistant construction",
+            "construction project assistant",
+            "site office assistant",
+            "project coordinator in construction company",
+            "back-office specialist in construction / engineering company",
+            "administrative assistant in construction / engineering company",
+        ]
+        if any(marker in text for marker in allowed_markers):
+            return False
+
+        forbidden_markers = [
+            "generic back-office specialist",
+            "sales operations assistant",
+            "master of shift",
+            "warehouse team lead",
+            "courier",
+            "private repair jobs",
+            "tile",
+            "drywall",
+            "furniture work",
+            "частные заказы",
+            "плитк",
+            "гипсокарт",
+            "покраск",
+            "ремонт",
+            "курьер",
+            "кладов",
+            "склад",
+        ]
+        if any(marker in text for marker in forbidden_markers):
+            return True
+
+        if "administrative assistant" in text and "construction" not in text and "engineering" not in text:
+            return True
+        if "back-office specialist" in text and "construction" not in text and "engineering" not in text:
+            return True
+
+        return False
+
+    def _contains_forbidden_construction_first_step_terms(self, value: str) -> bool:
+        text = str(value or "").lower().replace("ё", "е")
+        return any(term in text for term in CONSTRUCTION_FORBIDDEN_FIRST_STEP_TERMS)
+
+    def _enforce_domain_specific_routes(self, report: dict[str, Any], profile_domain: str) -> None:
+        if profile_domain != CONSTRUCTION_ESTIMATION_DOMAIN:
+            return
+
+        decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+        main_path = str(decision.get("recommended_main_path", "")).strip()
+        if self._is_forbidden_construction_main_path(main_path):
+            decision["recommended_main_path"] = "Assistant Cost Estimator / Junior Quantity Surveyor"
+
+        backup_path = str(decision.get("backup_path", "")).strip()
+        if self._is_forbidden_construction_main_path(backup_path):
+            decision["backup_path"] = "Construction Documentation Specialist / Technical Assistant Construction"
+
+        avoid_for_now = str(decision.get("avoid_for_now", "")).strip()
+        avoid_note = "Избегать generic office ролей и несвязанных с construction подработок как основного пути."
+        if avoid_note not in avoid_for_now:
+            decision["avoid_for_now"] = f"{avoid_note} {avoid_for_now}".strip()
+
+        why_this_path = str(decision.get("why_this_path", "")).strip()
+        domain_note = "Профиль зафиксирован в домене construction engineering / cost estimation."
+        if domain_note not in why_this_path:
+            decision["why_this_path"] = f"{domain_note} {why_this_path}".strip()
+
+        report["career_decision"] = decision
+
+        market_analysis = report.get("market_analysis") if isinstance(report.get("market_analysis"), list) else []
+        for idx, item in enumerate(market_analysis):
+            if not isinstance(item, dict):
+                continue
+            profession = str(item.get("profession", "")).strip()
+            if self._is_forbidden_construction_main_path(profession):
+                replacement = CONSTRUCTION_ESTIMATION_ROLES[min(idx, len(CONSTRUCTION_ESTIMATION_ROLES) - 1)]
+                item["profession"] = replacement
+        report["market_analysis"] = market_analysis
+
+        recommendations = report.get("career_recommendations") if isinstance(report.get("career_recommendations"), list) else []
+        for idx, item in enumerate(recommendations):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            if self._is_forbidden_construction_main_path(title):
+                item["title"] = CONSTRUCTION_ESTIMATION_ROLES[min(idx, len(CONSTRUCTION_ESTIMATION_ROLES) - 1)]
+        report["career_recommendations"] = recommendations
+
+        bridges = report.get("career_bridges") if isinstance(report.get("career_bridges"), list) else []
+        for item in bridges:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip().lower()
+            if role == "administrative assistant":
+                item["role"] = "Administrative Assistant in construction / engineering company"
+            elif role == "back-office specialist":
+                item["role"] = "Back-office Specialist in construction / engineering company"
+        report["career_bridges"] = bridges
+
+        solutions = report.get("real_solutions") if isinstance(report.get("real_solutions"), list) else []
+        if solutions:
+            first = solutions[0] if isinstance(solutions[0], dict) else {}
+            first_title = str(first.get("title", "")).strip()
+            if self._is_forbidden_construction_main_path(first_title):
+                first["title"] = "Решение №1: Assistant Cost Estimator / Junior Quantity Surveyor"
+            first["first_step"] = CONSTRUCTION_DOMAIN_FIRST_STEP_ACTION
+            first["timeline"] = str(first.get("timeline") or "1-3 недели")
+            solutions[0] = first
+        report["real_solutions"] = solutions
+
+        action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+        today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+        current_today_action = str(today.get("action", "")).strip()
+
+        # Domain lock: always keep the first step market-check oriented for estimator track.
+        if not current_today_action or self._contains_forbidden_construction_first_step_terms(current_today_action):
+            today["action"] = CONSTRUCTION_DOMAIN_FIRST_STEP_ACTION
+        else:
+            today["action"] = CONSTRUCTION_DOMAIN_FIRST_STEP_ACTION
+
+        today["timebox"] = "15 минут"
+        today["result"] = (
+            "Есть список из 10 вакансий и перечень повторяющихся требований рынка "
+            "для маршрута инженера-сметчика."
+        )
+        action_plan["today"] = today
+        report["action_plan"] = action_plan
+        report["first_step_buttons"] = list(CONSTRUCTION_DOMAIN_FIRST_STEP_BUTTONS)
+
     def _preferred_polish_roles(self, story_analysis: dict[str, Any]) -> list[str]:
         chunks = [
             str(story_analysis.get("current_identity", "")),
@@ -2239,6 +2664,10 @@ class CareerOpenAIClient:
             " ".join(str(item) for item in story_analysis.get("skills", []) if isinstance(item, str)),
         ]
         haystack = " ".join(chunks).lower()
+
+        profile_domain = self._detect_profile_domain(story_analysis)
+        if profile_domain == CONSTRUCTION_ESTIMATION_DOMAIN:
+            return CONSTRUCTION_ESTIMATION_ROLES[:4]
 
         project_ops_keywords = ["проект", "ngo", "education", "participant", "участник", "program", "координатор"]
         if sum(1 for keyword in project_ops_keywords if keyword in haystack) >= 2:

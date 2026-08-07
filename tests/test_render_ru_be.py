@@ -1,5 +1,6 @@
 import unittest
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from reportlab.pdfgen import canvas
@@ -7,16 +8,34 @@ from reportlab.pdfgen import canvas
 from handlers.career import (
     SEGMENT_ENTREPRENEUR,
     SEGMENT_WORKER,
+    ROUTE_CHOICE_HELP,
+    ROUTE_CHOICE_RETRAIN,
     ROUTE_CHOICE_STABLE,
+    _detect_crisis_risk,
+    _validate_route_divergence,
+    complete_barriers,
     _apply_route_choice_to_report,
     _build_route_comparison_rows,
+    _construction_final_case_block,
+    _reconcile_country_duration,
+    validate_final_report,
     _decode_resume_bytes,
     _detect_user_segment,
     _question_count_for_mode,
+    _ROUTE_CONTEXT_FIELDS,
+    _route_context_question,
+    _apply_strategy_outputs,
+    _build_alternative_routes,
+    handle_route_context_input,
+    _question_reply_markup,
+    _present_route_selection,
+    _send_final_map_bundle,
+    handle_route_selection_actions,
     process_answers_input,
     process_story_input,
     _set_mvp_questions,
     _start_questions_module,
+    restart_from_any_state,
     barriers_fallback,
     _short_conclusion_7_lines,
     _full_conclusion_one_screen,
@@ -28,6 +47,7 @@ from handlers.career import (
 )
 from handlers import voice as voice_handlers
 from keyboards import (
+    CAREER_STRATEGY_HELP,
     INPUT_TEXT,
     INPUT_VOICE,
     LANG_RU,
@@ -45,6 +65,8 @@ from keyboards import (
     result_actions_keyboard,
     resume_choice_keyboard,
     skiller_check_keyboard,
+    career_strategy_keyboard,
+    step_tracking_keyboard,
 )
 from localization import t
 from openai_client import ai_client
@@ -68,13 +90,60 @@ class FakeState:
     async def get_state(self) -> str | None:
         return self.current_state
 
+    async def clear(self) -> None:
+        self.data = {}
+        self.current_state = None
+
 
 class FakeMessage:
-    def __init__(self) -> None:
+    def __init__(self, text: str = "") -> None:
+        self.text = text
         self.answer = AsyncMock()
+        self.answer_document = AsyncMock()
+        self.from_user = None
+        self.chat = SimpleNamespace(id=123456)
+        self.bot = SimpleNamespace()
 
 
 class CareerGpsRenderTests(unittest.TestCase):
+    def test_detect_crisis_risk_for_explicit_functioning_loss(self) -> None:
+        self.assertTrue(_detect_crisis_risk("Я не могу есть, не могу спать и не могу работать уже несколько дней"))
+        self.assertFalse(_detect_crisis_risk("Я устал и хочу более щадящий темп"))
+
+    def test_validate_route_divergence_threshold(self) -> None:
+        route_a = {
+            "target_roles_6_months": ["Administrative Assistant", "Document Controller"],
+            "training_plan_12_weeks": {"0_4_weeks": ["Собрать вакансии"]},
+            "required_tools_and_skills": ["Excel", "CRM"],
+            "recommended_certificates": ["Excel basic"],
+            "income_at_start": {"assistant": "5000 PLN"},
+            "today_action": {"action": "Открыть 10 вакансий"},
+        }
+        route_b = {
+            "target_roles_6_months": ["Administrative Assistant", "Document Controller"],
+            "training_plan_12_weeks": {"0_4_weeks": ["Собрать вакансии"]},
+            "required_tools_and_skills": ["Excel", "CRM"],
+            "recommended_certificates": ["Excel basic"],
+            "income_at_start": {"assistant": "5000 PLN"},
+            "today_action": {"action": "Собрать CV"},
+        }
+        is_divergent, score, compare = _validate_route_divergence(route_a, route_b)
+        self.assertFalse(is_divergent)
+        self.assertEqual(score, 1)
+        self.assertTrue(compare["today_action"])
+
+        route_c = {
+            "new_career_options": ["HR operations", "Compliance"],
+            "time_to_entry": {"HR operations": "6-12 months"},
+            "gap_analysis": ["Labour law", "B2 language"],
+            "training_cost": {"HR operations": "medium"},
+            "income_growth_potential": {"HR operations": "high"},
+            "today_action": {"action": "Сравнить 20 вакансий по HR"},
+        }
+        is_divergent_hi, score_hi, _ = _validate_route_divergence(route_a, route_c)
+        self.assertTrue(is_divergent_hi)
+        self.assertGreaterEqual(score_hi, 4)
+
     def test_question_count_for_mode_is_fixed_by_default(self) -> None:
         self.assertEqual(_question_count_for_mode("fast"), 5)
         self.assertEqual(_question_count_for_mode("calm_steps"), 8)
@@ -89,6 +158,54 @@ class CareerGpsRenderTests(unittest.TestCase):
 
         self.assertEqual(_question_count_for_mode("deep_route", 10), 12)
         self.assertEqual(_question_count_for_mode("deep_route", 20), 15)
+
+    def test_reconcile_country_duration_prefers_story_value_on_conflict(self) -> None:
+        story = "Живу в Польше полтора года, работал в сметах и хочу вернуться в сферу."
+        data = {
+            "qa_answers": [
+                {
+                    "question": "Сколько времени вы живете в этой стране?",
+                    "answer": "меньше 6 месяцев",
+                }
+            ]
+        }
+        answers = "1. Сколько времени вы живете в этой стране?: меньше 6 месяцев"
+
+        merged, note, story_label = _reconcile_country_duration(story, data, answers)
+
+        self.assertEqual(story_label, "1–2 года")
+        self.assertIn("Вижу расхождение", note)
+        self.assertIn("Срок проживания в стране (основной): 1–2 года", merged)
+
+    def test_validate_final_report_for_construction_passes_with_required_terms(self) -> None:
+        text = (
+            "План: Assistant Cost Estimator и Junior Quantity Surveyor. "
+            "Фокус на проектной документации и construction вакансиях."
+        )
+        validate_final_report(
+            "construction_engineering_cost_estimation",
+            "Assistant Cost Estimator / Junior Quantity Surveyor",
+            "найти 10 construction вакансий",
+            text,
+        )
+
+    def test_validate_final_report_for_construction_fails_on_forbidden_template(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_final_report(
+                "construction_engineering_cost_estimation",
+                "любая офисная работа",
+                "первый шаг",
+                "Это route про sales-метрики и удержание клиентов",
+            )
+
+    def test_construction_final_case_block_contains_expected_roles_and_step(self) -> None:
+        block = _construction_final_case_block()
+        self.assertIn("Assistant Cost Estimator", block)
+        self.assertIn("Junior Quantity Surveyor", block)
+        self.assertIn("Technical Assistant Construction", block)
+        self.assertIn("Construction Documentation Specialist", block)
+        self.assertIn("Construction Project Assistant", block)
+        self.assertIn("за 15 минут найдите 10 вакансий", block)
 
     def test_resume_pdf_is_decoded_for_analysis(self) -> None:
         buffer = BytesIO()
@@ -161,6 +278,440 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("Изменить приоритет", map_validation_dump)
         self.assertIn("не согласен с маршрутом", map_validation_dump)
 
+    def test_career_strategy_keyboard_contains_requested_options(self) -> None:
+        keyboard_dump = career_strategy_keyboard().model_dump_json()
+        self.assertIn("Нужен доход в ближайшие 1–2 месяца", keyboard_dump)
+        self.assertIn("Готов(а) готовиться 3–6 месяцев ради работы ближе к моему опыту", keyboard_dump)
+
+
+class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_route_selection_requires_strategy_choice_before_comparison(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Administrative Assistant", "backup_path": "Document Controller"},
+            "career_recommendations": [
+                {
+                    "title": "Administrative Assistant",
+                    "income_range": "5000-7500 PLN brutto",
+                    "entry_timeline": "быстрый",
+                    "risks": ["базовый польский"],
+                    "pros": ["быстрый вход"],
+                    "why_fit": "Сильное совпадение по административному опыту.",
+                    "first_step": "Сравнить 5 вакансий по требованиям и сроку входа.",
+                },
+                {
+                    "title": "Document Controller",
+                    "income_range": "6000-9000 PLN brutto",
+                    "entry_timeline": "средний",
+                    "risks": ["аккуратный письменный польский"],
+                    "pros": ["системность"],
+                    "why_fit": "Подходит для опыта документооборота.",
+                    "first_step": "Сравнить 5 вакансий по требованиям и сроку входа.",
+                },
+            ],
+            "development_map": {},
+            "weekly_plan": [],
+            "action_plan": {"today": {"action": "Открыть 5 вакансий"}},
+        }
+        state = FakeState(
+            data={
+                "language": "ru",
+                "public_user_id": "pub-1",
+                "session_id": "sess-1",
+                "user_mode": "calm_steps",
+                "report_generation_id": "rid-1",
+                "final_report": report,
+            },
+            current_state=CareerFlow.FINAL_READY.state,
+        )
+        message = FakeMessage()
+
+        with patch("handlers.career.save_profile_version") as save_profile:
+            with patch("handlers.career._track_event", new=AsyncMock()):
+                await _present_route_selection(message, state, "ru", report)
+                self.assertTrue(state.data.get("awaiting_career_strategy_choice"))
+                self.assertEqual(state.current_state, CareerFlow.ROUTE_SELECTION.state)
+                self.assertIn("несколько реалистичных путей", message.answer.await_args_list[0].args[0])
+
+                message.text = "Нужен доход в ближайшие 1–2 месяца"
+                await handle_route_selection_actions(message, state)
+
+        self.assertEqual(state.data.get("career_strategy"), "fast_income")
+        self.assertEqual(state.data.get("career_strategy_label"), "Нужен доход в ближайшие 1–2 месяца")
+        self.assertFalse(state.data.get("awaiting_career_strategy_choice"))
+        self.assertIn("fast_income", state.data.get("final_report", {}))
+        self.assertTrue(save_profile.called)
+        self.assertEqual(save_profile.call_args.args[1], "career_strategy_selected")
+        self.assertEqual(save_profile.call_args.args[2]["career_strategy"], "fast_income")
+
+    async def test_route_selection_saves_new_report_version(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Assistant Cost Estimator / Junior Quantity Surveyor",
+                "backup_path": "Site Office Assistant / Construction Documentation Assistant",
+                "decision_summary": "",
+            },
+            "action_plan": {"today": {"action": "", "timebox": "", "result": ""}},
+        }
+        state = FakeState(
+            data={
+                "language": "ru",
+                "public_user_id": "pub-2",
+                "session_id": "sess-2",
+                "user_mode": "calm_steps",
+                "report_generation_id": "rid-old",
+                "final_report": report,
+            },
+            current_state=CareerFlow.FINAL_READY.state,
+        )
+        message = FakeMessage(text=ROUTE_CHOICE_STABLE)
+
+        with patch("handlers.career.save_report_version") as save_report:
+            with patch("handlers.career.save_profile_version") as save_profile:
+                with patch("handlers.career._send_final_map_bundle", new=AsyncMock()):
+                    with patch("handlers.career._track_event", new=AsyncMock()):
+                        await handle_route_selection_actions(message, state)
+
+        self.assertTrue(save_report.called)
+        self.assertTrue(save_profile.called)
+        self.assertEqual(save_profile.call_args.args[1], "route_selected_report_regenerated")
+        self.assertNotEqual(state.data.get("report_generation_id"), "rid-old")
+        self.assertTrue(str(state.data.get("report_generation_id") or "").strip())
+
+    async def test_final_bundle_rebuilds_construction_report_when_validator_fails(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "route_type": "route_upskill",
+            "career_decision": {
+                "recommended_main_path": "любая офисная работа",
+                "backup_path": "-",
+                "decision_summary": "",
+            },
+            "action_plan": {
+                "today": {
+                    "action": "Плитка и гипсокартон как первый шаг",
+                    "timebox": "10 минут",
+                    "result": "-",
+                }
+            },
+        }
+        state = FakeState(
+            data={
+                "language": "ru",
+                "report_generation_id": "rid-final-1",
+                "final_report": report,
+            },
+            current_state=CareerFlow.FINAL_READY.state,
+        )
+        message = FakeMessage()
+
+        with patch("handlers.career.generate_html_report_file", return_value="reports/nextyou_report_example.html"):
+            with patch("handlers.career.generate_docx_report_file", return_value=("", "")):
+                with patch("handlers.career.update_report_files"):
+                    with patch("handlers.career._run_pdf_generation_background", new=AsyncMock()):
+                        with patch("handlers.career._track_event", new=AsyncMock()) as track_event:
+                            await _send_final_map_bundle(message, state, "ru", report)
+
+        selected = str((report.get("career_decision") or {}).get("recommended_main_path") or "")
+        self.assertIn("Assistant Cost Estimator", selected)
+        self.assertIn("Construction", _written_conclusion_from_report(report))
+        self.assertTrue(
+            any(
+                len(call.args) >= 3 and str(call.args[2]) == "final_report_validated_after_rebuild"
+                for call in track_event.await_args_list
+            )
+        )
+
+    async def test_crisis_text_switches_to_crisis_support(self) -> None:
+        state = FakeState(data={"language": "ru"}, current_state=CareerFlow.WAITING_STORY.state)
+        message = FakeMessage(text="Я не могу есть, спать и не могу работать, совсем не справляюсь")
+
+        with patch("handlers.career._track_event", new=AsyncMock()):
+            await process_story_input(message, state, message.text)
+
+        self.assertEqual(state.current_state, CareerFlow.CRISIS_SUPPORT.state)
+        self.assertTrue(state.data.get("career_planning_paused"))
+        self.assertTrue(message.answer.called)
+
+    async def test_need_decision_flow_asks_three_questions_before_strategy(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Administrative Assistant", "backup_path": "Document Controller"},
+            "career_recommendations": [{"title": "Administrative Assistant"}],
+            "development_map": {},
+            "weekly_plan": [],
+            "action_plan": {"today": {"action": "Открыть 5 вакансий"}},
+        }
+        state = FakeState(
+            data={
+                "language": "ru",
+                "public_user_id": "pub-1",
+                "session_id": "sess-1",
+                "user_mode": "calm_steps",
+                "report_generation_id": "rid-1",
+                "final_report": report,
+            },
+            current_state=CareerFlow.FINAL_READY.state,
+        )
+        message = FakeMessage()
+
+        with patch("handlers.career.save_profile_version") as save_profile:
+            with patch("handlers.career._track_event", new=AsyncMock()):
+                await _present_route_selection(message, state, "ru", report)
+                message.text = CAREER_STRATEGY_HELP
+                await handle_route_selection_actions(message, state)
+
+                self.assertTrue(state.data.get("awaiting_need_decision_questions"))
+                self.assertIn("Мини-сравнение путей", message.answer.await_args_list[-2].args[0])
+                self.assertIn("1/3.", message.answer.await_args_list[-1].args[0])
+
+                message.text = "Проживу максимум 1-2 месяца без стабильного дохода"
+                await handle_route_selection_actions(message, state)
+                message.text = "Важно сохранить профессиональный статус"
+                await handle_route_selection_actions(message, state)
+                message.text = "Сейчас не готов(а) учиться регулярно"
+                await handle_route_selection_actions(message, state)
+
+        self.assertFalse(state.data.get("awaiting_need_decision_questions"))
+        self.assertIn(state.data.get("career_strategy"), {"fast_income", "upskill_for_profile", "long_transition"})
+        self.assertTrue(save_profile.called)
+
+    async def test_route_context_is_required_before_report_generation(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "selected_psych_markers": ["Боюсь отказов"],
+                "selected_barriers": ["Боюсь отказов"],
+                "selected_fears": ["Боюсь отказов"],
+            },
+            current_state=CareerFlow.waiting_for_barriers.state,
+        )
+        message = FakeMessage()
+
+        with patch("handlers.career._start_route_context_intake", new=AsyncMock()) as start_route_context:
+            with patch("handlers.career._build_and_send_report", new=AsyncMock()) as build_report:
+                await complete_barriers(message, state)
+
+        self.assertEqual(state.current_state, CareerFlow.waiting_for_barriers.state)
+        start_route_context.assert_awaited_once()
+        build_report.assert_not_awaited()
+
+    async def test_route_context_last_answer_continues_to_report(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "route_context_index": len(_ROUTE_CONTEXT_FIELDS) - 1,
+                "route_context": {
+                    "country": "Польша",
+                    "city": "Варшава",
+                    "current_language_level": "A2",
+                    "target_language": "польский B1",
+                    "income_urgency": "срочно",
+                    "minimum_monthly_income": "3500",
+                    "desired_monthly_income": "5000",
+                    "training_budget": "200",
+                    "available_time_for_study": "5 часов",
+                    "career_goal_type": "близкая сфера",
+                    "work_preferences": "офис",
+                    "health_or_schedule_limits": "без ночных смен",
+                    "documents_and_work_rights": "есть право на работу",
+                    "diploma_status": "диплом есть",
+                },
+            },
+            current_state=CareerFlow.ROUTE_CONTEXT.state,
+        )
+        message = FakeMessage(text="Есть портфолио и рекомендации")
+
+        with patch("handlers.career.save_profile_version") as save_profile:
+            with patch("handlers.career._build_and_send_report", new=AsyncMock()) as build_report:
+                await handle_route_context_input(message, state)
+
+        self.assertEqual(state.data.get("route_context", {}).get("portfolio_or_references"), "Есть портфолио и рекомендации")
+        self.assertFalse(state.data.get("awaiting_route_context"))
+        build_report.assert_awaited_once()
+        self.assertTrue(save_profile.called)
+
+    def test_fast_income_strategy_bundle_has_application_plan(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Administrative Assistant", "backup_path": "Document Controller"},
+            "market_analysis": [
+                {"profession": "Administrative Assistant", "requirements": ["Excel", "документооборот", "базовый польский"]},
+                {"profession": "Back-office Specialist", "requirements": ["точность", "процессы", "Sheets"]},
+            ],
+            "career_recommendations": [{"title": "Operations Coordinator"}],
+            "action_plan": {"today": {"action": ""}},
+        }
+        route_context = {
+            "country": "Польша",
+            "city": "Варшава",
+            "current_language_level": "A2",
+            "target_language": "польский B1",
+            "documents_and_work_rights": "есть право на работу",
+            "work_preferences": "офис, без смен",
+        }
+
+        _apply_strategy_outputs(report, route_context, "fast_income")
+
+        bundle = report.get("fast_income", {}) if isinstance(report.get("fast_income"), dict) else {}
+        self.assertEqual(report.get("career_strategy"), "fast_income")
+        self.assertIn("Закрепиться на одной из быстрых входных ролей", str(bundle.get("goal_30_days", "")))
+        self.assertGreaterEqual(len(bundle.get("realistic_entry_roles", [])), 2)
+        self.assertGreaterEqual(len(bundle.get("application_plan_7_days", [])), 7)
+        self.assertIn("15 минут", str(bundle.get("today_action", {}).get("timebox", "")))
+
+    def test_fast_income_uses_professional_bridge_for_5plus_years_return_case(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Administrative Assistant / Back-office Specialist",
+                "backup_path": "Document Controller",
+                "why_this_path": "Пользователь хочет вернуться в профессию.",
+            },
+            "market_analysis": [
+                {"profession": "Administrative Assistant", "requirements": ["Excel", "документооборот"]},
+                {"profession": "Assistant Cost Estimator", "requirements": ["сметы", "проектная документация"]},
+            ],
+            "career_recommendations": [{"title": "Junior Quantity Surveyor"}],
+            "facts_only": {
+                "explicit_facts": [
+                    "17 лет в строительстве",
+                    "Хочет вернуться в профессию инженера-сметчика",
+                ]
+            },
+        }
+        route_context = {
+            "country": "Польша",
+            "city": "Варшава",
+            "career_goal_type": "вернуться в профессию",
+            "current_language_level": "A2",
+            "target_language": "польский B1",
+            "documents_and_work_rights": "есть право на работу",
+            "work_preferences": "офис, строительная компания",
+        }
+
+        _apply_strategy_outputs(report, route_context, "fast_income")
+
+        bundle = report.get("fast_income", {}) if isinstance(report.get("fast_income"), dict) else {}
+        self.assertEqual(bundle.get("route_type"), "professional_bridge_with_income")
+        self.assertEqual(bundle.get("short_term_goal"), "сохранить доход и начать возвращение в строительную сферу")
+        self.assertEqual(
+            bundle.get("main_goal_3_6_months"),
+            "выйти на assistant / junior роль рядом со сметами, строительной документацией или project coordination",
+        )
+        roles_blob = " ".join(str(item) for item in bundle.get("realistic_entry_roles", []))
+        self.assertIn("Assistant Cost Estimator", roles_blob)
+        self.assertNotIn("Administrative Assistant", roles_blob)
+
+    def test_fast_income_uses_generic_professional_bridge_for_non_construction(self) -> None:
+        report = {
+            "career_decision": {
+                "recommended_main_path": "Administrative Assistant / Back-office Specialist",
+                "backup_path": "Operations Coordinator",
+                "why_this_path": "Хочет вернуться по специальности.",
+            },
+            "market_analysis": [
+                {"profession": "Administrative Assistant", "requirements": ["Excel"]},
+                {"profession": "Procurement Assistant", "requirements": ["тендеры", "документы"]},
+            ],
+            "career_recommendations": [{"title": "Junior Procurement Specialist"}],
+            "facts_only": {
+                "explicit_facts": [
+                    "8 лет в закупках",
+                    "Хочет вернуться в профессию",
+                ]
+            },
+        }
+        route_context = {
+            "country": "Польша",
+            "city": "Краков",
+            "career_goal_type": "вернуться в профессию",
+            "work_preferences": "офис, закупки",
+        }
+
+        _apply_strategy_outputs(report, route_context, "fast_income")
+
+        bundle = report.get("fast_income", {}) if isinstance(report.get("fast_income"), dict) else {}
+        self.assertEqual(bundle.get("route_type"), "professional_bridge_with_income")
+        self.assertEqual(bundle.get("short_term_goal"), "сохранить доход и начать возвращение в профессиональную сферу")
+        self.assertEqual(
+            bundle.get("main_goal_3_6_months"),
+            "выйти на assistant / junior роль рядом с профильными задачами, документацией или project coordination",
+        )
+        roles_blob = " ".join(str(item) for item in bundle.get("realistic_entry_roles", []))
+        self.assertNotIn("Administrative Assistant", roles_blob)
+        self.assertIn("Procurement Assistant", roles_blob)
+
+    def test_upskill_strategy_bundle_has_gap_analysis(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Document Controller", "backup_path": "Operations Coordinator"},
+            "market_analysis": [
+                {"profession": "Operations Coordinator", "requirements": ["Excel", "workflows", "language"]},
+                {"profession": "Document Control Specialist", "requirements": ["GDPR", "attention to detail", "documents"]},
+            ],
+            "what_not_reset": [
+                "Опыт работы с документами",
+                "Контроль сроков",
+                "Координация задач",
+            ],
+        }
+        route_context = {
+            "current_language_level": "A2",
+            "target_language": "польский B1",
+            "diploma_status": "диплом требует проверки",
+        }
+
+        _apply_strategy_outputs(report, route_context, "upskill_for_profile")
+
+        bundle = report.get("upskill_for_profile", {}) if isinstance(report.get("upskill_for_profile"), dict) else {}
+        self.assertEqual(report.get("career_strategy"), "upskill_for_profile")
+        self.assertGreaterEqual(len(bundle.get("target_roles_6_months", [])), 2)
+        self.assertEqual(len(bundle.get("gap_analysis", [])), 4)
+        self.assertGreaterEqual(len(bundle.get("training_plan_12_weeks", {}).keys()), 4)
+        self.assertIn("данных недостаточно", str(bundle.get("recommended_certificates", [""])[0]))
+
+    def test_long_transition_bundle_has_required_fields_and_table(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Project Coordinator", "backup_path": "HR Operations"},
+            "market_analysis": [
+                {"profession": "Project Coordinator", "salary_range": "7000-9500 PLN", "competition": "средняя"},
+                {"profession": "Compliance Specialist", "salary_range": "8500-12000 PLN", "competition": "высокая"},
+                {"profession": "HR Operations", "salary_range": "6500-9000 PLN", "competition": "средняя"},
+            ],
+        }
+        route_context = {
+            "country": "Польша",
+            "city": "Варшава",
+            "current_language_level": "A2",
+            "target_language": "B1",
+            "documents_and_work_rights": "есть право на работу",
+            "diploma_status": "есть диплом",
+        }
+
+        _apply_strategy_outputs(report, route_context, "long_transition")
+
+        bundle = report.get("long_transition", {}) if isinstance(report.get("long_transition"), dict) else {}
+        self.assertEqual(report.get("career_strategy"), "long_transition")
+        self.assertGreaterEqual(len(bundle.get("new_career_options", [])), 3)
+        self.assertGreaterEqual(len(bundle.get("comparison_table", [])), 3)
+        self.assertIn("15–20", str(bundle.get("decision_checkpoint", "")))
+        self.assertIn("15 минут", str(bundle.get("today_action", {}).get("timebox", "")))
+
+    def test_need_decision_bundle_has_mini_table_and_questions(self) -> None:
+        report = {
+            "career_decision": {"recommended_main_path": "Administrative Assistant"},
+        }
+        route_context = {
+            "country": "Польша",
+            "city": "Варшава",
+        }
+
+        _apply_strategy_outputs(report, route_context, "need_decision")
+
+        bundle = report.get("need_decision", {}) if isinstance(report.get("need_decision"), dict) else {}
+        self.assertEqual(report.get("career_strategy"), "need_decision")
+        self.assertEqual(len(bundle.get("comparison_table", [])), 3)
+        self.assertEqual(len(bundle.get("decision_questions", [])), 3)
+        self.assertIn("Ответьте на 3 коротких вопроса", str(bundle.get("today_action", {}).get("action", "")))
+
     def test_story_snapshot_and_questions_render(self) -> None:
         analysis = {
             "current_identity": "Мигрант с опытом управления и коммуникации.",
@@ -208,8 +759,8 @@ class CareerGpsRenderTests(unittest.TestCase):
             ]
         }
         text = _question_prompt(analysis, 0, "ru")
-        self.assertIn("=== Вопрос 1/1 ===", text)
-        self.assertIn("№5. Сколько ресурса и времени у вас сейчас на поиск и действия?", text)
+        self.assertIn("Сколько ресурса и времени у вас сейчас на поиск и действия?", text)
+        self.assertNotIn("=== Вопрос", text)
         self.assertNotIn("Варианты:", text)
         self.assertNotIn("Можно ответить своими словами", text)
 
@@ -284,6 +835,126 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertEqual(normalized["market_analysis"][0]["profession"], "Administrative Assistant")
         self.assertEqual(normalized["career_translation"][0]["market_term"], "Administrative Assistant")
         self.assertEqual(normalized["career_decision"]["recommended_main_path"], "Administrative Assistant / Back-office Specialist")
+
+    def test_construction_estimator_domain_forces_main_route(self) -> None:
+        story_analysis = {
+            "current_identity": "Инженер-сметчик в строительной сфере.",
+            "experience_snapshot": [
+                "Сметы",
+                "Проектная документация",
+                "Объёмы работ",
+                "Взаимодействие с подрядчиками и проектировщиками",
+            ],
+            "skills": ["строительные нормы", "материалы", "construction"],
+        }
+        report = {
+            "digital_human": {"current_state": "", "previous_identity": ""},
+            "market_analysis": [{"profession": "Administrative Assistant"}, {"profession": "Generic Back-office Specialist"}],
+            "career_recommendations": [{"title": "Administrative Assistant"}, {"title": "Back-office Specialist"}],
+            "career_decision": {
+                "recommended_main_path": "Administrative Assistant / Back-office Specialist",
+                "backup_path": "Courier",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "career_bridges": [{"role": "Administrative Assistant", "why_bridge": "", "first_market_test": ""}],
+            "real_solutions": [{"title": "Administrative Assistant", "first_step": ""}],
+            "action_plan": {"today": {"action": "Открыть вакансии", "timebox": "15 минут", "result": "Список"}},
+            "what_not_reset": [],
+            "experience_layers": [],
+            "social_integration": {},
+            "facts_only": {
+                "explicit_facts": ["Профиль инженера-сметчика"],
+                "inferences": ["Похоже, у вас есть профильный опыт в строительстве."],
+                "unknowns": [],
+                "contradictions": [],
+            },
+        }
+
+        normalized = ai_client._align_report_with_story(report, story_analysis)
+
+        self.assertEqual(normalized.get("profile_domain"), "construction_engineering_cost_estimation")
+        self.assertIn("assistant cost estimator", normalized["career_decision"]["recommended_main_path"].lower())
+        self.assertNotIn("administrative assistant / back-office specialist", normalized["career_decision"]["recommended_main_path"].lower())
+        self.assertEqual(normalized["market_analysis"][0]["profession"], "Assistant Cost Estimator")
+        self.assertEqual(normalized["career_recommendations"][0]["title"], "Assistant Cost Estimator")
+        self.assertEqual(normalized["action_plan"]["today"]["timebox"], "15 минут")
+        self.assertIn("Assistant Cost Estimator", normalized["action_plan"]["today"]["action"])
+        self.assertIn("Junior Quantity Surveyor", normalized["action_plan"]["today"]["action"])
+        self.assertNotIn("плитк", normalized["action_plan"]["today"]["action"].lower())
+        self.assertEqual(
+            normalized.get("first_step_buttons"),
+            [
+                "Сделал",
+                "Слишком сложно",
+                "Сделать проще",
+                "Помоги составить таблицу",
+                "Хочу примеры запросов",
+            ],
+        )
+
+    def test_construction_overwhelm_step_uses_estimator_examples(self) -> None:
+        story_analysis = {
+            "current_identity": "Инженер-сметчик в строительстве.",
+            "experience_snapshot": ["Сметы", "Проектная документация", "Объёмы работ"],
+            "skills": ["строительные нормы"],
+        }
+        report = {
+            "digital_human": {
+                "current_state": "",
+                "previous_identity": "",
+                "strategy_mode": "Growth",
+                "career_readiness": {
+                    "urgency": "высокая",
+                    "learning_capacity": "средняя",
+                    "risk_tolerance": "умеренная",
+                    "language_readiness": "средняя",
+                    "mobility": "средняя",
+                },
+            },
+            "market_analysis": [],
+            "career_recommendations": [],
+            "career_translation": [],
+            "career_decision": {
+                "recommended_main_path": "Administrative Assistant / Back-office Specialist",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "backup_path": "",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "action_plan": {"today": {"action": "Открыть вакансии", "timebox": "15 минут", "result": "Список"}},
+            "what_not_reset": [],
+            "experience_layers": [],
+            "social_integration": {},
+            "facts_only": {
+                "explicit_facts": ["Инженер-сметчик"],
+                "inferences": ["Похоже, у вас есть профильный строительный опыт."],
+                "unknowns": [],
+                "contradictions": [],
+            },
+        }
+
+        decision_layers = {
+            "career_profile": ["Профиль инженера-сметчика"],
+            "constraints": ["Данных о изменении ограничений пока недостаточно"],
+            "psychological_state": ["signal: overwhelm", "не знаю, с чего начать"],
+            "action_capacity": ["Темп: slow"],
+        }
+
+        normalized = ai_client._align_report_with_story(
+            report,
+            story_analysis,
+            answers_text="Не знаю, с чего начать",
+            decision_layers=decision_layers,
+        )
+
+        today_action = normalized["action_plan"]["today"]["action"].lower()
+        self.assertIn("assistant cost estimator", today_action)
+        self.assertIn("junior quantity surveyor", today_action)
+        self.assertNotIn("плитк", today_action)
 
     def test_facts_only_removes_unconfirmed_admin_claims(self) -> None:
         story_analysis = {
@@ -667,6 +1338,166 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertEqual(report["career_decision"]["recommended_main_path"], selected)
         self.assertIn("совместно", report["career_decision"]["decision_summary"].lower())
 
+    def test_construction_route_choice_stable_applies_domain_pack(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Assistant Cost Estimator / Junior Quantity Surveyor",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "backup_path": "",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "action_plan": {"today": {"action": "", "timebox": "", "result": ""}},
+        }
+
+        rows = _build_route_comparison_rows(report)
+        selected = _apply_route_choice_to_report(report, ROUTE_CHOICE_STABLE, rows)
+
+        self.assertEqual(report.get("route_type"), "route_stable")
+        self.assertIn("Site Office Assistant", selected)
+        self.assertIn("строительных компаниях", str(report["action_plan"]["today"]["action"]))
+        self.assertEqual(str(report["route_stable"]["timeline"]), "1-3 месяца")
+
+    def test_construction_route_choice_retrain_applies_upskill_pack(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Site Office Assistant / Construction Documentation Assistant",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "backup_path": "",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "action_plan": {"today": {"action": "", "timebox": "", "result": ""}},
+        }
+
+        rows = _build_route_comparison_rows(report)
+        selected = _apply_route_choice_to_report(report, ROUTE_CHOICE_RETRAIN, rows)
+
+        self.assertEqual(report.get("route_type"), "route_upskill")
+        self.assertIn("Assistant Cost Estimator", selected)
+        self.assertEqual(str(report["route_upskill"]["timeline"]), "3-6 месяцев")
+        self.assertEqual(
+            str(report["route_upskill"]["first_step"]),
+            "собрать 10 вакансий и выписать требования",
+        )
+
+    def test_construction_route_help_returns_comparison_without_auto_selection(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Assistant Cost Estimator / Junior Quantity Surveyor",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "backup_path": "",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+        }
+        initial_path = report["career_decision"]["recommended_main_path"]
+
+        rows = _build_route_comparison_rows(report)
+        selected = _apply_route_choice_to_report(report, ROUTE_CHOICE_HELP, rows)
+
+        self.assertEqual(selected, "")
+        self.assertEqual(report.get("route_type"), "route_comparison")
+        self.assertEqual(report["career_decision"]["recommended_main_path"], initial_path)
+        comparison = report.get("route_comparison", [])
+        self.assertEqual(len(comparison), 3)
+        self.assertEqual(str(comparison[0].get("name")), "Быстрый вход в строительную компанию")
+        self.assertEqual(str(comparison[1].get("name")), "Возврат к сметам через обучение")
+
+    def test_alternative_routes_rotation_for_construction_has_four_distinct_items(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "career_decision": {
+                "recommended_main_path": "Assistant Cost Estimator / Junior Quantity Surveyor",
+                "backup_path": "Site Office Assistant / Construction Documentation Assistant",
+            },
+        }
+        rows = _build_route_comparison_rows(report)
+        alternatives = _build_alternative_routes(report, rows)
+
+        self.assertEqual(len(alternatives), 4)
+        names = [str(item.get("name") or "") for item in alternatives if isinstance(item, dict)]
+        self.assertEqual(len(set(names)), 4)
+        self.assertTrue(all(str(item.get("first_step") or "").strip() for item in alternatives if isinstance(item, dict)))
+
+    def test_language_documents_question_uses_only_language_document_buttons(self) -> None:
+        analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 3,
+                    "question": "Что у вас сейчас с языком, документами и правом работать?",
+                    "options": [],
+                    "semantic_intent": "language_documents_work_right",
+                }
+            ]
+        }
+
+        keyboard = _question_reply_markup(analysis, 0)
+        self.assertIsNotNone(keyboard)
+        dump = str(getattr(keyboard, "keyboard", ""))
+        self.assertIn("Польский A1-A2, право работать есть", dump)
+        self.assertIn("Польский B1+, право работать есть", dump)
+        self.assertIn("Отвечу текстом", dump)
+        self.assertNotIn("Больше с людьми", dump)
+        self.assertNotIn("Лучше без активных продаж", dump)
+        self.assertNotIn("офис", dump.lower())
+
+    def test_language_documents_question_text_match_still_uses_language_buttons(self) -> None:
+        analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 3,
+                    "question": "Что у вас сейчас с языком, документами и правом работать?",
+                    "options": ["случайная кнопка"],
+                }
+            ]
+        }
+
+        keyboard = _question_reply_markup(analysis, 0)
+        self.assertIsNotNone(keyboard)
+        dump = str(getattr(keyboard, "keyboard", ""))
+        self.assertIn("Польский A1-A2, право работать есть", dump)
+        self.assertIn("Нужно уточнить право на работу", dump)
+        self.assertNotIn("Больше с людьми", dump)
+        self.assertNotIn("Лучше без активных продаж", dump)
+
+    def test_written_conclusion_contains_construction_route_blocks(self) -> None:
+        report = {
+            "profile_domain": "construction_engineering_cost_estimation",
+            "digital_human": {
+                "current_state": "Инженер-сметчик",
+                "main_asset": "Опыт в сметах и строительной документации",
+                "main_barrier": "Язык и локальные нормы",
+                "career_readiness": {"urgency": "высокая"},
+                "barriers": {"internal": ["Тревога"], "external": ["Язык"]},
+            },
+            "career_decision": {
+                "recommended_main_path": "Assistant Cost Estimator / Junior Quantity Surveyor",
+                "why_this_path": "Ближе к профессии",
+                "why_not_other_paths": [],
+                "backup_path": "Site Office Assistant / Construction Documentation Assistant",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "action_plan": {"today": {"action": "собрать 10 вакансий и выписать требования", "timebox": "15 минут", "result": "Список требований"}},
+            "resource_level": "medium",
+            "integration_level": "medium",
+        }
+
+        text = _written_conclusion_from_report(report)
+
+        self.assertIn("route_stable", text)
+        self.assertIn("route_upskill", text)
+        self.assertIn("route_comparison", text)
+        self.assertIn("Site Office Assistant", text)
+        self.assertIn("Junior Quantity Surveyor", text)
+
     def test_overwhelm_changes_step_not_route(self) -> None:
         story_analysis = {
             "current_identity": "Административный специалист с опытом документооборота и координации.",
@@ -830,8 +1661,71 @@ class CareerGpsRenderTests(unittest.TestCase):
 
         today = normalized["action_plan"]["today"]
         self.assertEqual(today["timebox"], "10 минут")
-        self.assertIn("Привет. Я работаю по отделке", today["action"])
+        self.assertIn("Ищу работу по направлению", today["action"])
+        self.assertIn("Частные заказы", today["action"])
         self.assertIn("Скопировать текст", today["action"])
+
+    def test_fear_of_rejection_does_not_inject_construction_for_office_route(self) -> None:
+        story_analysis = {
+            "current_identity": "Административный профиль в госсекторе.",
+            "experience_snapshot": ["Документооборот", "Координация процессов"],
+            "skills": ["office"],
+        }
+        report = {
+            "digital_human": {
+                "current_state": "Административный специалист",
+                "main_barrier": "Страх отказа",
+                "main_fear": "Получить отказ и остановиться",
+                "strategy_mode": "Growth",
+                "career_readiness": {
+                    "urgency": "высокая",
+                    "learning_capacity": "средняя",
+                    "risk_tolerance": "умеренная",
+                    "language_readiness": "средняя",
+                    "mobility": "средняя",
+                },
+            },
+            "market_analysis": [],
+            "career_recommendations": [],
+            "career_translation": [],
+            "career_decision": {
+                "recommended_main_path": "Administrative Assistant / Back-office Specialist",
+                "why_this_path": "",
+                "why_not_other_paths": [],
+                "backup_path": "",
+                "avoid_for_now": "",
+                "decision_summary": "",
+            },
+            "action_plan": {
+                "today": {
+                    "action": "Открыть 5 вакансий",
+                    "timebox": "15 минут",
+                    "result": "Список требований",
+                }
+            },
+            "what_not_reset": ["Документооборот", "Координация"],
+            "experience_layers": [],
+            "social_integration": {},
+            "facts_only": {
+                "explicit_facts": ["Опыт в департаменте"],
+                "inferences": ["Похоже, у вас сильный административный профиль."],
+                "unknowns": [],
+                "contradictions": [],
+            },
+        }
+
+        normalized = ai_client._align_report_with_story(
+            report,
+            story_analysis,
+            answers_text="Боюсь отказа на отклики",
+            decision_layers={},
+        )
+
+        today = normalized["action_plan"]["today"]
+        self.assertEqual(today["timebox"], "10 минут")
+        self.assertIn("Administrative Assistant / Back-office Specialist", today["action"])
+        self.assertNotIn("плитка", today["action"].lower())
+        self.assertNotIn("гипсокартон", today["action"].lower())
 
 
 class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -860,7 +1754,7 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
                 await process_story_input(message, state, "Работала с документами и координацией, нужен стабильный доход.")
 
         self.assertEqual(state.current_state, CareerFlow.confirming_story.state)
-        self.assertEqual(state.data.get("promised_question_count"), 8)
+        self.assertEqual(state.data.get("promised_question_count"), 6)
         self.assertGreaterEqual(message.answer.await_count, 3)
 
     async def test_start_questions_module_moves_to_interview(self) -> None:
@@ -906,6 +1800,68 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.data.get("transcribed_text"), "")
         self.assertEqual(state.data.get("voice_target"), "story")
         message.answer.assert_not_awaited()
+
+    async def test_soft_voice_confirmation_uses_existing_transcript(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "transcribed_text": "У меня опыт в администрировании и документах.",
+                "voice_target": "story",
+            },
+            current_state=CareerFlow.confirming_transcription.state,
+        )
+        message = FakeMessage(text="она уже есть, используй это")
+
+        with patch.object(voice_handlers, "process_story_input", new=AsyncMock()) as process_story:
+            await voice_handlers.confirm_transcription_fallback(message, state)
+
+        process_story.assert_awaited_once_with(message, state, "У меня опыт в администрировании и документах.")
+        self.assertEqual(state.data.get("transcribed_text"), "")
+        self.assertEqual(state.data.get("voice_target"), "story")
+        message.answer.assert_not_awaited()
+
+    async def test_voice_confirmation_handles_soft_confirm_when_user_responds_by_voice(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "transcribed_text": "У меня опыт в администрировании и документах.",
+                "voice_target": "story",
+            },
+            current_state=CareerFlow.confirming_transcription.state,
+        )
+        message = FakeMessage()
+        message.voice = SimpleNamespace(file_id="voice-1")
+        message.bot = SimpleNamespace(get_file=AsyncMock(return_value=SimpleNamespace(file_path="voice-1.ogg")), download=AsyncMock())
+
+        with patch.object(ai_client, "transcribe_voice", new=AsyncMock(return_value="она уже есть, используй это")):
+            with patch.object(voice_handlers, "confirm_transcription_yes", new=AsyncMock()) as confirm_yes:
+                await voice_handlers.confirm_transcription_voice(message, state)
+
+        confirm_yes.assert_awaited_once_with(message, state)
+        message.answer.assert_not_awaited()
+
+    async def test_restart_intent_resets_to_initial_menu_from_step_tracking(self) -> None:
+        state = FakeState(
+            data={
+                "language": "ru",
+                "public_user_id": "pub-1",
+                "execution_steps": [{"day": 1, "task": "Тест"}],
+                "current_execution_day": 1,
+            },
+            current_state=CareerFlow.STEP_TRACKING.state,
+        )
+        message = FakeMessage(text="Хочу пройти сначала")
+
+        await restart_from_any_state(message, state)
+
+        self.assertEqual(state.current_state, CareerFlow.SELECTING_PACE.state)
+        self.assertGreaterEqual(message.answer.await_count, 3)
+        self.assertIn("нужно", str(message.answer.await_args_list[-1].args[0]))
+
+    def test_step_tracking_keyboard_exposes_restart(self) -> None:
+        dumped = step_tracking_keyboard().model_dump_json()
+        self.assertIn("Пройти заново", dumped)
+        self.assertIn("Следующий день", dumped)
 
     async def test_previous_question_button_is_not_recorded_as_current_answer(self) -> None:
         state = FakeState(

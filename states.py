@@ -1,4 +1,22 @@
 from aiogram.fsm.state import State, StatesGroup
+from pydantic import BaseModel, Field
+
+
+class InterviewContext(BaseModel):
+    evidence_profile: dict = Field(default_factory=dict)
+    hypotheses: list[dict] = Field(default_factory=list)
+    current_action: str | None = None
+    current_question_id: str | None = None
+    current_question_goal: str | None = None
+
+    asked_question_signatures: list[str] = Field(default_factory=list)
+    unresolved_critical_gaps: list[str] = Field(default_factory=list)
+    unresolved_noncritical_gaps: list[str] = Field(default_factory=list)
+
+    report_readiness: str = "not_ready"
+    questions_asked_count: int = 0
+    consecutive_long_answers: int = 0
+    user_fatigue_score: float = 0.0
 
 
 class CareerFlow(StatesGroup):
@@ -13,6 +31,7 @@ class CareerFlow(StatesGroup):
     INTERVIEW = State()
     SELECTING_BARRIERS = State()
     GENERATING_REPORT = State()
+    ROUTE_CONTEXT = State()
     ROUTE_SELECTION = State()
     FINAL_READY = State()
     SHOWING_DETAILS = State()
@@ -30,6 +49,7 @@ class CareerFlow(StatesGroup):
     REPORT_CLARIFICATION = State()
     PDF_GENERATING = State()
     PDF_READY = State()
+    CRISIS_SUPPORT = State()
 
     confirming_transcription = State()
 
@@ -42,6 +62,7 @@ class CareerFlow(StatesGroup):
     waiting_for_resume_decision = ASK_CV
     waiting_for_resume = WAITING_CV
     waiting_for_answers = INTERVIEW
+    waiting_for_route_context = ROUTE_CONTEXT
     waiting_for_barriers = SELECTING_BARRIERS
     waiting_for_post_result_action = FINAL_READY
     waiting_for_skiller_reason = BARRIER_ANALYSIS_DETAIL
