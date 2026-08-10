@@ -34,6 +34,9 @@ from handlers.career import (
     process_answers_input,
     process_story_input,
     _set_mvp_questions,
+    _questions_calm,
+    _questions_support,
+    _segment_common_questions,
     _start_questions_module,
     restart_from_any_state,
     barriers_fallback,
@@ -1258,6 +1261,83 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("semantic_intent", first)
         self.assertIn("source", first)
         self.assertIn("validity_status", first)
+
+    def test_money_and_time_templates_use_interval_buttons(self) -> None:
+        calm = _questions_calm()
+        support = _questions_support()
+        common = _segment_common_questions()
+
+        calm_income = next((row for row in calm if "минимальный доход" in str(row.get("question", "")).lower()), {})
+        support_income = next((row for row in support if "минимальный доход" in str(row.get("question", "")).lower()), {})
+        support_hours = next((row for row in support if "сколько часов" in str(row.get("question", "")).lower()), {})
+        common_hours = next((row for row in common if "сколько часов" in str(row.get("question", "")).lower()), {})
+
+        self.assertIn("3000-4500 PLN/мес", list(calm_income.get("options", [])))
+        self.assertIn("3000-4500 PLN/мес", list(support_income.get("options", [])))
+        self.assertIn("3-5 часов в неделю", list(support_hours.get("options", [])))
+        self.assertIn("3-5 часов в неделю", list(common_hours.get("options", [])))
+
+    def test_set_mvp_questions_injects_interval_options_for_free_text_income_time(self) -> None:
+        analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 101,
+                    "question": "Какой минимальный доход в месяц нужен вам сейчас?",
+                    "options": [],
+                },
+                {
+                    "id": 102,
+                    "question": "Сколько часов в неделю готовы уделять обучению?",
+                    "options": [],
+                },
+            ]
+        }
+
+        result = _set_mvp_questions(
+            analysis,
+            limit=15,
+            mode="deep_route",
+            story_text="",
+            user_segment=SEGMENT_WORKER,
+        )
+        questions = result.get("follow_up_questions", [])
+
+        income_row = next((row for row in questions if "минимальный доход в месяц" in str(row.get("question", "")).lower()), {})
+        hours_row = next((row for row in questions if "сколько часов в неделю готовы уделять обучению" in str(row.get("question", "")).lower()), {})
+
+        self.assertIn("3000-4500 PLN/мес", list(income_row.get("options", [])))
+        self.assertIn("6-10 часов в неделю", list(hours_row.get("options", [])))
+
+    def test_question_reply_markup_fallback_uses_intervals_for_income_and_time(self) -> None:
+        income_analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 1,
+                    "question": "Какой минимальный доход нужен в месяц?",
+                    "options": [],
+                }
+            ]
+        }
+        income_keyboard = _question_reply_markup(income_analysis, 0)
+        self.assertIsNotNone(income_keyboard)
+        income_dump = str(getattr(income_keyboard, "keyboard", ""))
+        self.assertIn("3000-4500 PLN/мес", income_dump)
+        self.assertIn("6000+ PLN/мес", income_dump)
+
+        hours_analysis = {
+            "follow_up_questions": [
+                {
+                    "id": 1,
+                    "question": "Сколько часов в неделю реально готовы уделять поиску или обучению?",
+                    "options": [],
+                }
+            ]
+        }
+        hours_keyboard = _question_reply_markup(hours_analysis, 0)
+        self.assertIsNotNone(hours_keyboard)
+        hours_dump = str(getattr(hours_keyboard, "keyboard", ""))
+        self.assertIn("3-5 часов в неделю", hours_dump)
+        self.assertIn("10+ часов в неделю", hours_dump)
 
     def test_written_conclusion_covers_all_required_dimensions(self) -> None:
         report = {

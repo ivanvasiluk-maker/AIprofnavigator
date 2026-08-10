@@ -231,6 +231,76 @@ _CONSTRUCTION_BRIDGE_ROLES = [
     "Construction Project Assistant",
 ]
 
+# All fields that must be wiped when a new story begins; prevents stale conclusions
+# from a previous run contaminating a new analysis.  Preserve: public_user_id, language,
+# user_mode, session_id, source_tag, memory_context, interaction_profile (overwritten below).
+_STORY_RESET_FIELDS: dict[str, object] = {
+    # previous conclusion
+    "final_report": {},
+    "report_chunks": {},
+    "final_report_generated": False,
+    "final_report_validated_after_rebuild": False,
+    "report_generation_id": "",
+    "html_report_path": "",
+    "pdf_report_path": "",
+    "docx_report_path": "",
+    "post_result_stage": "",
+    # interview / evidence
+    "story_analysis": {},
+    "qa_answers": [],
+    "qa_index": 0,
+    "answers_text": "",
+    "interview_context": {},
+    "asked_question_signatures": [],
+    "evidence_profile": {},
+    "conversation_hypotheses": [],
+    "preliminary_offer_shown": False,
+    "preliminary_map_route1": "",
+    "preliminary_map_route2": "",
+    "preliminary_route_selected": False,
+    "selected_preliminary_route": "",
+    "pending_answer_review": {},
+    "pending_question_append": {},
+    "pending_choice_reason": {},
+    "awaiting_extended_diagnostics_choice": False,
+    "extended_diagnostics_done": False,
+    "mandatory_diagnostics_in_progress": False,
+    "mandatory_diagnostics_done": False,
+    "promised_question_count": 0,
+    # route context
+    "route_context": {},
+    "route_context_index": 0,
+    "route_context_text_mode_for": "",
+    "route_context_question_id": "",
+    "awaiting_route_context": False,
+    # route selection / strategy
+    "career_strategy": "",
+    "awaiting_route_specific_questions": False,
+    "route_specific_gaps": [],
+    "route_specific_index": 0,
+    "route_specific_answers": [],
+    "route_specific_selected_route": "",
+    "route_specific_done": False,
+    # selected markers / multi-select choices
+    "selected_barriers": [],
+    "selected_fears": [],
+    "selected_psych_markers": [],
+    "selected_energy_sources": [],
+    "selected_career_priorities": [],
+    "selected_psych_state": [],
+    "selected_coping": [],
+    "selected_social_state": [],
+    "selected_integration_state": [],
+    "selected_choice_reasons": {},
+    # misc interview flags
+    "guardrail_retry_done": False,
+    "awaiting_story_correction": False,
+    "career_planning_paused": False,
+    "crisis_detected": False,
+    "resume_analysis": {},
+    "cv_uploaded": False,
+}
+
 _CAREER_STRATEGY_BY_ACTION = {
     CAREER_STRATEGY_FAST_INCOME: ("fast_income", CAREER_STRATEGY_FAST_INCOME),
     CAREER_STRATEGY_UPSKILL: ("upskill_for_profile", CAREER_STRATEGY_UPSKILL),
@@ -238,46 +308,209 @@ _CAREER_STRATEGY_BY_ACTION = {
     CAREER_STRATEGY_HELP: ("need_decision", CAREER_STRATEGY_HELP),
 }
 
+_ROUTE_CONTEXT_LANGUAGE_CURRENT_OPTIONS = [
+    "Польский: нет / ниже A1",
+    "Польский: A1-A2",
+    "Польский: B1",
+    "Польский: B2+",
+    "Английский: A2 и выше",
+]
+
+_ROUTE_CONTEXT_LANGUAGE_TARGET_OPTIONS = [
+    "Цель: польский A2",
+    "Цель: польский B1",
+    "Цель: польский B2+",
+    "Цель: английский B1+",
+    "Пока без языковой цели",
+]
+
+_ROUTE_CONTEXT_INCOME_URGENCY_OPTIONS = [
+    "Доход нужен срочно: в течение 2-4 недель",
+    "Доход нужен в течение 1-2 месяцев",
+    "Могу ждать 3+ месяца",
+]
+
+_ROUTE_CONTEXT_MIN_INCOME_OPTIONS = [
+    "Минимум: до 3000 PLN/мес",
+    "Минимум: 3000-4500 PLN/мес",
+    "Минимум: 4500-6000 PLN/мес",
+    "Минимум: 6000+ PLN/мес",
+]
+
+_ROUTE_CONTEXT_DESIRED_INCOME_OPTIONS = [
+    "Цель: до 4500 PLN/мес",
+    "Цель: 4500-6000 PLN/мес",
+    "Цель: 6000-8000 PLN/мес",
+    "Цель: 8000+ PLN/мес",
+]
+
+_ROUTE_CONTEXT_TRAINING_BUDGET_OPTIONS = [
+    "Бюджет на обучение: 0 PLN",
+    "Бюджет на обучение: до 500 PLN",
+    "Бюджет на обучение: 500-2000 PLN",
+    "Бюджет на обучение: 2000+ PLN",
+]
+
+_ROUTE_CONTEXT_STUDY_TIME_OPTIONS = [
+    "Учёба: 0-2 часа в неделю",
+    "Учёба: 3-5 часов в неделю",
+    "Учёба: 6-10 часов в неделю",
+    "Учёба: 10+ часов в неделю",
+]
+
+_ROUTE_CONTEXT_GOAL_OPTIONS = [
+    "Остаться в текущей профессии",
+    "Перейти в близкую сферу",
+    "Полностью сменить сферу",
+    "Пока не знаю",
+]
+
+_ROUTE_CONTEXT_WORK_FORMAT_OPTIONS = [
+    "📄 Больше с документами",
+    "👥 Больше с людьми",
+    "⚖️ 50/50",
+    "🚫 Лучше без активных продаж",
+    "✅ Могу общаться, если есть понятные правила",
+]
+WORK_FORMAT_OPTIONS = _ROUTE_CONTEXT_WORK_FORMAT_OPTIONS
+
+_ROUTE_CONTEXT_HEALTH_LIMIT_OPTIONS = [
+    "Ограничений нет",
+    "Есть ограничения по графику",
+    "Есть ограничения по здоровью",
+    "Есть ограничения по детям/уходу",
+]
+
+_ROUTE_CONTEXT_DOCS_OPTIONS = [
+    "Документы в порядке, право на работу есть",
+    "Право на работу есть, но документы частично",
+    "Право на работу нужно уточнить",
+    "Есть риски по легализации/документам",
+]
+
+_ROUTE_CONTEXT_DIPLOMA_OPTIONS = [
+    "Диплом/квалификация подтверждены",
+    "Диплом есть, но не подтверждён(а)",
+    "Диплома нет / не по профилю",
+    "Не знаю, что с признанием",
+]
+
+_ROUTE_CONTEXT_PORTFOLIO_OPTIONS = [
+    "Есть портфолио и рекомендации",
+    "Есть только портфолио",
+    "Есть только рекомендации",
+    "Пока нет портфолио/рекомендаций",
+]
+
+_INTERVIEW_INCOME_INTERVAL_OPTIONS = [
+    "До 3000 PLN/мес",
+    "3000-4500 PLN/мес",
+    "4500-6000 PLN/мес",
+    "6000+ PLN/мес",
+]
+
+_INTERVIEW_INCOME_SPEED_OPTIONS = [
+    "⚡ 2-4 недели",
+    "📆 1-2 месяца",
+    "📚 3-6 месяцев",
+    "🧭 Могу дольше при сильном маршруте",
+]
+
+_INTERVIEW_TIME_INTERVAL_OPTIONS = [
+    "0-2 часа в неделю",
+    "3-5 часов в неделю",
+    "6-10 часов в неделю",
+    "10+ часов в неделю",
+]
+
 _ROUTE_CONTEXT_FIELDS = [
     {
-        "id": "location",
-        "prompt": "1/8. Укажите страну и город в одном сообщении. Например: Польша, Варшава.",
-        "keys": ["country", "city"],
+        "id": "country",
+        "prompt": "1/15. В какой стране вы сейчас ищете работу?",
+        "keys": ["country"],
     },
     {
-        "id": "language",
-        "prompt": "2/8. Укажите текущий уровень языка и целевой язык. Например: польский A2, польский B1.",
-        "keys": ["current_language_level", "target_language"],
+        "id": "city",
+        "prompt": "2/15. В каком городе (или регионе) вы хотите работать?",
+        "keys": ["city"],
     },
     {
-        "id": "income",
-        "prompt": "3/8. Укажите срочность дохода, минимальный доход и желаемый доход. Например: срочно; 3500; 5000.",
-        "keys": ["income_urgency", "minimum_monthly_income", "desired_monthly_income"],
+        "id": "current_language_level",
+        "prompt": "3/15. Выберите текущий языковой уровень.",
+        "keys": ["current_language_level"],
+        "options": _ROUTE_CONTEXT_LANGUAGE_CURRENT_OPTIONS,
     },
     {
-        "id": "study",
-        "prompt": "4/8. Укажите бюджет на обучение и сколько времени в неделю готовы учиться. Например: 200 евро; 5 часов в неделю.",
-        "keys": ["training_budget", "available_time_for_study"],
+        "id": "target_language",
+        "prompt": "4/15. Выберите целевой язык/уровень на ближайшие месяцы.",
+        "keys": ["target_language"],
+        "options": _ROUTE_CONTEXT_LANGUAGE_TARGET_OPTIONS,
+    },
+    {
+        "id": "income_urgency",
+        "prompt": "5/15. Насколько срочно нужен стабильный доход?",
+        "keys": ["income_urgency"],
+        "options": _ROUTE_CONTEXT_INCOME_URGENCY_OPTIONS,
+    },
+    {
+        "id": "minimum_monthly_income",
+        "prompt": "6/15. Какой минимальный месячный доход нужен, чтобы закрыть базовые расходы?",
+        "keys": ["minimum_monthly_income"],
+        "options": _ROUTE_CONTEXT_MIN_INCOME_OPTIONS,
+    },
+    {
+        "id": "desired_monthly_income",
+        "prompt": "7/15. Какой доход вы считаете желаемым на этом этапе?",
+        "keys": ["desired_monthly_income"],
+        "options": _ROUTE_CONTEXT_DESIRED_INCOME_OPTIONS,
+    },
+    {
+        "id": "training_budget",
+        "prompt": "8/15. Выберите бюджет на обучение в ближайшие 1-3 месяца.",
+        "keys": ["training_budget"],
+        "options": _ROUTE_CONTEXT_TRAINING_BUDGET_OPTIONS,
+    },
+    {
+        "id": "available_time_for_study",
+        "prompt": "9/15. Сколько времени в неделю реально готовы учиться?",
+        "keys": ["available_time_for_study"],
+        "options": _ROUTE_CONTEXT_STUDY_TIME_OPTIONS,
     },
     {
         "id": "goal",
-        "prompt": "5/8. Что вам ближе сейчас: остаться в профессии, перейти в близкую сферу или сменить сферу?",
+        "prompt": "10/15. Какая карьерная цель сейчас ближе?",
         "keys": ["career_goal_type"],
+        "options": _ROUTE_CONTEXT_GOAL_OPTIONS,
     },
     {
         "id": "work",
-        "prompt": "6/8. Какие форматы работы вам подходят и есть ли ограничения по здоровью, детям, графику или транспорту?",
-        "keys": ["work_preferences", "health_or_schedule_limits"],
+        "prompt": "11/15. Какой формат работы вам подходит?",
+        "keys": ["work_preferences"],
+        "options": _ROUTE_CONTEXT_WORK_FORMAT_OPTIONS,
+    },
+    {
+        "id": "health_or_schedule_limits",
+        "prompt": "12/15. Есть ли ограничения по здоровью/графику/детям?",
+        "keys": ["health_or_schedule_limits"],
+        "options": _ROUTE_CONTEXT_HEALTH_LIMIT_OPTIONS,
     },
     {
         "id": "documents",
-        "prompt": "7/8. Укажите документы и право на работу, а также статус диплома или признания квалификации.",
-        "keys": ["documents_and_work_rights", "diploma_status"],
+        "prompt": "13/15. Какой у вас статус документов и права на работу?",
+        "keys": ["documents_and_work_rights"],
+        "options": _ROUTE_CONTEXT_DOCS_OPTIONS,
+    },
+    {
+        "id": "diploma_status",
+        "prompt": "14/15. Какой статус диплома/признания квалификации?",
+        "keys": ["diploma_status"],
+        "options": _ROUTE_CONTEXT_DIPLOMA_OPTIONS,
     },
     {
         "id": "proof",
-        "prompt": "8/8. Есть ли портфолио, рекомендации или реальные примеры работ?",
+        "prompt": "15/15. Есть ли портфолио, рекомендации или реальные примеры работ?",
         "keys": ["portfolio_or_references"],
+        "options": _ROUTE_CONTEXT_PORTFOLIO_OPTIONS,
     },
 ]
 
@@ -509,6 +742,22 @@ def _route_context_question(index: int) -> dict[str, object]:
     return dict(_ROUTE_CONTEXT_FIELDS[index])
 
 
+def _route_context_options(question: dict[str, object]) -> list[str]:
+    options = question.get("options") if isinstance(question, dict) else []
+    if not isinstance(options, list):
+        return []
+    return [str(item).strip() for item in options if str(item).strip()]
+
+
+def _route_context_reply_markup(question: dict[str, object]):
+    options = _route_context_options(question)
+    if options:
+        keyboard = question_options_keyboard(options)
+        if keyboard:
+            return keyboard
+    return input_method_keyboard()
+
+
 def _route_context_section_text(route_context: dict[str, str]) -> str:
     ordered = [
         ("Страна", route_context.get("country", "")),
@@ -551,7 +800,7 @@ async def _start_route_context_intake(message: Message, state: FSMContext, lang:
         return
     await state.set_state(CareerFlow.ROUTE_CONTEXT)
     await state.update_data(route_context=route_context, route_context_index=question_index, route_context_question_id=str(question.get("id") or question_index))
-    await message.answer(str(question.get("prompt") or ""), reply_markup=input_method_keyboard())
+    await message.answer(str(question.get("prompt") or ""), reply_markup=_route_context_reply_markup(question))
 
 
 def _route_context_next_index(current_index: int, answer: str, keys: list[str]) -> tuple[dict[str, str], int]:
@@ -2069,11 +2318,11 @@ def _questions_fast() -> list[dict[str, object]]:
 def _questions_calm() -> list[dict[str, object]]:
     return [
         {"id": 1, "question": "Кем вы работали раньше и что в вашем опыте получается лучше всего?", "options": []},
-        {"id": 2, "question": "Какой минимальный доход нужен в месяц, чтобы выдохнуть?", "options": []},
+        {"id": 2, "question": "Какой минимальный доход нужен в месяц, чтобы выдохнуть?", "options": list(_INTERVIEW_INCOME_INTERVAL_OPTIONS)},
         {
             "id": 3,
             "question": "Как быстро нужен первый стабильный доход?",
-            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Можно дольше, если путь сильнее"],
+            "options": list(_INTERVIEW_INCOME_SPEED_OPTIONS),
         },
         {"id": 4, "question": "Какие языки вы знаете и на каком они сейчас уровне?", "options": []},
         {"id": 5, "question": "Какие ограничения важно учитывать: дети, документы, здоровье, график, переезды?", "options": []},
@@ -2094,16 +2343,16 @@ def _questions_support() -> list[dict[str, object]]:
             "question": "Что сейчас больше всего тревожит: деньги, работа, язык, страх отказов, усталость, дети, документы или одиночество?",
             "options": ["деньги", "работа", "язык", "страх отказов", "усталость", "дети", "документы", "одиночество"],
         },
-        {"id": 2, "question": "Какой минимальный доход нужен в месяц?", "options": []},
+        {"id": 2, "question": "Какой минимальный доход нужен в месяц?", "options": list(_INTERVIEW_INCOME_INTERVAL_OPTIONS)},
         {
             "id": 3,
             "question": "Как быстро нужен доход?",
-            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Могу менять траекторию год"],
+            "options": list(_INTERVIEW_INCOME_SPEED_OPTIONS),
         },
         {"id": 4, "question": "Какие языки и уровень?", "options": []},
         {"id": 5, "question": "Чего точно не хотите делать?", "options": []},
         {"id": 6, "question": "Какие варианты работы вам кажутся хоть немного возможными?", "options": []},
-        {"id": 7, "question": "Сколько часов в неделю реально готовы уделять поиску или обучению?", "options": []},
+        {"id": 7, "question": "Сколько часов в неделю реально готовы уделять поиску или обучению?", "options": list(_INTERVIEW_TIME_INTERVAL_OPTIONS)},
         {
             "id": 8,
             "question": "Как вы живёте и адаптируетесь в новой стране: кто рядом, какие барьеры, есть ли сообщество?",
@@ -2197,15 +2446,34 @@ def _segment_label(segment: str) -> str:
 
 def _segment_common_questions() -> list[dict[str, object]]:
     return [
-        {"id": 1, "question": "Какой минимальный доход вам нужен в месяц?", "options": []},
+        {"id": 1, "question": "Какой минимальный доход вам нужен в месяц?", "options": list(_INTERVIEW_INCOME_INTERVAL_OPTIONS)},
         {
             "id": 2,
             "question": "Как быстро нужен первый стабильный доход?",
-            "options": ["⚡ 2–4 недели", "📆 1–3 месяца", "📚 3–6 месяцев", "🧭 Можно дольше"],
+            "options": list(_INTERVIEW_INCOME_SPEED_OPTIONS),
         },
         {"id": 3, "question": "Какие языки вы знаете и на каком уровне?", "options": []},
-        {"id": 4, "question": "Сколько часов в неделю вы реально готовы выделять на поиск работы или обучение?", "options": []},
+        {"id": 4, "question": "Сколько часов в неделю вы реально готовы выделять на поиск работы или обучение?", "options": list(_INTERVIEW_TIME_INTERVAL_OPTIONS)},
     ]
+
+
+def _interval_options_for_question(question_text: str) -> list[str]:
+    q_text = str(question_text or "").lower()
+    if "как быстро" in q_text and "доход" in q_text:
+        return list(_INTERVIEW_INCOME_SPEED_OPTIONS)
+    if "доход" in q_text and ("миним" in q_text or "нуж" in q_text or "месяц" in q_text):
+        return list(_INTERVIEW_INCOME_INTERVAL_OPTIONS)
+    if "сколько часов" in q_text or ("врем" in q_text and ("поиск" in q_text or "обуч" in q_text or "учи" in q_text)):
+        return list(_INTERVIEW_TIME_INTERVAL_OPTIONS)
+    return []
+
+
+def _normalize_question_options(question_text: str, options: list[object] | None) -> list[str]:
+    raw = options if isinstance(options, list) else []
+    cleaned = [str(item).strip() for item in raw if str(item).strip()]
+    if cleaned:
+        return cleaned
+    return _interval_options_for_question(question_text)
 
 
 def _segment_questions(segment: str) -> list[dict[str, object]]:
@@ -3465,7 +3733,8 @@ def _set_mvp_questions(
         effective_limit = min(effective_limit, 5)
         normalized_fast: list[dict[str, object]] = []
         for idx, row in enumerate(_questions_fast()[:effective_limit], start=1):
-            opts = row.get("options", []) if isinstance(row.get("options", []), list) else []
+            question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
+            opts = _normalize_question_options(question_text, row.get("options", []) if isinstance(row.get("options", []), list) else [])
             option_labels = [str(item).strip() for item in opts[:6] if str(item).strip()]
             allowed_button_ids: list[str] = []
             allowed_button_map: dict[str, str] = {}
@@ -3477,7 +3746,6 @@ def _set_mvp_questions(
                     suffix += 1
                 allowed_button_ids.append(slug)
                 allowed_button_map[slug] = option
-            question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
             normalized_fast.append(
                 {
                     "id": idx,
@@ -3524,9 +3792,7 @@ def _set_mvp_questions(
             q_key = q_text.lower()
             if q_key in seen:
                 continue
-            opts = row.get("options", [])
-            if not isinstance(opts, list):
-                opts = []
+            opts = _normalize_question_options(q_text, row.get("options", []) if isinstance(row.get("options", []), list) else [])
             max_options = 15 if row.get("force_options_keyboard") else 6
             selected.append({"id": int(row.get("id", len(selected) + 1)), "question": q_text, "options": opts[:max_options]})
             seen.add(q_key)
@@ -3553,9 +3819,8 @@ def _set_mvp_questions(
     for idx, row in enumerate(trimmed, start=1):
         if not isinstance(row, dict):
             continue
-        opts = row.get("options", [])
-        if not isinstance(opts, list):
-            opts = []
+        question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
+        opts = _normalize_question_options(question_text, row.get("options", []) if isinstance(row.get("options", []), list) else [])
         max_options = 15 if row.get("force_options_keyboard") else 6
         option_labels = [str(item).strip() for item in opts[:max_options] if str(item).strip()]
         allowed_button_ids: list[str] = []
@@ -3569,7 +3834,6 @@ def _set_mvp_questions(
             allowed_button_ids.append(slug)
             allowed_button_map[slug] = option
 
-        question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
         question_id = str(row.get("question_id") or _slugify(question_text))
         normalized_row: dict[str, object] = {
             "id": idx,
@@ -5881,8 +6145,8 @@ def _question_reply_markup(analysis: dict, index: int):
         return interview_work_format_keyboard()
     if "поддерж" in q_text:
         return interview_support_keyboard()
-    options = row.get("options", [])
-    return question_options_keyboard(options if isinstance(options, list) else [])
+    options = _normalize_question_options(str(row.get("question") or ""), row.get("options", []) if isinstance(row.get("options", []), list) else [])
+    return question_options_keyboard(options)
 
 
 async def _download_document_bytes(message: Message, document: Document) -> bytes:
@@ -5921,6 +6185,9 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     if not clean:
         await message.answer(t(lang, "story_too_short"))
         return
+
+    # Clear all stale conclusion/interview/route data so a new story always produces a fresh result.
+    await state.update_data(**_STORY_RESET_FIELDS)
 
     profile = _build_interaction_profile(clean, data)
     selected_mode = str(data.get("user_mode") or "calm_steps")
@@ -6877,8 +7144,22 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
 
     index = int(data.get("route_context_index") or 0)
     question = _route_context_question(index)
+    question_id = str(question.get("id") or index)
+    options = _route_context_options(question)
     keys = [str(item) for item in question.get("keys", []) if str(item).strip()] if isinstance(question.get("keys", []), list) else []
     route_context = dict(data.get("route_context") or {})
+
+    text_mode_for = str(data.get("route_context_text_mode_for") or "")
+    if raw == QUESTION_ADD_TEXT and options:
+        await state.update_data(route_context_text_mode_for=question_id)
+        await message.answer("Ок, напишите ответ своими словами одним сообщением.", reply_markup=input_method_keyboard())
+        return
+
+    if options and text_mode_for != question_id and raw not in options:
+        await message.answer("Выберите вариант кнопкой или нажмите «Другое / расскажу своими словами».", reply_markup=_route_context_reply_markup(question))
+        return
+
+    await state.update_data(route_context_text_mode_for="")
     parsed_values, next_index = _route_context_next_index(index, raw, keys)
     route_context.update(parsed_values)
     await state.update_data(route_context=route_context, route_context_index=next_index, awaiting_route_context=True)
