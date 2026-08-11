@@ -809,6 +809,60 @@ def _need_decision_comparison_text(bundle: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
+    """Create an immutable snapshot of the route answers and country config before report generation."""
+    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    country_config = route_context.get("country_config") if isinstance(route_context.get("country_config"), dict) else {}
+    if not country_config and str(route_context.get("country") or data.get("country") or "").strip():
+        country_config = _resolve_country_config(str(route_context.get("country") or data.get("country") or ""))
+
+    snapshot: dict[str, object] = {
+        "country_code": str((country_config or {}).get("country_code") or "UNKNOWN").upper(),
+        "country_name": str((country_config or {}).get("country_name") or str(route_context.get("country") or "").strip() or "").strip(),
+        "city": str(route_context.get("city") or "").strip(),
+        "currency": str((country_config or {}).get("currency") or "EUR").upper(),
+        "local_language": str((country_config or {}).get("local_language") or "-").strip(),
+        "market_locale": str((country_config or {}).get("market_locale") or "unknown").strip(),
+        "answers_text": str(data.get("answers_text") or "").strip(),
+        "story_text": str(data.get("story_text") or "").strip(),
+        "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip()},
+        "ready_for_report": False,
+    }
+    snapshot["ready_for_report"] = _snapshot_is_ready_for_report(snapshot)
+    return snapshot
+
+
+def _snapshot_is_ready_for_report(snapshot: dict[str, object]) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    route_context = snapshot.get("route_context") if isinstance(snapshot.get("route_context"), dict) else {}
+    if not route_context:
+        return False
+    if not str(snapshot.get("country_code") or "").strip() or str(snapshot.get("country_code") or "").upper() == "UNKNOWN":
+        return False
+    required_fields = (
+        "country",
+        "city",
+        "current_language_level",
+        "target_language",
+        "income_urgency",
+        "minimum_monthly_income",
+        "desired_monthly_income",
+        "training_budget",
+        "available_time_for_study",
+        "career_goal_type",
+        "work_preferences",
+        "health_or_schedule_limits",
+        "documents_and_work_rights",
+        "diploma_status",
+        "portfolio_or_references",
+    )
+    for field in required_fields:
+        if not str(route_context.get(field) or "").strip():
+            return False
+    return True
+
+
 def _route_context_missing(data: dict[str, object]) -> list[str]:
     missing: list[str] = []
     route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
@@ -6101,6 +6155,16 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
         await _start_route_context_intake(message, state, lang)
         return
+
+    snapshot = _build_profile_snapshot(data)
+    if not _snapshot_is_ready_for_report(snapshot):
+        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
+        await _start_route_context_intake(message, state, lang)
+        return
+    await state.update_data(profile_snapshot=snapshot)
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    session_id = str(data.get("session_id") or "").strip()
+    save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
     user_mode = str(data.get("user_mode") or "calm_steps")
     decision_layers = _build_decision_layers(data, story_analysis, answers_text)
     report_generation_id = report_generation_id or str(uuid.uuid4())
@@ -7323,11 +7387,16 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
         public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
         session_id = str(data.get("session_id") or "").strip()
         await state.update_data(awaiting_route_context=False)
+        snapshot = _build_profile_snapshot({**data, "route_context": route_context})
+        await state.update_data(profile_snapshot=snapshot)
         save_profile_version(
             public_user_id,
             "route_context_selected",
             {
-                "route_context": route_context,
+                "country_code": snapshot.get("country_code"),
+                "currency": snapshot.get("currency"),
+                "route_context": snapshot.get("route_context"),
+                "ready_for_report": snapshot.get("ready_for_report"),
                 "user_mode": str(data.get("user_mode") or ""),
                 "report_generation_id": str(data.get("report_generation_id") or ""),
             },

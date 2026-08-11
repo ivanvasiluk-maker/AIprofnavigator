@@ -13,11 +13,13 @@ from __future__ import annotations
 import unittest
 
 from handlers.career import (
+    _build_profile_snapshot,
     _income_options_for_currency,
     _language_options_for_country,
     _report_draft_is_empty,
     _resolve_country_config,
     _route_context_question,
+    _snapshot_is_ready_for_report,
 )
 
 
@@ -178,6 +180,42 @@ class DynamicQuestionOptionsTest(unittest.TestCase):
         q = _route_context_question(idx)
         options = q.get("options", [])
         self.assertTrue(any("Польский" in o for o in options))
+
+
+class SnapshotReadinessGateTest(unittest.TestCase):
+    def test_snapshot_has_country_and_route_context(self) -> None:
+        snapshot = _build_profile_snapshot(
+            {
+                "country_config": {"country_code": "LT", "currency": "EUR", "local_language": "Литовский"},
+                "route_context": {
+                    "country": "Литва",
+                    "city": "Вильнюс",
+                    "current_language_level": "A2",
+                    "target_language": "B1",
+                    "income_urgency": "Немедленно",
+                    "minimum_monthly_income": "1000 EUR/мес",
+                    "desired_monthly_income": "2000 EUR/мес",
+                    "training_budget": "200 EUR",
+                    "available_time_for_study": "6 часов/неделю",
+                    "career_goal_type": "Product marketing",
+                    "work_preferences": "Remote",
+                    "health_or_schedule_limits": "Нет",
+                    "documents_and_work_rights": "Есть право на работу",
+                    "diploma_status": "Высшее",
+                    "portfolio_or_references": "Есть",
+                },
+                "answers_text": "Пользователь готов менять направление",
+                "story_text": "Есть опыт в маркетинге",
+            }
+        )
+        self.assertEqual(snapshot["country_code"], "LT")
+        self.assertEqual(snapshot["currency"], "EUR")
+        self.assertTrue(snapshot["ready_for_report"])
+        self.assertIn("route_context", snapshot)
+
+    def test_incomplete_snapshot_is_not_ready(self) -> None:
+        snapshot = _build_profile_snapshot({"route_context": {"country": "Литва"}})
+        self.assertFalse(_snapshot_is_ready_for_report(snapshot))
 
 
 class ReportDraftGateTest(unittest.TestCase):
