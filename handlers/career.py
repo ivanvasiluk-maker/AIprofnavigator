@@ -918,6 +918,41 @@ def _route_context_options(question: dict[str, object]) -> list[str]:
     return [str(item).strip() for item in options if str(item).strip()]
 
 
+def _is_route_context_stale_input(raw: str) -> bool:
+    """Reject old UI texts from previous screens that must never be treated as route answers."""
+    if not raw:
+        return False
+    normalized = raw.strip()
+    if not normalized:
+        return False
+    low = normalized.lower()
+    stale_markers = {
+        "✍️ написать историю",
+        "✍️ другое / расскажу своими словами",
+        "📄 загрузить резюме",
+        "📄 пришлю резюме",
+        "➡️ продолжить без резюме",
+        "✅ да, вы поняли верно",
+        "✅ отметил(а), что мешает",
+        "нормальный разбор",
+        "хорошо, делаем нормальный разбор",
+        "принято",
+    }
+    if low in stale_markers:
+        return True
+    return (
+        low.startswith("✍️")
+        or low.startswith("📄")
+        or low.startswith("➡️")
+        or low.startswith("✅")
+        or "напишите историю" in low
+        or "загрузить резюме" in low
+        or "продолжить без резюме" in low
+        or "отметил" in low and "мешает" in low
+        or "поняли верно" in low
+    )
+
+
 def _route_context_reply_markup(question: dict[str, object]):
     options = _route_context_options(question)
     if options:
@@ -7355,6 +7390,16 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
         return
 
     index = int(data.get("route_context_index") or 0)
+    if raw == QUESTION_ADD_TEXT:
+        await state.update_data(route_context_text_mode_for=str(_route_context_question(index, dict(data.get("route_context") or {})).get("id") or index))
+        await message.answer("Ок, напишите ответ своими словами одним сообщением.", reply_markup=input_method_keyboard())
+        return
+
+    if _is_route_context_stale_input(raw):
+        await message.answer("Пожалуйста, ответьте на текущий вопрос одним из вариантов или напишите свой ответ в свободной форме.", reply_markup=_route_context_reply_markup(_route_context_question(index, dict(data.get("route_context") or {}))))
+        return
+
+    index = int(data.get("route_context_index") or 0)
     route_context = dict(data.get("route_context") or {})
     question = _route_context_question(index, route_context)
     question_id = str(question.get("id") or index)
@@ -7402,6 +7447,7 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
             },
             session_id=session_id,
         )
+        await state.set_state(CareerFlow.GENERATING_REPORT)
         await message.answer(t(lang, "route_context_complete"))
         await _build_and_send_report(message, state, lang)
         return

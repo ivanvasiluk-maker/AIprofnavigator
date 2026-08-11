@@ -15,6 +15,7 @@ import unittest
 from handlers.career import (
     _build_profile_snapshot,
     _income_options_for_currency,
+    _is_route_context_stale_input,
     _language_options_for_country,
     _report_draft_is_empty,
     _resolve_country_config,
@@ -216,6 +217,15 @@ class SnapshotReadinessGateTest(unittest.TestCase):
     def test_incomplete_snapshot_is_not_ready(self) -> None:
         snapshot = _build_profile_snapshot({"route_context": {"country": "Литва"}})
         self.assertFalse(_snapshot_is_ready_for_report(snapshot))
+
+
+class RouteContextStaleInputTest(unittest.TestCase):
+    def test_stale_text_is_rejected(self) -> None:
+        self.assertTrue(_is_route_context_stale_input("✍️ Написать историю"))
+        self.assertTrue(_is_route_context_stale_input("📄 Загрузить резюме"))
+        self.assertTrue(_is_route_context_stale_input("➡️ Продолжить без резюме"))
+        self.assertTrue(_is_route_context_stale_input("✅ Отметил(а), что мешает"))
+        self.assertFalse(_is_route_context_stale_input("Литва"))
 
 
 class ReportDraftGateTest(unittest.TestCase):
