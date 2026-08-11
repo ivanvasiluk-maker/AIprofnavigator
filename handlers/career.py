@@ -273,6 +273,8 @@ _STORY_RESET_FIELDS: dict[str, object] = {
     "route_context_text_mode_for": "",
     "route_context_question_id": "",
     "awaiting_route_context": False,
+    "country_config": {},
+    "fsm_generation": 0,  # incremented each time a new question batch starts
     # route selection / strategy
     "career_strategy": "",
     "awaiting_route_specific_questions": False,
@@ -323,6 +325,102 @@ _ROUTE_CONTEXT_LANGUAGE_TARGET_OPTIONS = [
     "Цель: английский B1+",
     "Пока без языковой цели",
 ]
+
+# ── Country-aware helpers ──────────────────────────────────────────
+_COUNTRY_CONFIGS: dict[str, dict[str, str]] = {
+    "lt": {"country_code": "LT", "country_name": "Литва", "currency": "EUR", "currency_symbol": "€", "local_language": "Литовский", "market_locale": "lt-LT"},
+    "pl": {"country_code": "PL", "country_name": "Польша", "currency": "PLN", "currency_symbol": "zł", "local_language": "Польский", "market_locale": "pl-PL"},
+    "de": {"country_code": "DE", "country_name": "Германия", "currency": "EUR", "currency_symbol": "€", "local_language": "Немецкий", "market_locale": "de-DE"},
+    "cz": {"country_code": "CZ", "country_name": "Чехия", "currency": "CZK", "currency_symbol": "Kč", "local_language": "Чешский", "market_locale": "cs-CZ"},
+    "ee": {"country_code": "EE", "country_name": "Эстония", "currency": "EUR", "currency_symbol": "€", "local_language": "Эстонский", "market_locale": "et-EE"},
+    "lv": {"country_code": "LV", "country_name": "Латвия", "currency": "EUR", "currency_symbol": "€", "local_language": "Латышский", "market_locale": "lv-LV"},
+    "nl": {"country_code": "NL", "country_name": "Нидерланды", "currency": "EUR", "currency_symbol": "€", "local_language": "Нидерландский", "market_locale": "nl-NL"},
+    "fi": {"country_code": "FI", "country_name": "Финляндия", "currency": "EUR", "currency_symbol": "€", "local_language": "Финский", "market_locale": "fi-FI"},
+    "gb": {"country_code": "GB", "country_name": "Великобритания", "currency": "GBP", "currency_symbol": "£", "local_language": "Английский", "market_locale": "en-GB"},
+    "us": {"country_code": "US", "country_name": "США", "currency": "USD", "currency_symbol": "$", "local_language": "Английский", "market_locale": "en-US"},
+    "remote": {"country_code": "REMOTE", "country_name": "Удалённо", "currency": "USD", "currency_symbol": "$", "local_language": "Английский", "market_locale": "remote"},
+}
+
+
+def _resolve_country_config(country_text: str) -> dict[str, str]:
+    """Map user's free-text country answer to a structured country config."""
+    text = (country_text or "").lower().strip().replace("ё", "е")
+    if any(t in text for t in ["литв", "вильн", "lithuani", "lt-"]):
+        return _COUNTRY_CONFIGS["lt"]
+    if any(t in text for t in ["польш", "варшав", "краков", "poland", "polish", "pl-"]):
+        return _COUNTRY_CONFIGS["pl"]
+    if any(t in text for t in ["герман", "берлин", "мюнхен", "франкфурт", "german", "deutsch", "de-"]):
+        return _COUNTRY_CONFIGS["de"]
+    if any(t in text for t in ["чехи", "праг", "czech", "cz-"]):
+        return _COUNTRY_CONFIGS["cz"]
+    if any(t in text for t in ["эстон", "таллин", "estonia", "ee-"]):
+        return _COUNTRY_CONFIGS["ee"]
+    if any(t in text for t in ["латв", "рига", "latvia", "lv-"]):
+        return _COUNTRY_CONFIGS["lv"]
+    if any(t in text for t in ["нидерланд", "голланд", "амстердам", "netherland", "nl-"]):
+        return _COUNTRY_CONFIGS["nl"]
+    if any(t in text for t in ["финлянд", "хельсинк", "finland", "suomi", "fi-"]):
+        return _COUNTRY_CONFIGS["fi"]
+    if any(t in text for t in ["великобритан", "лондон", "britain", "england", "uk "]):
+        return _COUNTRY_CONFIGS["gb"]
+    if any(t in text for t in ["сша", "нью-йорк", "usa", "united states", "america"]):
+        return _COUNTRY_CONFIGS["us"]
+    if any(t in text for t in ["удал", "удален", "remote", "online", "global", "онлайн"]):
+        return _COUNTRY_CONFIGS["remote"]
+    return {"country_code": "UNKNOWN", "country_name": country_text.strip(), "currency": "EUR", "currency_symbol": "€", "local_language": "-", "market_locale": "unknown"}
+
+
+def _income_options_for_currency(currency: str) -> tuple[list[str], list[str], list[str]]:
+    """Returns (min_income_options, desired_income_options, training_budget_options) by currency."""
+    if currency == "PLN":
+        return (
+            ["Минимум: до 3000 PLN/мес", "Минимум: 3000-4500 PLN/мес", "Минимум: 4500-6000 PLN/мес", "Минимум: 6000+ PLN/мес"],
+            ["Цель: до 4500 PLN/мес", "Цель: 4500-6000 PLN/мес", "Цель: 6000-8000 PLN/мес", "Цель: 8000+ PLN/мес"],
+            ["Бюджет на обучение: 0 PLN", "Бюджет на обучение: до 500 PLN", "Бюджет на обучение: 500-2000 PLN", "Бюджет на обучение: 2000+ PLN"],
+        )
+    if currency == "GBP":
+        return (
+            ["Минимум: до 1500 GBP/мес", "Минимум: 1500-2500 GBP/мес", "Минимум: 2500-3500 GBP/мес", "Минимум: 3500+ GBP/мес"],
+            ["Цель: до 2500 GBP/мес", "Цель: 2500-3500 GBP/мес", "Цель: 3500-5000 GBP/мес", "Цель: 5000+ GBP/мес"],
+            ["Бюджет на обучение: 0 GBP", "Бюджет на обучение: до 200 GBP", "Бюджет на обучение: 200-800 GBP", "Бюджет на обучение: 800+ GBP"],
+        )
+    if currency in ("USD", "CAD", "AUD"):
+        return (
+            [f"Минимум: до 2000 {currency}/мес", f"Минимум: 2000-3500 {currency}/мес", f"Минимум: 3500-5000 {currency}/мес", f"Минимум: 5000+ {currency}/мес"],
+            [f"Цель: до 3500 {currency}/мес", f"Цель: 3500-5000 {currency}/мес", f"Цель: 5000-8000 {currency}/мес", f"Цель: 8000+ {currency}/мес"],
+            [f"Бюджет на обучение: 0 {currency}", f"Бюджет на обучение: до 300 {currency}", f"Бюджет на обучение: 300-1000 {currency}", f"Бюджет на обучение: 1000+ {currency}"],
+        )
+    # Default: EUR
+    return (
+        ["Минимум: до 1000 EUR/мес", "Минимум: 1000-1500 EUR/мес", "Минимум: 1500-2500 EUR/мес", "Минимум: 2500+ EUR/мес"],
+        ["Цель: до 1500 EUR/мес", "Цель: 1500-2500 EUR/мес", "Цель: 2500-4000 EUR/мес", "Цель: 4000+ EUR/мес"],
+        ["Бюджет на обучение: 0 EUR", "Бюджет на обучение: до 200 EUR", "Бюджет на обучение: 200-800 EUR", "Бюджет на обучение: 800+ EUR"],
+    )
+
+
+def _language_options_for_country(country_code: str) -> tuple[list[str], list[str]]:
+    """Returns (current_level_options, target_options) for the given country."""
+    if country_code == "PL":
+        return (
+            ["Польский: нет / ниже A1", "Польский: A1-A2", "Польский: B1", "Польский: B2+", "Английский: A2 и выше"],
+            ["Цель: польский A2", "Цель: польский B1", "Цель: польский B2+", "Цель: английский B1+", "Пока без языковой цели"],
+        )
+    if country_code == "DE":
+        return (
+            ["Немецкий: нет / ниже A1", "Немецкий: A1-A2", "Немецкий: B1", "Немецкий: B2+", "Английский: B1 и выше"],
+            ["Цель: немецкий A2", "Цель: немецкий B1", "Цель: немецкий B2+", "Цель: английский B1+", "Пока без языковой цели"],
+        )
+    if country_code in ("GB", "US", "REMOTE"):
+        return (
+            ["Английский: A1-A2", "Английский: B1", "Английский: B2", "Английский: C1-C2"],
+            ["Цель: английский B2", "Цель: английский C1+", "Пока без языковой цели"],
+        )
+    lang_map = {"LT": "Литовский", "LV": "Латышский", "EE": "Эстонский", "NL": "Нидерландский", "FI": "Финский", "CZ": "Чешский"}
+    local_lang = lang_map.get(country_code, "Местный язык")
+    return (
+        [f"{local_lang}: нет / ниже A1", f"{local_lang}: A1-A2", f"{local_lang}: B1+", "Английский: B1 и выше", "Пока учу английский"],
+        [f"Цель: {local_lang.lower()} A2", f"Цель: {local_lang.lower()} B1", "Цель: английский B1+", "Пока без языковой цели"],
+    )
 
 _ROUTE_CONTEXT_INCOME_URGENCY_OPTIONS = [
     "Доход нужен срочно: в течение 2-4 недель",
@@ -736,10 +834,27 @@ def _route_context_missing(data: dict[str, object]) -> list[str]:
     return missing
 
 
-def _route_context_question(index: int) -> dict[str, object]:
+def _route_context_question(index: int, route_context: dict | None = None) -> dict[str, object]:
     if index < 0 or index >= len(_ROUTE_CONTEXT_FIELDS):
         return {}
-    return dict(_ROUTE_CONTEXT_FIELDS[index])
+    q = dict(_ROUTE_CONTEXT_FIELDS[index])
+    if not route_context:
+        return q
+    country_config = route_context.get("country_config") if isinstance(route_context.get("country_config"), dict) else {}
+    country_code = str((country_config or {}).get("country_code") or "").upper()
+    currency = str((country_config or {}).get("currency") or "EUR")
+    q_id = str(q.get("id") or "")
+    if q_id == "current_language_level":
+        q["options"], _ = _language_options_for_country(country_code)
+    elif q_id == "target_language":
+        _, q["options"] = _language_options_for_country(country_code)
+    elif q_id == "minimum_monthly_income":
+        q["options"], _, _ = _income_options_for_currency(currency)
+    elif q_id == "desired_monthly_income":
+        _, q["options"], _ = _income_options_for_currency(currency)
+    elif q_id == "training_budget":
+        _, _, q["options"] = _income_options_for_currency(currency)
+    return q
 
 
 def _route_context_options(question: dict[str, object]) -> list[str]:
@@ -795,7 +910,7 @@ async def _start_route_context_intake(message: Message, state: FSMContext, lang:
     question_index = int(data.get("route_context_index") or 0)
     if question_index <= 0 and not route_context:
         await message.answer(t(lang, "route_context_intro"), reply_markup=input_method_keyboard())
-    question = _route_context_question(question_index)
+    question = _route_context_question(question_index, route_context)
     if not question:
         return
     await state.set_state(CareerFlow.ROUTE_CONTEXT)
@@ -5853,9 +5968,32 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
         _resume_debug_log(message, "question_1_sent", question_id=first_question.get("id", 1))
 
 
+_REPORT_PLACEHOLDER_NAMES: frozenset[str] = frozenset({
+    "-", "данных недостаточно", "возможный маршрут", "possible route",
+    "потребуется проверить", "предварительная гипотеза",
+})
+
+
+def _report_draft_is_empty(report: dict) -> bool:
+    """True if the generated report lacks a viable career decision or first step."""
+    if not isinstance(report, dict):
+        return True
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    main_path = str(decision.get("recommended_main_path") or "").strip()
+    if not main_path or main_path.lower() in _REPORT_PLACEHOLDER_NAMES:
+        return True
+    if not (report.get("market_analysis") or report.get("career_recommendations")):
+        return True
+    today = (report.get("action_plan") or {}).get("today") if isinstance(report.get("action_plan"), dict) else {}
+    first_step = str((today or {}).get("action") or "").strip()
+    if not first_step or first_step == "-":
+        return True
+    return False
+
+
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
-    
+
     # Check for crisis signals before proceeding
     answers_text = str(data.get("answers_text") or "").strip()
     story_text = str(data.get("story_text") or "").strip()
@@ -6119,6 +6257,17 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             "career_priorities": list((report.get("career_priorities") or [])[:4]) if isinstance(report.get("career_priorities"), list) else [],
         },
     )
+
+    # Report Readiness Gate: if report is essentially empty, ask one clarifying question
+    if _report_draft_is_empty(report):
+        await _track_event(message, state, "report_draft_empty_blocked", meta={})
+        await message.answer(
+            "Для точного маршрута нужно ещё несколько деталей.\n\n"
+            "Скажите: какой из вариантов вы готовы проверить первым — "
+            "продуктовый менеджмент, образовательный проект или консультирование?"
+        )
+        return
+
     await _send_final_map_bundle(message, state, lang, report)
 
 
@@ -7142,11 +7291,11 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
         return
 
     index = int(data.get("route_context_index") or 0)
-    question = _route_context_question(index)
+    route_context = dict(data.get("route_context") or {})
+    question = _route_context_question(index, route_context)
     question_id = str(question.get("id") or index)
     options = _route_context_options(question)
     keys = [str(item) for item in question.get("keys", []) if str(item).strip()] if isinstance(question.get("keys", []), list) else []
-    route_context = dict(data.get("route_context") or {})
 
     text_mode_for = str(data.get("route_context_text_mode_for") or "")
     if raw == QUESTION_ADD_TEXT and options:
@@ -7161,6 +7310,13 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
     await state.update_data(route_context_text_mode_for="")
     parsed_values, next_index = _route_context_next_index(index, raw, keys)
     route_context.update(parsed_values)
+
+    # After country answer (Q1): compute and persist structured country_config
+    if question_id == "country" and str(parsed_values.get("country") or "").strip():
+        country_config = _resolve_country_config(str(parsed_values["country"]))
+        route_context["country_config"] = country_config  # type: ignore[assignment]
+        await state.update_data(country_config=country_config)
+
     await state.update_data(route_context=route_context, route_context_index=next_index, awaiting_route_context=True)
 
     if next_index >= len(_ROUTE_CONTEXT_FIELDS):
