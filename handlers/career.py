@@ -3073,8 +3073,7 @@ def _top_strategy_roles(report: dict[str, object], limit: int = 4) -> list[str]:
 
     _add(decision.get("recommended_main_path"))
     _add(decision.get("backup_path"))
-    if not roles:
-        roles.extend(["Administrative Assistant", "Back-office Specialist", "Document Controller"])
+    # No fallback: empty roles means the report has no confirmed routes yet.
     return roles[:limit]
 
 

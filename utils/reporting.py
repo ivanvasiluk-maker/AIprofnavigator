@@ -151,10 +151,30 @@ def _detect_country(report: dict) -> str:
 
 
 def _detect_mode(report: dict) -> str:
-    readiness = (report.get("digital_human") or {}).get("career_readiness", {})
+    """Survival requires explicit user-confirmed financial urgency evidence."""
+    dh = report.get("digital_human") or {}
+    strategy_mode = str(dh.get("strategy_mode") or "").strip()
+    if strategy_mode == "Survival":
+        facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+        explicit_facts = " ".join(str(f) for f in (facts_only.get("explicit_facts") or [])).lower()
+        survival_signals = [
+            "без дохода", "no income", "долг", "debt",
+            "срочно нужна", "urgent", "потери жилья", "housing risk",
+            "финансовый дедлайн", "financial deadline",
+            "быстрый доход как приоритет", "income urgency",
+        ]
+        if any(signal in explicit_facts for signal in survival_signals):
+            return "Survival"
+        readiness = dh.get("career_readiness") or {}
+        urgency = str((readiness or {}).get("urgency", "")).lower()
+        constraints = " ".join(str(c) for c in ((report.get("decision_layers") or {}).get("constraints") or [])).lower()
+        if ("высок" in urgency or "high" in urgency) and any(s in constraints for s in survival_signals):
+            return "Survival"
+        return "Transition"
+    if strategy_mode in ("Transition", "Growth"):
+        return strategy_mode
+    readiness = dh.get("career_readiness") or {}
     urgency = str((readiness or {}).get("urgency", "")).lower()
-    if "высок" in urgency or "high" in urgency:
-        return "Survival"
     if "сред" in urgency or "moder" in urgency or "medium" in urgency:
         return "Transition"
     return "Growth"

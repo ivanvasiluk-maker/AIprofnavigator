@@ -341,6 +341,195 @@ def validate_career_break_logic(profile: CareerEvidenceProfile, report: dict) ->
     return errors
 
 
+# ── New validators PATCH-2026-08 ─────────────────────────────────────────────
+
+_ADMIN_ROLES: frozenset[str] = frozenset({
+    "administrative assistant",
+    "back-office specialist",
+    "document controller",
+    "operations coordinator",
+    "office administrator",
+})
+
+_ADMIN_FUNCTION_SIGNALS: frozenset[str] = frozenset({
+    "документооборот", "делопроизводство", "1с документ", "секретар",
+    "document management", "document control", "back-office", "office admin",
+    "канцелярия", "канцеляр",
+})
+
+_SURVIVAL_SIGNALS: frozenset[str] = frozenset({
+    "без дохода", "no income", "долг", "debt",
+    "срочно нужна", "urgent", "потери жилья", "housing risk",
+    "финансовый дедлайн", "financial deadline",
+    "быстрый доход как приоритет", "income urgency",
+})
+
+_PSYCH_INVENTED: frozenset[str] = frozenset({
+    "тревога из-за переезда",
+    "тревога из-за миграции",
+    "страх отказов",
+    "страх отказа",
+    "хаос в голове",
+    "финансовое давление",
+    "проблемы интеграции",
+    "избегание откликов",
+    "паника",
+})
+
+
+def validate_survival_mode_evidence(profile: CareerEvidenceProfile, report: dict) -> list[str]:
+    """PATCH-2026-08 §4: Survival mode requires explicit confirmed financial urgency."""
+    errors: list[str] = []
+    dh = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    mode = str((dh or {}).get("strategy_mode") or "").strip()
+    if mode != "Survival":
+        return errors
+
+    profile_blob = _profile_text_blob(profile)
+    explicit_facts_blob = " ".join(
+        str(f) for f in (
+            (report.get("facts_only") or {}).get("explicit_facts") or []
+            if isinstance(report.get("facts_only"), dict) else []
+        )
+    ).lower()
+    combined = profile_blob + " " + explicit_facts_blob
+
+    if not any(signal in combined for signal in _SURVIVAL_SIGNALS):
+        errors.append(
+            "[CRITICAL] strategy_mode=Survival but no confirmed financial urgency found in "
+            "explicit_facts or profile. Migration alone does not justify Survival mode."
+        )
+    return errors
+
+
+def validate_seniority_protection(profile: CareerEvidenceProfile, report: dict) -> list[str]:
+    """PATCH-2026-08 §5: Senior/lead professionals must not get entry-level as primary route."""
+    errors: list[str] = []
+    roles = _recommended_roles(report)
+    if not roles:
+        return errors
+
+    has_senior = any(
+        f.inferred_seniority in {"senior", "lead", "expert"}
+        or f.responsibility_scale in {"team", "department", "organization"}
+        for f in profile.functions
+    )
+    years_senior = any(
+        f.years is not None and f.years >= 5
+        for f in profile.functions
+    )
+    if not (has_senior or years_senior):
+        return errors
+
+    refusals_blob = " ".join(r.statement.lower() for r in profile.explicit_refusals)
+    user_wants_entry = any(
+        token in refusals_blob
+        for token in ["entry", "junior", "начальный", "любую работу", "срочно"]
+    )
+    if user_wants_entry:
+        return errors
+
+    explicit_facts_blob = " ".join(
+        str(f) for f in (
+            (report.get("facts_only") or {}).get("explicit_facts") or []
+            if isinstance(report.get("facts_only"), dict) else []
+        )
+    ).lower()
+    if any(signal in explicit_facts_blob for signal in _SURVIVAL_SIGNALS):
+        return errors
+
+    primary = roles[0].lower() if roles else ""
+    for admin_role in _ADMIN_ROLES:
+        if admin_role in primary:
+            errors.append(
+                f"[CRITICAL] Seniority protection: primary route '{roles[0]}' is an entry-level "
+                "admin role for a user with 5+ years or senior-level profile, and no survival "
+                "urgency was confirmed. Recommend seniority-matching roles instead."
+            )
+            break
+    return errors
+
+
+def validate_admin_roles_require_evidence(profile: CareerEvidenceProfile, report: dict) -> list[str]:
+    """PATCH-2026-08 §5: Admin/back-office roles only if admin functions confirmed in profile."""
+    errors: list[str] = []
+    roles = _recommended_roles(report)
+    if not roles:
+        return errors
+
+    profile_blob = _profile_text_blob(profile)
+    has_admin_evidence = any(signal in profile_blob for signal in _ADMIN_FUNCTION_SIGNALS)
+    if has_admin_evidence:
+        return errors
+
+    for role in roles:
+        for admin_role in _ADMIN_ROLES:
+            if admin_role in role.lower():
+                errors.append(
+                    f"[CRITICAL] Role '{role}' requires administrative background "
+                    "but no admin function evidence found in profile. "
+                    "Do not recommend admin roles without confirmed admin experience."
+                )
+    return errors
+
+
+def validate_country_market_consistency(profile: CareerEvidenceProfile, report: dict) -> list[str]:
+    """PATCH-2026-08 §8: No national market analysis if country is unconfirmed."""
+    errors: list[str] = []
+    location_blob = " ".join(
+        item.statement.lower() for item in profile.location_and_language
+    )
+    explicit_country_known = any(
+        token in location_blob
+        for token in [
+            "польш", "poland", "литв", "lithuania", "германи", "germany",
+            "чехи", "czech", "нидерланд", "netherlands",
+            "эстони", "латви", "финлянд",
+        ]
+    )
+    if explicit_country_known:
+        return errors
+
+    report_blob = _text_blob(report)
+    country_market_signals = [
+        "польский рынок", "литовский рынок", "рынок польши", "рынок литвы",
+        "pln brutto", "eur brutto", "zl brutto",
+    ]
+    for signal in country_market_signals:
+        if signal in report_blob:
+            errors.append(
+                f"[WARNING] Report references '{signal}' (specific national market) "
+                "but user country is not confirmed in profile. "
+                "Replace country-specific salary/market data with 'требует уточнения страны'."
+            )
+            break
+    return errors
+
+
+def validate_no_invented_psychological_facts(profile: CareerEvidenceProfile, report: dict) -> list[str]:
+    """PATCH-2026-08 §6: Psychological states must not be asserted without user evidence."""
+    errors: list[str] = []
+    profile_blob = _profile_text_blob(profile)
+    report_blob = _text_blob(report)
+
+    for phrase in _PSYCH_INVENTED:
+        if phrase not in report_blob:
+            continue
+        if phrase in profile_blob:
+            continue
+        idx = report_blob.find(phrase)
+        context_start = max(0, idx - 60)
+        context = report_blob[context_start: idx + len(phrase) + 40]
+        hedges = ["возможно", "вероятно", "похоже", "может быть", "гипотез", "if ", "если"]
+        if any(hedge in context for hedge in hedges):
+            continue
+        errors.append(
+            f"[WARNING] Psychological assertion '{phrase}' appears in report as fact "
+            "but was not confirmed by user. Must be framed as hypothesis or removed."
+        )
+    return errors
+
+
 # ── Main entry point ─────────────────────────────────────────────────────────
 
 def validate_career_report(
@@ -363,6 +552,12 @@ def validate_career_report(
     errors += validate_route_randomness(profile, report)
     errors += validate_management_assumption(profile, report)
     errors += validate_career_break_logic(profile, report)
+    # PATCH-2026-08: new validators
+    errors += validate_survival_mode_evidence(profile, report)
+    errors += validate_seniority_protection(profile, report)
+    errors += validate_admin_roles_require_evidence(profile, report)
+    errors += validate_country_market_consistency(profile, report)
+    errors += validate_no_invented_psychological_facts(profile, report)
     return errors
 
 
