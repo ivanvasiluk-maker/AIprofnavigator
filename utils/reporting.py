@@ -181,16 +181,18 @@ def _detect_mode(report: dict) -> str:
 
 
 def build_meta(report: dict, user_name: str = "", profile_version: str = "") -> ReportMeta:
+    from openai_client import REPORT_PIPELINE_VERSION  # noqa: PLC0415
     name = _safe_text(user_name, "Пользователь")
     country = _detect_country(report)
     mode = _detect_mode(report)
     created_at = datetime.now().strftime("%Y-%m-%d")
+    pipeline_v = report.get("_pipeline_version") or REPORT_PIPELINE_VERSION
     return ReportMeta(
         user_name=name,
         country=country,
         mode=mode,
         created_at=created_at,
-        profile_version=_safe_text(profile_version, "-") if str(profile_version or "").strip() else "-",
+        profile_version=_safe_text(profile_version, "-") if str(profile_version or "").strip() else f"pipeline:{pipeline_v}",
     )
 
 
@@ -931,7 +933,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
   </section>
 
     <section class='page'>
-        <h2>Контракт финального отчёта (15 блоков)</h2>
+        <h2>Подробный анализ по 15 блокам</h2>
         <div class='card'><h3>1. Как мы поняли вашу ситуацию</h3><p>{escape(story_echo)}</p></div>
         <div class='card'><h3>2. Ваше профессиональное ядро</h3><p>{escape(_professional_core_summary(report))}</p></div>
         <div class='card'><h3>3. Подтверждённые функции</h3><ul>{function_lines}</ul></div>

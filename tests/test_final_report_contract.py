@@ -68,7 +68,8 @@ class FinalReportContractTests(unittest.TestCase):
         }
         html = render_report_html(report, build_meta(report, user_name="Ivan"))
 
-        self.assertIn("Контракт финального отчёта (15 блоков)", html)
+        self.assertIn("Подробный анализ по 15 блокам", html)
+        self.assertNotIn("Контракт финального отчёта", html)
         self.assertIn("1. Как мы поняли вашу ситуацию", html)
         self.assertIn("15. План на неделю и месяц", html)
         self.assertIn("Маршруты с обязательным блоком доказательств", html)

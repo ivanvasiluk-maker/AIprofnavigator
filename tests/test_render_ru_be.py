@@ -1627,9 +1627,19 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
             decision_layers=decision_layers,
         )
 
-        self.assertEqual(normalized["career_decision"]["recommended_main_path"], "Administrative Assistant / Back-office Specialist")
+        self.assertNotEqual(
+            normalized["career_decision"]["recommended_main_path"],
+            "Administrative Assistant / Back-office Specialist",
+            "Overwhelm must NOT change the route to admin defaults",
+        )
+        self.assertNotEqual(
+            normalized.get("digital_human", {}).get("strategy_mode"),
+            "Survival",
+            "Overwhelm must NOT set strategy_mode to Survival",
+        )
         self.assertEqual(normalized["action_plan"]["today"]["timebox"], "10 минут")
         self.assertIn("три вида работ", normalized["action_plan"]["today"]["action"].lower())
+        self.assertNotIn("плитка", normalized["action_plan"]["today"]["action"].lower())
         self.assertIn("decision_layers", normalized)
 
     def test_private_orders_anchor_preserved_under_overwhelm(self) -> None:

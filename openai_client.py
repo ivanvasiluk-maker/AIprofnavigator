@@ -762,445 +762,88 @@ RESUME_ANALYSIS_FALLBACK = {
     ],
 }
 
-FINAL_REPORT_FALLBACK = {
+REPORT_PIPELINE_VERSION = "career-report-clean-v2"
+
+# Safe empty fallback — contains NO user-specific content, NO admin roles, NO migration profile.
+# Used only when the LLM call fails completely. All substantive content comes from LLM output.
+FINAL_REPORT_FALLBACK: dict[str, Any] = {
+    "_pipeline_status": "insufficient_data",
+    "_pipeline_version": REPORT_PIPELINE_VERSION,
     "digital_human": {
-        "summary": "Вы взрослый специалист в миграционном переходе с сильным прошлым опытом и потребностью в быстром выходе на доход.",
-        "previous_identity": "Опытный специалист с подтвержденными результатами в работе с клиентами и процессами.",
-        "current_state": "Есть опыт и переносимые навыки, но не хватает локальной упаковки и ясного решения по первому маршруту.",
-        "main_asset": "Сильный релевантный опыт и умение работать с людьми.",
-        "main_risk": "Финансовое давление может подтолкнуть к хаотичной и долгой смене профессии.",
-        "main_barrier": "Недостаток ясной приоритизации и структурного плана перехода.",
-        "main_fear": "Застрять без дохода при долгом эксперименте с новой сферой.",
-        "hidden_strengths": ["быстрая адаптация", "умение учиться в неопределенности"],
+        "summary": "-",
+        "previous_identity": "-",
+        "current_state": "-",
+        "main_asset": "-",
+        "main_risk": "-",
+        "main_barrier": "-",
+        "main_fear": "-",
+        "hidden_strengths": [],
         "psychological_profile": {
-            "dominant_barriers": ["тревога", "язык", "деньги"],
-            "dominant_fears": ["не найти работу", "ошибиться с выбором профессии"],
-            "coping_style": "Рациональный и дисциплинированный подход, если есть ясный пошаговый план.",
-            "support_needed": "Короткие итерации, внешняя обратная связь рынка и декомпозиция задач по неделям.",
+            "dominant_barriers": [],
+            "dominant_fears": [],
+            "coping_style": "-",
+            "support_needed": "-",
         },
-        "fastest_path_to_income": "Войти в смежную роль, максимально используя предыдущие компетенции.",
-        "long_term_path": "Параллельно наращивать язык и компетенции для перехода в более высокую позицию.",
-        "skills": {
-            "professional": ["клиентская коммуникация", "ведение процессов", "достижение KPI"],
-            "transferable": ["переговоры", "организация", "приоритизация"],
-            "hidden": ["адаптивность", "устойчивость к неопределенности"],
-        },
-        "barriers": {
-            "external": ["язык", "локальный опыт", "адаптация резюме под рынок"],
-            "internal": ["тревога из-за переезда", "сомнения в переносимости опыта"],
-            "critical": ["финансовое давление", "срок до первого дохода"],
-        },
-        "motivation": {
-            "money": 9,
-            "stability": 8,
-            "freedom": 6,
-            "meaning": 6,
-            "status": 5,
-            "entrepreneurship": 4,
-        },
+        "fastest_path_to_income": "-",
+        "long_term_path": "-",
+        "skills": {"professional": [], "transferable": [], "hidden": []},
+        "barriers": {"external": [], "internal": [], "critical": []},
+        "motivation": {"money": 0, "stability": 0, "freedom": 0, "meaning": 0, "status": 0, "entrepreneurship": 0},
         "career_readiness": {
-            "urgency": "высокая",
-            "learning_capacity": "средняя",
-            "risk_tolerance": "умеренная",
-            "language_readiness": "требует усиления",
-            "mobility": "готовность к смежным ролям",
+            "urgency": "не определена",
+            "learning_capacity": "не определена",
+            "risk_tolerance": "не определена",
+            "language_readiness": "не определена",
+            "mobility": "не определена",
         },
-        "strategy_mode": "Survival",
+        "strategy_mode": "Growth",  # Never default to Survival without explicit evidence
     },
-    "experience_layers": [
-        "Административный слой: документы, сроки, поручения, процессная дисциплина.",
-        "Коммерческий слой: работа с клиентами, планом продаж и сопровождением сделок.",
-    ],
-    "what_not_reset": [
-        "Умение работать с документами и формальными процедурами.",
-        "Навык контроля сроков и поручений.",
-        "Опыт координации людей и задач.",
-        "Системность в офисных процессах.",
-        "Опыт клиентской коммуникации и поддержки отношений.",
-        "Умение быстро адаптироваться в новых правилах.",
-    ],
-    "market_analysis": [
-        {
-            "profession": "Administrative Assistant",
-            "fit_percent": 90,
-            "demand": "высокий",
-            "entry_speed": "высокая",
-            "competition": "средняя",
-            "requirements": ["Excel или Google Sheets", "документооборот", "базовый польский"],
-            "salary_range": "5000-7500 PLN brutto",
-            "profile_match_reason": "Сильное совпадение по административному опыту, работе с документами и координации задач.",
-        },
-        {
-            "profession": "Back-office Specialist",
-            "fit_percent": 84,
-            "demand": "средний",
-            "entry_speed": "средняя",
-            "competition": "средняя",
-            "requirements": ["процессная дисциплина", "работа с данными", "точность"],
-            "salary_range": "5500-8000 PLN brutto",
-            "profile_match_reason": "Подходит для профиля с опытом formal procedures, tracking и внутренней координации.",
-        },
-        {
-            "profession": "Document Controller",
-            "fit_percent": 76,
-            "demand": "средний",
-            "entry_speed": "средняя",
-            "competition": "средняя",
-            "requirements": ["документирование", "контроль версий документов", "внимание к деталям"],
-            "salary_range": "6000-9000 PLN brutto",
-            "profile_match_reason": "Особенно релевантно для опыта документооборота, сроков и формальных процедур.",
-        },
-    ],
-    "career_translation": [
-        {
-            "source_experience": "Контроль поручений и сроков",
-            "market_term": "Task tracking / deadline control / operations coordination",
-            "suitable_roles": ["Administrative Assistant", "Operations Coordinator"],
-        },
-        {
-            "source_experience": "Документооборот и формальные процедуры",
-            "market_term": "Document management / office administration",
-            "suitable_roles": ["Back-office Specialist", "Document Controller"],
-        },
-        {
-            "source_experience": "Руководство сотрудниками",
-            "market_term": "Team coordination / workflow management",
-            "suitable_roles": ["Office Administrator", "Operations Coordinator"],
-        },
-    ],
-    "career_bridges": [
-        {
-            "role": "Administrative Assistant",
-            "why_bridge": "Минимальный разрыв с прошлым административным опытом.",
-            "first_market_test": "Найти 10 вакансий и проверить повторяющиеся требования.",
-        },
-        {
-            "role": "Back-office Specialist",
-            "why_bridge": "Опора на документы, таблицы и процессную дисциплину.",
-            "first_market_test": "Собрать 5 релевантных откликов и зафиксировать фидбек.",
-        },
-        {
-            "role": "Operations Coordinator",
-            "why_bridge": "Использует опыт координации задач и дедлайнов.",
-            "first_market_test": "Подготовить 3 кейса координации в формате действие-результат.",
-        },
-    ],
-    "career_recommendations": [
-        {
-            "title": "Administrative Assistant",
-            "match_percent": 88,
-            "why_fit": "Это прямой перенос административного опыта в понятный для польского рынка формат без резкой смены трека.",
-            "pros": ["максимальная опора на прошлый опыт", "быстрый вход", "понятные вакансии на польском рынке"],
-            "risks": ["нужен базовый польский для переписки и звонков", "важно адаптировать CV под local role names"],
-            "entry_timeline": "1-3 месяца",
-            "income_range": "5000-7500 PLN brutto",
-        },
-        {
-            "title": "Back-office Specialist",
-            "match_percent": 82,
-            "why_fit": "Подходит для сильного process-oriented профиля: документы, дедлайны, внутренние процедуры, аккуратность и Excel.",
-            "pros": ["низкий порог смены трека", "ценится системность", "можно расти в operations"],
-            "risks": ["часто требуется аккуратный письменный польский", "нужна адаптация словаря под вакансии"],
-            "entry_timeline": "2-4 месяца",
-            "income_range": "5500-8000 PLN brutto",
-        },
-        {
-            "title": "Operations Coordinator",
-            "match_percent": 78,
-            "why_fit": "Хороший маршрут для профиля, где уже были поручения, координация людей, сроков и внутренних процессов.",
-            "pros": ["видимый карьерный рост", "опора на coordination experience", "востребовано в service и NGO-среде"],
-            "risks": ["часть вакансий просит локальный опыт", "нужно показать achievements, а не только обязанности"],
-            "entry_timeline": "2-4 месяца",
-            "income_range": "6000-9000 PLN brutto",
-        },
-    ],
-    "real_solutions": [
-        {
-            "title": "Решение №1: Вернуться в продажи через локальный рынок",
-            "recommendation_level": "рекомендуемое",
-            "success_probability": "высокая",
-            "timeline": "1-3 месяца",
-            "why": "Максимально использует прошлый опыт и дает самый короткий путь к доходу.",
-            "first_step": "Собрать 15 релевантных вакансий и адаптировать CV под sales-метрики.",
-        },
-        {
-            "title": "Решение №2: Переход в Customer Success",
-            "recommendation_level": "альтернативное",
-            "success_probability": "средняя",
-            "timeline": "2-4 месяца",
-            "why": "Хорошо опирается на навыки коммуникации, но требует усиления языка и доменной специфики.",
-            "first_step": "Подготовить 5 кейсов удержания клиентов и улучшить профиль LinkedIn.",
-        },
-        {
-            "title": "Решение №3: Полная смена профессии",
-            "recommendation_level": "долгосрочное",
-            "success_probability": "ниже",
-            "timeline": "6-18 месяцев",
-            "why": "Повышает риск затяжного периода без дохода при текущем финансовом давлении.",
-            "first_step": "Выделить отдельный вечерний трек обучения без замены основного доходного маршрута.",
-        },
-    ],
+    "experience_layers": [],
+    "what_not_reset": [],
+    "market_analysis": [],
+    "career_translation": [],
+    "career_bridges": [],
+    "career_recommendations": [],
+    "real_solutions": [],
     "career_decision": {
-        "recommended_main_path": "Administrative Assistant / Back-office Specialist",
-        "why_this_path": "Этот маршрут использует существующий административный и процессный опыт и дает самый короткий путь к доходу под текущим финансовым давлением.",
-        "why_not_other_paths": [
-            "Долгая смена профессии сейчас увеличит период без дохода.",
-            "Слишком узкие technical-роли потребуют длительной подготовки до первого оффера.",
-        ],
-        "backup_path": "Operations Coordinator / Sales Operations Assistant",
-        "avoid_for_now": "Полная смена на long-track профессию без промежуточного доходного шага.",
-        "decision_summary": "Сначала быстрый вход через смежный трек, затем наращивание компетенций для долгосрочного роста.",
+        "recommended_main_path": "-",
+        "why_this_path": "-",
+        "why_not_other_paths": [],
+        "backup_path": "-",
+        "avoid_for_now": "-",
+        "decision_summary": "-",
     },
-    "route_evidence_blocks": [
-        {
-            "route": "Administrative Assistant / Back-office Specialist",
-            "why_it_fits": ["Опирается на подтвержденный административный и процессный опыт."],
-            "evidence_from_user": ["Опыт документооборота", "Опыт координации задач"],
-            "missing_competencies": ["Локальный словарь вакансий", "Адаптация CV под польский рынок"],
-            "entry_level": "junior-middle",
-            "income_role": "primary",
-            "risks": ["Конкуренция на массовых ролях", "Требуется стабильный польский для коммуникации"],
-            "what_may_disprove_this_route": ["Прямой отказ от административных функций", "Новые ограничения по графику/доступности"],
-        },
-        {
-            "route": "Operations Coordinator / Sales Operations Assistant",
-            "why_it_fits": ["Использует переносимые навыки координации и контроля сроков."],
-            "evidence_from_user": ["Опыт организации процесса", "Работа с внутренними задачами"],
-            "missing_competencies": ["Более сильный английский/польский", "Демонстрация KPI-кейсов"],
-            "entry_level": "strong_junior-middle",
-            "income_role": "transition",
-            "risks": ["Требования к локальному опыту"],
-            "what_may_disprove_this_route": ["Недостаточный уровень языка для координационных задач"],
-        },
-        {
-            "route": "Смежные роли с быстрым входом (assistant/back-office)",
-            "why_it_fits": ["Дает короткий путь к доходу и не требует полного переобучения."],
-            "evidence_from_user": ["Есть релевантный бэк-офис опыт"],
-            "missing_competencies": ["Локальная адаптация откликов"],
-            "entry_level": "entry-junior",
-            "income_role": "quick",
-            "risks": ["Ниже стартовый доход"],
-            "what_may_disprove_this_route": ["Рынок подтвердит отсутствие релевантных вакансий"],
-        },
-        {
-            "route": "Временный стабилизирующий трек с минимальным порогом входа",
-            "why_it_fits": ["Снижает риск затяжного периода без дохода."],
-            "evidence_from_user": ["Финансовое давление"],
-            "missing_competencies": ["Уточнение допустимых условий"],
-            "entry_level": "entry",
-            "income_role": "emergency",
-            "risks": ["Слабая связь с долгосрочной траекторией"],
-            "what_may_disprove_this_route": ["Если основной маршрут дает быстрый доход без аварийного трека"],
-        },
-    ],
-    "development_map": {
-        "current_state": "Есть релевантный опыт, но профиль и подача не адаптированы под локальный рынок.",
-        "goal": "Получить первый оффер в смежном направлении за короткий срок.",
-        "gap": ["рыночная упаковка опыта", "язык для интервью", "практика откликов"],
-        "route": [
-            {
-                "stage": "Этап 1: Диагностика рынка",
-                "objective": "Понять требования реальных вакансий в целевом треке.",
-                "actions": ["Собрать 15 вакансий", "Выделить повторяющиеся требования"],
-                "output": "Список приоритетных требований рынка.",
-                "timeline": "2-3 дня",
-            },
-            {
-                "stage": "Этап 2: Упаковка опыта",
-                "objective": "Перевести прошлые результаты в язык рынка.",
-                "actions": ["Подготовить achievement-блок", "Обновить CV и LinkedIn"],
-                "output": "Актуальные CV и профиль для откликов.",
-                "timeline": "3-5 дней",
-            },
-            {
-                "stage": "Этап 3: Прицельные отклики",
-                "objective": "Запустить управляемый поток откликов.",
-                "actions": ["Отправлять 3-5 релевантных откликов в день", "Вести трекер откликов"],
-                "output": "Первые интервью и обратная связь от рынка.",
-                "timeline": "2-4 недели",
-            },
-            {
-                "stage": "Этап 4: Интервью и оффер",
-                "objective": "Конвертировать интервью в оффер.",
-                "actions": ["Подготовить 60-секундный pitch", "Отрепетировать ответы на 10 типовых вопросов"],
-                "output": "Первый оффер в целевом или смежном направлении.",
-                "timeline": "2-6 недель",
-            },
-        ],
-        "first_month": [
-            {
-                "week": 1,
-                "focus": "Диагностика рынка",
-                "tasks": ["Собрать 15 вакансий", "Выделить требования", "Собрать целевые ключевые слова"],
-                "output": "Ясная картина рынка и список требований.",
-            },
-            {
-                "week": 2,
-                "focus": "Упаковка профиля",
-                "tasks": ["Обновить CV", "Обновить LinkedIn", "Подготовить 10 достижений с цифрами"],
-                "output": "Готовый профиль для откликов.",
-            },
-            {
-                "week": 3,
-                "focus": "Активные отклики",
-                "tasks": ["Отправлять 3-5 откликов в день", "Вести трекер откликов", "Корректировать шаблоны"],
-                "output": "Поток интервью и обратной связи.",
-            },
-            {
-                "week": 4,
-                "focus": "Интервью и переговоры",
-                "tasks": ["Отработать pitch", "Подготовить ответы", "Сделать разбор интервью"],
-                "output": "Готовность к офферу и улучшенная конверсия.",
-            },
-        ],
-    },
+    "route_evidence_blocks": [],
+    "development_map": {"current_state": "-", "goal": "-", "gap": [], "route": [], "first_month": []},
     "action_plan": {
-        "today": {
-            "action": "Собрать 10 ключевых слов из вакансий и найти 5 релевантных позиций под текущий маршрут.",
-            "timebox": "15 минут",
-            "result": "Список приоритетных требований для адаптации профиля.",
-        },
-        "this_week": [
-            "Подготовить CV с 8-10 достижениями в цифрах",
-            "Обновить LinkedIn под целевую роль",
-            "Сделать 20-25 прицельных откликов",
-            "Подготовить 60-секундный питч",
-            "Отрепетировать ответы на 10 вопросов интервью",
-            "Собрать обратную связь и скорректировать стратегию",
-        ],
-        "this_month": [
-            "Стабилизировать ежедневный поток откликов",
-            "Дойти до серии интервью в целевом треке",
-            "Получить первый оффер или 2-3 финальных этапа",
-            "Запустить параллельный трек развития языка для рабочих сценариев",
-        ],
+        "today": {"action": "-", "timebox": "-", "result": "-"},
+        "this_week": [],
+        "this_month": [],
     },
-    "weekly_plan": [
-        {"day": 1, "focus": "Проверить рынок", "task": "Найти 10 вакансий по основному маршруту и выписать требования.", "time": "40 минут", "result": "Список повторяющихся требований.", "why": "Это покажет, насколько ваш опыт уже совпадает с рынком."},
-        {"day": 2, "focus": "Упаковать опыт", "task": "Выписать 10 достижений в формате действие -> результат -> цифра.", "time": "30 минут", "result": "Материал для CV и LinkedIn.", "why": "Работодатель оценивает результаты, а не обязанности."},
-        {"day": 3, "focus": "Обновить профиль", "task": "Переписать заголовок и summary в LinkedIn под целевой маршрут.", "time": "35 минут", "result": "Профиль, понятный рекрутерам.", "why": "Сильный профиль повышает конверсию откликов."},
-        {"day": 4, "focus": "Подготовить CV", "task": "Собрать CV на 1 страницу с акцентом на релевантные кейсы.", "time": "45 минут", "result": "Черновик CV для откликов.", "why": "Без адаптированного CV рынок не видит вашу ценность."},
-        {"day": 5, "focus": "Запустить отклики", "task": "Отправить 5 прицельных откликов на релевантные вакансии.", "time": "50 минут", "result": "Первые отправленные отклики.", "why": "Только реальные отклики дают обратную связь от рынка."},
-        {"day": 6, "focus": "Подготовка к интервью", "task": "Составить и проговорить 60-секундный рассказ о себе.", "time": "25 минут", "result": "Готовый elevator pitch.", "why": "Четкое позиционирование повышает шанс пройти скрининг."},
-        {"day": 7, "focus": "Скорректировать план", "task": "Проанализировать ответы рынка и обновить стратегию на следующую неделю.", "time": "30 минут", "result": "Обновленный план откликов и обучения.", "why": "Итерации быстрее приводят к офферу, чем попытка сделать идеально с первого раза."},
-    ],
-    "career_barriers": [
-        {
-            "barrier": "Страх ошибиться с выбором профессии",
-            "severity": 82,
-            "mechanism": "Человек долго сравнивает варианты и откладывает решение, чтобы избежать ошибки.",
-            "recommended_skill": "Принятие решений в условиях неопределенности",
-            "first_exercise": "Выберите один маршрут и запретите себе менять решение 7 дней; ежедневно делайте 1 действие по нему.",
-        },
-        {
-            "barrier": "Избегание откликов",
-            "severity": 75,
-            "mechanism": "Высокая тревога перед отказом приводит к прокрастинации и отсутствию рыночной обратной связи.",
-            "recommended_skill": "Экспозиция к отказам малыми шагами",
-            "first_exercise": "Отправьте 2 отклика сегодня по шаблону, фиксируя только факт отправки, а не результат.",
-        },
-    ],
-    "barrier_landscape": {
-        "external": ["язык", "ограниченное время", "финансовое давление", "нет локального опыта"],
-        "internal": ["страх отказов", "неуверенность в ценности опыта", "хаос в голове"],
-        "behavioral_risk": "Страх отказа -> долгие раздумья -> откладывание откликов -> нет данных рынка -> рост тревоги.",
-        "first_counter_action": "Сделать 3 небольших рыночных теста за неделю (3 отклика, 1 адаптация CV, 1 разбор обратной связи).",
-    },
-    "social_integration": {
-        "environment": ["Есть базовое понимание локальной среды и рабочих форматов."],
-        "people": ["Есть частичный круг контактов, но не хватает профессиональных связей."],
-        "communities": ["Нужно добавить 1-2 профессиональных сообщества в LinkedIn/Telegram/Facebook."],
-        "opportunities": ["Регулярно мониторить локальные программы, курсы и вакансии."],
-        "contribution": ["Использовать волонтёрские/локальные проекты как мост к первым контактам."],
-    },
+    "weekly_plan": [],
+    "career_barriers": [],
+    "barrier_landscape": {"external": [], "internal": [], "behavioral_risk": "-", "first_counter_action": "-"},
+    "social_integration": {"environment": [], "people": [], "communities": [], "opportunities": [], "contribution": []},
     "resource_level": "medium",
     "integration_level": "medium",
-    "energy_sources": [
-        "Организация процессов",
-        "Работа с людьми",
-        "Анализ",
-    ],
-    "career_priorities": [
-        "Быстро выйти на доход",
-        "Сохранить профессиональный статус",
-        "Найти устойчивость и баланс",
-    ],
-    "competency_signals": [
-        "Коммуникация",
-        "Организация процессов",
-        "Решение проблем",
-    ],
-    "decision_layers": {
-        "career_profile": [
-            "Текущая идентичность: данных недостаточно",
-        ],
-        "constraints": [
-            "Данных о изменении ограничений пока недостаточно",
-        ],
-        "psychological_state": [
-            "Стабильное состояние без явного перегруза",
-        ],
-        "action_capacity": [
-            "Темп: normal",
-        ],
-    },
+    "energy_sources": [],
+    "career_priorities": [],
+    "competency_signals": [],
+    "decision_layers": {"career_profile": [], "constraints": [], "psychological_state": [], "action_capacity": []},
     "facts_only": {
-        "explicit_facts": [
-            "Пока доступен только общий миграционный контекст и базовый карьерный запрос.",
-        ],
+        "explicit_facts": [],
         "resume_facts": [],
-        "inferences": [
-            "Похоже, пользователю нужен короткий и структурный маршрут к первому доходу.",
-        ],
-        "unknowns": [
-            "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах.",
-            "Пока недостаточно данных, чтобы это оценить. Можно уточнить это в следующих шагах.",
-        ],
+        "inferences": [],
+        "unknowns": [],
         "contradictions": [],
-        "career_profile": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
-        "constraints": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
-        "psychological_state": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
-        "action_capacity": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
-        "integration": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
-        "route_preferences": {
-            "from_story": [],
-            "from_answers": [],
-            "from_resume": [],
-            "inferred": [],
-            "unknown": [],
-        },
+        "career_profile": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
+        "constraints": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
+        "psychological_state": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
+        "action_capacity": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
+        "integration": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
+        "route_preferences": {"from_story": [], "from_answers": [], "from_resume": [], "inferred": [], "unknown": []},
     },
-    "closing_message": "У вас уже есть материал для перехода. Следующая задача не искать идеальный путь, а собрать первый работающий маршрут и проверить его на рынке за неделю.",
+    "closing_message": "-",
 }
 
 MANDATORY_QUESTIONS_RU = [
@@ -1537,7 +1180,7 @@ class CareerOpenAIClient:
                 if first and not str(digital_human.get("previous_identity", "")).strip():
                     digital_human["previous_identity"] = first
 
-        preferred_titles = self._preferred_polish_roles(story_analysis)
+        preferred_titles = self._preferred_polish_roles(story_analysis, user_segment)
         if preferred_titles:
             self._normalize_admin_backoffice_roles(report, preferred_titles)
 
@@ -1634,9 +1277,15 @@ class CareerOpenAIClient:
         if overload:
             action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
             today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
-            example_roles = "плитка, гипсокартон, мебель"
+            # Derive example from the user's own skills/experience, never use generic construction examples
+            example_roles: str
             if profile_domain == CONSTRUCTION_ESTIMATION_DOMAIN:
                 example_roles = "сметы, проверка проектной документации, расчёт объёмов работ"
+            else:
+                user_skills = [str(s).strip() for s in story_analysis.get("skills", []) if str(s).strip()]
+                user_exp = [str(e).strip() for e in story_analysis.get("experience_snapshot", []) if str(e).strip()]
+                candidates = (user_skills + user_exp)[:3]
+                example_roles = ", ".join(candidates) if candidates else "конкретные задачи из вашего опыта"
             today["action"] = (
                 "Напишите в заметках три вида работ, которые вы реально умеете делать лучше всего "
                 f"(например: {example_roles})."
@@ -1646,9 +1295,11 @@ class CareerOpenAIClient:
             action_plan["today"] = today
             report["action_plan"] = action_plan
 
+            # Overwhelm affects STEP SIZE only — never mode or route
             digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
             if digital_human:
-                digital_human["strategy_mode"] = "Survival"
+                # Do NOT set Survival: emotional state does not justify Survival mode
+                pass
 
             decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
             if decision:
@@ -1674,9 +1325,8 @@ class CareerOpenAIClient:
                         decision["backup_path"] = "Локальный найм по текущему профилю как стабилизирующий трек"
 
             if overload and (not has_driver or has_contradictions):
-                preferred_titles = self._preferred_polish_roles(story_analysis)
-                if preferred_titles and decision:
-                    decision["recommended_main_path"] = f"{preferred_titles[0]} / {preferred_titles[1]}"
+                # No admin role injection here — done in _align_report_with_story with segment guard
+                pass
 
     def _build_facts_only(
         self,
@@ -2452,12 +2102,21 @@ class CareerOpenAIClient:
             return
         mode = str(digital_human.get("strategy_mode", "")).strip()
         if mode in {"Survival", "Transition", "Growth"}:
+            # Survival requires explicit evidence - demote if evidence missing
+            if mode == "Survival":
+                facts_only = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+                explicit_facts = " ".join(str(f) for f in (facts_only.get("explicit_facts") or [])).lower()
+                survival_signals = [
+                    "без дохода", "no income", "долг", "debt",
+                    "срочно нужна", "urgent", "потери жилья", "housing risk",
+                    "финансовый дедлайн", "financial deadline",
+                ]
+                if not any(s in explicit_facts for s in survival_signals):
+                    digital_human["strategy_mode"] = "Transition"
             return
         readiness = digital_human.get("career_readiness") if isinstance(digital_human.get("career_readiness"), dict) else {}
         urgency = str((readiness or {}).get("urgency", "")).lower()
-        if "выс" in urgency or "high" in urgency:
-            digital_human["strategy_mode"] = "Survival"
-        elif "сред" in urgency or "moder" in urgency or "medium" in urgency:
+        if "сред" in urgency or "moder" in urgency or "medium" in urgency:
             digital_human["strategy_mode"] = "Transition"
         else:
             digital_human["strategy_mode"] = "Growth"
@@ -2657,7 +2316,12 @@ class CareerOpenAIClient:
         report["action_plan"] = action_plan
         report["first_step_buttons"] = list(CONSTRUCTION_DOMAIN_FIRST_STEP_BUTTONS)
 
-    def _preferred_polish_roles(self, story_analysis: dict[str, Any]) -> list[str]:
+    def _preferred_polish_roles(self, story_analysis: dict[str, Any], user_segment: str = "") -> list[str]:
+        # Guard: senior/leader/specialist/entrepreneur segments never get admin default roles
+        _no_admin_segments = {"leader", "specialist_expert", "entrepreneur"}
+        if str(user_segment or "").strip().lower() in _no_admin_segments:
+            return []
+
         chunks = [
             str(story_analysis.get("current_identity", "")),
             " ".join(str(item) for item in story_analysis.get("experience_snapshot", []) if isinstance(item, str)),
@@ -2669,7 +2333,8 @@ class CareerOpenAIClient:
         if profile_domain == CONSTRUCTION_ESTIMATION_DOMAIN:
             return CONSTRUCTION_ESTIMATION_ROLES[:4]
 
-        project_ops_keywords = ["проект", "ngo", "education", "participant", "участник", "program", "координатор"]
+        # Raised threshold to 3 to prevent accidental triggers from generic words
+        project_ops_keywords = ["ngo", "participant", "program coordinator", "координатор программ"]
         if sum(1 for keyword in project_ops_keywords if keyword in haystack) >= 2:
             return [
                 "Operations Coordinator",
@@ -2678,8 +2343,8 @@ class CareerOpenAIClient:
                 "Back-office Specialist",
             ]
 
-        sales_ops_keywords = ["продаж", "sales", "crm", "sap", "erp", "аккаунт", "клиент", "лид"]
-        if sum(1 for keyword in sales_ops_keywords if keyword in haystack) >= 2:
+        sales_ops_keywords = ["продаж", "sales", "crm", "sap", "erp", "аккаунт", "лид", "воронк"]
+        if sum(1 for keyword in sales_ops_keywords if keyword in haystack) >= 3:
             return [
                 "Sales Operations Assistant",
                 "CRM Specialist",
@@ -2687,20 +2352,15 @@ class CareerOpenAIClient:
                 "Administrative Assistant",
             ]
 
+        # Only trigger admin roles if EXPLICIT admin/backoffice/documentation keywords present
         admin_keywords = [
-            "админ",
-            "администра",
-            "докумен",
             "документооборот",
-            "office",
             "back-office",
-            "координа",
-            "поручен",
-            "срок",
-            "процесс",
-            "excel",
-            "гос",
+            "секретар",
+            "document control",
+            "делопроизводств",
             "formal procedure",
+            "канцелярия",
         ]
         if sum(1 for keyword in admin_keywords if keyword in haystack) >= 2:
             return [
@@ -2776,27 +2436,9 @@ class CareerOpenAIClient:
                 if any(token in title for token in ["продаж", "sales", "customer success"]):
                     continue
                 normalized.append(item)
-
-            if not normalized:
-                normalized = [
-                    {
-                        "title": "Решение №1: Быстрый вход через административный маршрут",
-                        "recommendation_level": "рекомендуемое",
-                        "success_probability": "высокая",
-                        "timeline": "1-3 месяца",
-                        "why": "Максимально использует текущий административный опыт без резкой смены трека.",
-                        "first_step": "Собрать 15 вакансий Administrative Assistant / Back-office и адаптировать CV под требования.",
-                    },
-                    {
-                        "title": "Решение №2: Переход в Document Controller / Operations",
-                        "recommendation_level": "альтернативное",
-                        "success_probability": "средняя",
-                        "timeline": "2-4 месяца",
-                        "why": "Опирается на документооборот, контроль сроков и процессную дисциплину.",
-                        "first_step": "Собрать 10 вакансий и выделить повторяющиеся требования к документам и отчетности.",
-                    },
-                ]
-            report["real_solutions"] = normalized[:3]
+            # No admin hardcoded fallback — keep original solutions or leave empty
+            if normalized:
+                report["real_solutions"] = normalized[:3]
 
     def _inject_signal_roles(self, report: dict[str, Any], story_analysis: dict[str, Any], answers_text: str) -> None:
         blob = " ".join(

@@ -22,7 +22,7 @@
     "NXT_PATCH_31",
     "NXT_PATCH_32",
     "NXT_PATCH_33",
-    "NXT_PATCH_35"
+    "NXT_PATCH_36"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -82,19 +82,26 @@
       "services/career_guardrails.py",
       "utils/reporting.py",
       "tests/test_golden_marketing_manager.py"
+    ],
+    "NXT_PATCH_36": [
+      "openai_client.py",
+      "utils/reporting.py",
+      "tests/test_final_report_contract.py",
+      "tests/test_render_ru_be.py",
+      "tests/test_golden_marketing_manager.py"
     ]
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
     "prompts.py": "ACCF89ED117AC2CBAB0B8E8CEC5D1F5FD3CA9B8DFA1A8E0A468438F35D783920",
-    "openai_client.py": "FBA23199B3490588C85262A549B02E571800765B096CF379190B2983C8EACD8A",
+    "openai_client.py": "41747E581431AF4BF1AFD82EAB318BF9E8EAE8871578A0BC3443E6A87087A8A7",
     "handlers/career.py": "3FE82010831DFF2BAC223E8D44DE94700806D13AB08E0F99C41F27B130E30B77",
     "states.py": "4CB3282082BF494EA6FE7AA14629A008B8BC2FCACA6C89E7C62657FA8BF8DE86",
     "services/evidence_profile.py": "946453BFC110C4DBC7D864A4B63D197CA165DE6B64F5B688C43E704BE1A01FC6",
     "services/interview_policy.py": "4B2A658DF71FB01E6D2FB21A9BCDCD36ECAFF74C48F41071E1640A0A5FA2444D",
     "services/hypothesis_engine.py": "4E0E8FC9D566A036B01ABE9E04DCDF56773591DFB1FBB2D5B1212410B77E26D5",
     "services/career_guardrails.py": "CA33AE68232A9728DB5F6668A2BD82766E41E6369E98ECBEAB7BCBCC30C2ACC6",
-    "utils/reporting.py": "16A7A6146301E03123D6A1EB1B4E9FA3A020B7F1A3C9D93796FA0A2AB71B8169",
+    "utils/reporting.py": "1FAD30776B4922FC3CAEF06163F32C6399742553617F4924F267A93A38259F51",
     "utils/analytics.py": "2D82B5C0BBBCBCC002AAB1519AFFB9081245272BA5047A4F89E2D493D387BAE2"
   },
   "created_at": "2026-08-06T13:26:15.2569504Z"
