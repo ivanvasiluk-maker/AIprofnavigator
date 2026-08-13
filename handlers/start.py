@@ -466,6 +466,22 @@ async def recover_without_fsm_state(message: Message, state: FSMContext) -> None
         interaction_profile=profile_payload if isinstance(profile_payload, dict) else {},
     )
 
+    if recovered_state == CareerFlow.INTERVIEW and str(profile_row.get("source") or "") == "fsm_checkpoint":
+        await state.update_data(
+            story_text=profile_payload.get("story_text", ""),
+            story_analysis=profile_payload.get("story_analysis", {}),
+            qa_answers=profile_payload.get("qa_answers", []),
+            qa_index=int(profile_payload.get("qa_index") or 0),
+            answers_text=profile_payload.get("answers_text", ""),
+            evidence_profile=profile_payload.get("evidence_profile", {}),
+            interview_context=profile_payload.get("interview_context", {}),
+        )
+        await state.set_state(CareerFlow.INTERVIEW)
+        from handlers.career import process_answers_input
+
+        await process_answers_input(message, state, text)
+        return
+
     if _is_final_like_state(recovered_state_name) and isinstance(report_row.get("report"), dict) and report_row.get("report"):
         await state.set_state(CareerFlow.FINAL_READY)
         await state.update_data(

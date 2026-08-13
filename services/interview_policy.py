@@ -468,6 +468,7 @@ def is_ready_for_conclusion(
 
 class ReportReadiness(BaseModel):
     status: Literal["not_ready", "ready_with_uncertainty", "ready"]
+    readiness_level: Literal["NOT_READY", "PRELIMINARY_REPORT_READY", "FULL_REPORT_READY"] = "NOT_READY"
     blocking_gaps: list[str] = PydanticField(default_factory=list)
     non_blocking_gaps: list[str] = PydanticField(default_factory=list)
     warnings: list[str] = PydanticField(default_factory=list)
@@ -553,8 +554,15 @@ def evaluate_report_readiness(
         if "no_professional_core" not in blocking:
             blocking.append("insufficient_data_for_any_route")
 
+    readiness_level = "NOT_READY"
+    if status == "ready":
+        readiness_level = "FULL_REPORT_READY"
+    elif status == "ready_with_uncertainty":
+        readiness_level = "PRELIMINARY_REPORT_READY"
+
     return ReportReadiness(
         status=status,
+        readiness_level=readiness_level,
         blocking_gaps=blocking,
         non_blocking_gaps=non_blocking,
         warnings=warnings,

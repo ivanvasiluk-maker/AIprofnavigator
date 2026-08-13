@@ -917,7 +917,7 @@ class CareerOpenAIClient:
         self.model = model
         self.transcribe_model = transcribe_model
         self.api_key = api_key
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = OpenAI(api_key=api_key, timeout=45.0, max_retries=1) if api_key else None
 
     def _ensure_client(self) -> OpenAI:
         if self.client is None:
@@ -962,8 +962,14 @@ class CareerOpenAIClient:
         language: str = "ru",
     ) -> dict[str, Any]:
         try:
-            raw_text = await asyncio.to_thread(self._chat, prompt, schema, language)
+            raw_text = await asyncio.wait_for(
+                asyncio.to_thread(self._chat, prompt, schema, language),
+                timeout=55.0,
+            )
             return json.loads(raw_text)
+        except asyncio.TimeoutError:
+            print("[openai] request timed out; using fallback response", flush=True)
+            return copy.deepcopy(fallback)
         except Exception:
             return copy.deepcopy(fallback)
 

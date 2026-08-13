@@ -38,6 +38,7 @@ from handlers.career import (
     _questions_support,
     _segment_common_questions,
     _start_questions_module,
+    _is_restart_intent,
     restart_from_any_state,
     barriers_fallback,
     _short_conclusion_7_lines,
@@ -1819,6 +1820,10 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
+    def test_stable_income_answer_is_not_restart_intent(self) -> None:
+        self.assertFalse(_is_restart_intent(ROUTE_CHOICE_STABLE))
+        self.assertTrue(_is_restart_intent("🔁 Пройти заново"))
+
     async def test_process_story_input_moves_to_story_confirmation(self) -> None:
         state = FakeState(
             data={

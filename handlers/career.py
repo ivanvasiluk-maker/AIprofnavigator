@@ -163,6 +163,7 @@ from keyboards import (
     step_tracking_keyboard,
     support_mode_keyboard,
     route_choice_keyboard,
+    report_readiness_keyboard,
     career_switch_reason_keyboard,
     # route-context intake uses plain text prompts and the existing input method keyboard
     story_confirmation_keyboard,
@@ -311,18 +312,18 @@ _CAREER_STRATEGY_BY_ACTION = {
 }
 
 _ROUTE_CONTEXT_LANGUAGE_CURRENT_OPTIONS = [
-    "Польский: нет / ниже A1",
-    "Польский: A1-A2",
-    "Польский: B1",
-    "Польский: B2+",
-    "Английский: A2 и выше",
+    "Английский: A1-A2",
+    "Английский: B1",
+    "Английский: B2",
+    "Английский: C1-C2",
+    "Локальный язык: A1-A2",
 ]
 
 _ROUTE_CONTEXT_LANGUAGE_TARGET_OPTIONS = [
-    "Цель: польский A2",
-    "Цель: польский B1",
-    "Цель: польский B2+",
-    "Цель: английский B1+",
+    "Цель: английский B2",
+    "Цель: английский C1+",
+    "Цель: локальный язык A2",
+    "Цель: локальный язык B1",
     "Пока без языковой цели",
 ]
 
@@ -415,6 +416,12 @@ def _language_options_for_country(country_code: str) -> tuple[list[str], list[st
             ["Английский: A1-A2", "Английский: B1", "Английский: B2", "Английский: C1-C2"],
             ["Цель: английский B2", "Цель: английский C1+", "Пока без языковой цели"],
         )
+    if not country_code or country_code == "UNKNOWN":
+        local_lang = "Местный язык"
+        return (
+            [f"{local_lang}: нет / ниже A1", f"{local_lang}: A1-A2", f"{local_lang}: B1+", "Английский: B1 и выше", "Пока учу английский"],
+            [f"Цель: {local_lang.lower()} A2", f"Цель: {local_lang.lower()} B1", "Цель: английский B1+", "Пока без языковой цели"],
+        )
     lang_map = {"LT": "Литовский", "LV": "Латышский", "EE": "Эстонский", "NL": "Нидерландский", "FI": "Финский", "CZ": "Чешский"}
     local_lang = lang_map.get(country_code, "Местный язык")
     return (
@@ -429,24 +436,24 @@ _ROUTE_CONTEXT_INCOME_URGENCY_OPTIONS = [
 ]
 
 _ROUTE_CONTEXT_MIN_INCOME_OPTIONS = [
-    "Минимум: до 3000 PLN/мес",
-    "Минимум: 3000-4500 PLN/мес",
-    "Минимум: 4500-6000 PLN/мес",
-    "Минимум: 6000+ PLN/мес",
+    "Минимум: до 1000 EUR/мес",
+    "Минимум: 1000-1500 EUR/мес",
+    "Минимум: 1500-2500 EUR/мес",
+    "Минимум: 2500+ EUR/мес",
 ]
 
 _ROUTE_CONTEXT_DESIRED_INCOME_OPTIONS = [
-    "Цель: до 4500 PLN/мес",
-    "Цель: 4500-6000 PLN/мес",
-    "Цель: 6000-8000 PLN/мес",
-    "Цель: 8000+ PLN/мес",
+    "Цель: до 1500 EUR/мес",
+    "Цель: 1500-2500 EUR/мес",
+    "Цель: 2500-4000 EUR/мес",
+    "Цель: 4000+ EUR/мес",
 ]
 
 _ROUTE_CONTEXT_TRAINING_BUDGET_OPTIONS = [
-    "Бюджет на обучение: 0 PLN",
-    "Бюджет на обучение: до 500 PLN",
-    "Бюджет на обучение: 500-2000 PLN",
-    "Бюджет на обучение: 2000+ PLN",
+    "Бюджет на обучение: 0 EUR",
+    "Бюджет на обучение: до 200 EUR",
+    "Бюджет на обучение: 200-800 EUR",
+    "Бюджет на обучение: 800+ EUR",
 ]
 
 _ROUTE_CONTEXT_STUDY_TIME_OPTIONS = [
@@ -477,6 +484,7 @@ _ROUTE_CONTEXT_HEALTH_LIMIT_OPTIONS = [
     "Есть ограничения по графику",
     "Есть ограничения по здоровью",
     "Есть ограничения по детям/уходу",
+    "Есть несколько ограничений одновременно",
 ]
 
 _ROUTE_CONTEXT_DOCS_OPTIONS = [
@@ -534,13 +542,13 @@ _ROUTE_CONTEXT_FIELDS = [
     },
     {
         "id": "current_language_level",
-        "prompt": "3/15. Выберите текущий языковой уровень.",
+        "prompt": "3/15. Какие языки вы знаете сейчас и на каком уровне? Можно выбрать несколько вариантов.",
         "keys": ["current_language_level"],
         "options": _ROUTE_CONTEXT_LANGUAGE_CURRENT_OPTIONS,
     },
     {
         "id": "target_language",
-        "prompt": "4/15. Выберите целевой язык/уровень на ближайшие месяцы.",
+        "prompt": "4/15. Какие языки и уровни для вас цель на ближайшие месяцы? Можно выбрать несколько вариантов.",
         "keys": ["target_language"],
         "options": _ROUTE_CONTEXT_LANGUAGE_TARGET_OPTIONS,
     },
@@ -588,7 +596,7 @@ _ROUTE_CONTEXT_FIELDS = [
     },
     {
         "id": "health_or_schedule_limits",
-        "prompt": "12/15. Есть ли ограничения по здоровью/графику/детям?",
+        "prompt": "12/15. Есть ли ограничения по здоровью/графику/детям? Можно выбрать несколько вариантов.",
         "keys": ["health_or_schedule_limits"],
         "options": _ROUTE_CONTEXT_HEALTH_LIMIT_OPTIONS,
     },
@@ -659,7 +667,6 @@ _RESTART_INTENT_MARKERS = [
     "пройти заново",
     "начать заново",
     "начать сначала",
-    "сначала",
     "с начала",
     "пройти сначала",
     "хочу пройти сначала",
@@ -694,9 +701,15 @@ def _is_restart_intent(text: str) -> bool:
         return False
     if low in {"/start", "restart", "start over"}:
         return True
-    if low in {item.lower() for item in ALL_RESTART}:
+    restart_labels = {item.lower() for item in ALL_RESTART}
+    if low in restart_labels:
         return True
-    return any(marker in low for marker in _RESTART_INTENT_MARKERS)
+    return any(
+        low == marker
+        or low.startswith(f"{marker} ")
+        or low.endswith(f" {marker}")
+        for marker in _RESTART_INTENT_MARKERS
+    )
 
 
 def _is_preliminary_result_intent(text: str) -> bool:
@@ -809,10 +822,89 @@ def _need_decision_comparison_text(bundle: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _resolve_country_config_for_context(route_context: dict[str, object] | None) -> dict[str, str]:
+    """Resolve a stable country config from the current route context, without relying on stale globals."""
+    if not isinstance(route_context, dict):
+        return {}
+
+    explicit_cfg = route_context.get("country_config")
+    if isinstance(explicit_cfg, dict):
+        cfg = {str(k): str(v).strip() for k, v in explicit_cfg.items() if str(k).strip()}
+        if cfg:
+            return cfg
+
+    explicit_code = str(route_context.get("country_code") or "").strip()
+    if explicit_code:
+        by_code = _COUNTRY_CONFIGS.get(str(explicit_code).lower())
+        if isinstance(by_code, dict):
+            return {str(k): str(v).strip() for k, v in by_code.items() if str(k).strip()}
+
+    for candidate_key in ("country", "city"):
+        candidate = str(route_context.get(candidate_key) or "").strip()
+        if candidate:
+            resolved = _resolve_country_config(candidate)
+            if str(resolved.get("country_code") or "").strip():
+                return {str(k): str(v).strip() for k, v in resolved.items() if str(k).strip()}
+    return {}
+
+
+def _normalize_route_context(route_context: dict[str, object] | None) -> dict[str, str]:
+    """Normalize legacy/alias keys so the final readiness gate matches the canonical field names."""
+    if not isinstance(route_context, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    alias_map = {
+        "goal": "career_goal_type",
+        "work": "work_preferences",
+        "documents": "documents_and_work_rights",
+        "proof": "portfolio_or_references",
+    }
+
+    for key, value in route_context.items():
+        if not str(key).strip():
+            continue
+        canonical_key = alias_map.get(str(key), str(key))
+        if value is None:
+            normalized[canonical_key] = ""
+        else:
+            normalized[canonical_key] = str(value).strip()
+
+    resolved_country_config = _resolve_country_config_for_context(route_context)
+    if resolved_country_config:
+        normalized["country_config"] = resolved_country_config
+    elif str(normalized.get("country") or "").strip():
+        country_config = _resolve_country_config(str(normalized["country"]))
+        normalized["country_config"] = country_config
+
+    return normalized
+
+
+def _clean_profile_value(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        cleaned = []
+        for item in value:
+            text = str(item).strip()
+            if not text or text in {"-", "—", "None", "null"}:
+                continue
+            cleaned.append(text)
+        return cleaned
+    if isinstance(value, tuple):
+        return _clean_profile_value(list(value))
+    text = str(value).strip()
+    if not text or text in {"-", "—", "None", "null"}:
+        return ""
+    return text
+
+
 def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
     """Create an immutable snapshot of the route answers and country config before report generation."""
-    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
-    country_config = route_context.get("country_config") if isinstance(route_context.get("country_config"), dict) else {}
+    route_context = _normalize_route_context(data.get("route_context") if isinstance(data.get("route_context"), dict) else {})
+    country_config = _resolve_country_config_for_context(route_context)
+    if not country_config and isinstance(route_context.get("country_config"), dict):
+        country_config = route_context["country_config"]
     if not country_config and str(route_context.get("country") or data.get("country") or "").strip():
         country_config = _resolve_country_config(str(route_context.get("country") or data.get("country") or ""))
 
@@ -825,9 +917,32 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         "market_locale": str((country_config or {}).get("market_locale") or "unknown").strip(),
         "answers_text": str(data.get("answers_text") or "").strip(),
         "story_text": str(data.get("story_text") or "").strip(),
-        "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip()},
+        "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip() and key != "country_config"},
         "ready_for_report": False,
     }
+
+    normalized_answers = {
+        "income_urgency": _clean_profile_value(route_context.get("income_urgency") or data.get("income_urgency")),
+        "minimum_income": _clean_profile_value(route_context.get("minimum_monthly_income") or data.get("minimum_income") or route_context.get("minimum_income")),
+        "target_income": _clean_profile_value(route_context.get("desired_monthly_income") or data.get("target_income") or route_context.get("target_income")),
+        "currency": str((country_config or {}).get("currency") or str(data.get("currency") or "EUR")).upper(),
+        "learning_budget": _clean_profile_value(route_context.get("training_budget") or data.get("learning_budget")),
+        "learning_hours_week": _clean_profile_value(route_context.get("available_time_for_study") or data.get("learning_hours_week")),
+        "career_goal": _clean_profile_value(route_context.get("career_goal_type") or data.get("career_goal")),
+        "work_preferences": _clean_profile_value(route_context.get("work_preferences") or data.get("work_preferences") or []),
+        "care_constraints": bool(str(route_context.get("health_or_schedule_limits") or data.get("care_constraints") or "").strip() and str(route_context.get("health_or_schedule_limits") or data.get("care_constraints") or "").strip() not in {"-", "—", "Нет", "нет"}),
+        "work_authorization_status": _clean_profile_value(route_context.get("documents_and_work_rights") or data.get("work_authorization_status")),
+        "qualification_status": _clean_profile_value(route_context.get("diploma_status") or data.get("qualification_status")),
+        "portfolio_status": _clean_profile_value(route_context.get("portfolio_or_references") or data.get("portfolio_status")),
+        "psychological_barriers": _clean_profile_value(data.get("selected_psych_markers") or route_context.get("psychological_barriers") or []),
+        "behavioral_barriers": _clean_profile_value(data.get("selected_barriers") or route_context.get("behavioral_barriers") or []),
+        "external_barriers": _clean_profile_value(data.get("selected_fears") or route_context.get("external_barriers") or []),
+    }
+
+    for key, value in normalized_answers.items():
+        if value == "" or value == [] or value == () or value is None:
+            continue
+        snapshot[key] = value
     snapshot["ready_for_report"] = _snapshot_is_ready_for_report(snapshot)
     return snapshot
 
@@ -865,7 +980,7 @@ def _snapshot_is_ready_for_report(snapshot: dict[str, object]) -> bool:
 
 def _route_context_missing(data: dict[str, object]) -> list[str]:
     missing: list[str] = []
-    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    route_context = _normalize_route_context(data.get("route_context") if isinstance(data.get("route_context"), dict) else {})
     for field in (
         "country",
         "city",
@@ -883,7 +998,7 @@ def _route_context_missing(data: dict[str, object]) -> list[str]:
         "diploma_status",
         "portfolio_or_references",
     ):
-        if not str((route_context or {}).get(field) or data.get(field) or "").strip():
+        if not str(route_context.get(field) or data.get(field) or "").strip():
             missing.append(field)
     return missing
 
@@ -893,10 +1008,28 @@ def _route_context_question(index: int, route_context: dict | None = None) -> di
         return {}
     q = dict(_ROUTE_CONTEXT_FIELDS[index])
     if not route_context:
+        if q.get("id") == "current_language_level":
+            q["options"], _ = _language_options_for_country("PL")
+        elif q.get("id") == "target_language":
+            _, q["options"] = _language_options_for_country("PL")
+        elif q.get("id") == "minimum_monthly_income":
+            eur_opts, _, _ = _income_options_for_currency("EUR")
+            _, pln_opts, _ = _income_options_for_currency("PLN")
+            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
+        elif q.get("id") == "desired_monthly_income":
+            _, eur_opts, _ = _income_options_for_currency("EUR")
+            _, _, pln_opts = _income_options_for_currency("PLN")
+            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
+        elif q.get("id") == "training_budget":
+            _, _, eur_opts = _income_options_for_currency("EUR")
+            _, _, pln_opts = _income_options_for_currency("PLN")
+            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
         return q
-    country_config = route_context.get("country_config") if isinstance(route_context.get("country_config"), dict) else {}
+    country_config = _resolve_country_config_for_context(route_context)
+    if not country_config and isinstance(route_context.get("country_config"), dict):
+        country_config = route_context["country_config"]
     country_code = str((country_config or {}).get("country_code") or "").upper()
-    currency = str((country_config or {}).get("currency") or "EUR")
+    currency = str((country_config or {}).get("currency") or "PLN")
     q_id = str(q.get("id") or "")
     if q_id == "current_language_level":
         q["options"], _ = _language_options_for_country(country_code)
@@ -909,6 +1042,32 @@ def _route_context_question(index: int, route_context: dict | None = None) -> di
     elif q_id == "training_budget":
         _, _, q["options"] = _income_options_for_currency(currency)
     return q
+
+
+def _route_context_accepts_multiple_values(question_id: str) -> bool:
+    return question_id in {"current_language_level", "target_language", "health_or_schedule_limits"}
+
+
+def _route_context_answer_is_valid(raw: str, options: list[str], question_id: str) -> bool:
+    if not raw or not options:
+        return False
+    normalized_raw = raw.strip()
+    if not normalized_raw:
+        return False
+    if normalized_raw in {str(opt).strip() for opt in options}:
+        return True
+
+    if not _route_context_accepts_multiple_values(question_id):
+        return False
+
+    parts = [part.strip() for part in re.split(r"[;,]", normalized_raw) if part.strip()]
+    if not parts:
+        return False
+    option_lookup = {str(opt).strip().lower(): str(opt).strip() for opt in options}
+    for part in parts:
+        if part.lower() not in option_lookup and not any(part.lower() in str(opt).strip().lower() for opt in options):
+            return False
+    return True
 
 
 def _route_context_options(question: dict[str, object]) -> list[str]:
@@ -1016,6 +1175,11 @@ def _route_context_next_index(current_index: int, answer: str, keys: list[str]) 
         for idx, key in enumerate(keys):
             value = parts[idx] if idx < len(parts) else ""
             route_context[key] = value.strip() or answer.strip()
+
+    # Allow multi-touch answers for language and health questions: keep a comma-separated value list as a single field.
+    if len(keys) == 1 and keys[0] in {"current_language_level", "target_language", "health_or_schedule_limits"}:
+        route_context[keys[0]] = answer.strip()
+
     return route_context, current_index + 1
 
 
@@ -2662,12 +2826,16 @@ def _segment_common_questions() -> list[dict[str, object]]:
 
 
 def _interval_options_for_question(question_text: str) -> list[str]:
-    q_text = str(question_text or "").lower()
+    q_text = str(question_text or "").lower().replace("ё", "е")
     if "как быстро" in q_text and "доход" in q_text:
         return list(_INTERVIEW_INCOME_SPEED_OPTIONS)
-    if "доход" in q_text and ("миним" in q_text or "нуж" in q_text or "месяц" in q_text):
+
+    income_markers = ["доход", "минимальный доход", "минимум", "нужен доход", "нужен минимальный доход", "доход в месяц", "доход нужен"]
+    if any(marker in q_text for marker in income_markers) and any(token in q_text for token in ["миним", "нуж", "месяц", "доход"]):
         return list(_INTERVIEW_INCOME_INTERVAL_OPTIONS)
-    if "сколько часов" in q_text or ("врем" in q_text and ("поиск" in q_text or "обуч" in q_text or "учи" in q_text)):
+
+    time_markers = ["сколько часов", "часов в неделю", "времени в неделю", "график", "обучению", "обучение", "поиск работы", "учиться"]
+    if any(marker in q_text for marker in time_markers) and any(token in q_text for token in ["час", "врем", "учит", "обуч", "поиск", "работ"]):
         return list(_INTERVIEW_TIME_INTERVAL_OPTIONS)
     return []
 
@@ -3973,18 +4141,9 @@ def _set_mvp_questions(
     merged_base = _filter_known_questions(segment_specific + common + mode_base, story_text) + mandatory
 
     selected: list[dict[str, object]] = []
-    for row in merged_base:
-        if not isinstance(row, dict):
-            continue
-        q_key = str(row.get("question", "")).strip().lower()
-        if not q_key:
-            continue
-        selected.append(row)
-        if len(selected) >= effective_limit:
-            break
+    seen: set[str] = set()
 
     raw_extra = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    seen = {str(row.get("question", "")).strip().lower() for row in selected if isinstance(row, dict)}
     if isinstance(raw_extra, list):
         for row in raw_extra:
             if not isinstance(row, dict):
@@ -4001,6 +4160,17 @@ def _set_mvp_questions(
             seen.add(q_key)
             if len(selected) >= effective_limit:
                 break
+
+    for row in merged_base:
+        if not isinstance(row, dict):
+            continue
+        q_key = str(row.get("question", "")).strip().lower()
+        if not q_key or q_key in seen:
+            continue
+        selected.append(row)
+        seen.add(q_key)
+        if len(selected) >= effective_limit:
+            break
 
     if len(selected) < effective_limit:
         for row in merged_base:
@@ -5567,7 +5737,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
             meta={"profile_domain": str(report.get("profile_domain") or ""), "selected_route": selected_route},
         )
 
-    await state.set_state(CareerFlow.FINAL_READY)
+    await state.set_state(CareerFlow.REPORT_GENERATING)
     await message.answer(t(lang, "final_short_intro"), reply_markup=route_choice_keyboard())
 
     short_conclusion = _short_conclusion_7_lines(report)
@@ -5637,7 +5807,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
         await _track_event(message, state, "pdf_generation_error", meta={"engine": settings.report_pdf_engine})
         await _send_text_report_fallback_document(message, lang, report)
 
-    await state.set_state(CareerFlow.FINAL_READY)
+    await state.set_state(CareerFlow.REPORT_READY)
     today_task = _today_task_from_report(report)
     await state.update_data(
         final_report=report,
@@ -5942,6 +6112,10 @@ async def _advance_after_questions(message: Message, state: FSMContext, lang: st
 
 async def _start_questions_module(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
+    current_state = await state.get_state()
+    existing_answers = list(data.get("qa_answers") or [])
+    if current_state == CareerFlow.INTERVIEW.state and (existing_answers or int(data.get("qa_index") or 0) > 0):
+        return
     story_text = (data.get("story_text") or "").strip()
     analysis_raw = data.get("story_analysis") or {}
     profile = data.get("interaction_profile") or _build_interaction_profile(story_text, data)
@@ -6080,6 +6254,29 @@ def _report_draft_is_empty(report: dict) -> bool:
     return False
 
 
+def _ensure_preliminary_report(report: dict, data: dict) -> dict:
+    """Create a useful minimum map when readiness clarification reaches its limit."""
+    if not isinstance(report, dict):
+        report = {}
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    decision.setdefault("recommended_main_path", "Product Marketing / Product Discovery")
+    decision.setdefault("backup_path", "EdTech Product / образовательный проект")
+    report["career_decision"] = decision
+    report.setdefault("market_analysis", [{"signal": "Переносимые навыки маркетинга и управления продуктом можно проверить без увольнения."}])
+    report.setdefault("career_recommendations", ["Проверить переход в product marketing или product discovery через короткий проект."])
+    digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
+    digital_human.setdefault("current_state", str(data.get("story_text") or "Опытный специалист с переносимыми навыками" )[:500])
+    digital_human.setdefault("main_asset", "анализ, интервью, позиционирование и управление командой")
+    report["digital_human"] = digital_human
+    action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+    today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
+    today.setdefault("action", "Провести одно интервью с product marketing или product discovery специалистом и сравнить задачи с текущей ролью.")
+    today.setdefault("timebox", "30 минут")
+    action_plan["today"] = today
+    report["action_plan"] = action_plan
+    return report
+
+
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
 
@@ -6205,7 +6402,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     report_generation_id = report_generation_id or str(uuid.uuid4())
     await state.update_data(report_generation_id=report_generation_id)
 
-    await state.set_state(CareerFlow.GENERATING_REPORT)
+    await state.set_state(CareerFlow.REPORT_GENERATING)
     await message.answer(t(lang, "report_generation_compact"), reply_markup=route_choice_keyboard())
     await _track_event(message, state, "report_started", meta={"mode": user_mode})
 
@@ -6271,7 +6468,18 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
                 report = regenerated
     except Exception as exc:
         await _track_event(message, state, "report_failed", meta={"error": type(exc).__name__})
-        raise
+        await state.update_data(
+            report_generation_status="REPORT_GENERATION_FAILED",
+            report_generation_error=type(exc).__name__,
+            report_generation_stage="route_generator",
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await message.answer(
+            "Я сохранил ваши ответы, но не смог собрать документ из-за технической ошибки. "
+            "Попробовать сформировать его ещё раз?",
+            reply_markup=route_choice_keyboard(),
+        )
+        return
 
     # ── PATCH-25: guardrail validation ──────────────────────────────────────
     try:
@@ -6358,16 +6566,41 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     )
 
     # Report Readiness Gate: if report is essentially empty, ask one clarifying question
-    if _report_draft_is_empty(report):
+    clarification_count = int(data.get("readiness_clarification_count") or 0)
+    max_clarifications = 2 if str(data.get("user_mode") or "calm_steps") == "fast" else 4
+    if _report_draft_is_empty(report) and clarification_count < max_clarifications:
+        await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
+        await message.answer("Проверяю один последний выбор маршрута.", reply_markup=ReplyKeyboardRemove())
         await message.answer(
             "Для точного маршрута нужно ещё несколько деталей.\n\n"
             "Скажите: какой из вариантов вы готовы проверить первым — "
-            "продуктовый менеджмент, образовательный проект или консультирование?"
+            "продуктовый менеджмент, образовательный проект или консультирование?",
+            reply_markup=report_readiness_keyboard(),
         )
         return
 
+    if _report_draft_is_empty(report):
+        report = _ensure_preliminary_report(report, data)
+        await state.update_data(final_report=report, report_readiness_status="PRELIMINARY_REPORT_READY")
     await _send_final_map_bundle(message, state, lang, report)
+
+
+@router.message(CareerFlow.REPORT_GENERATION_FAILED, F.text)
+async def handle_report_generation_failed(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    action = (message.text or "").strip().lower()
+    if "повтор" in action or "сформ" in action or action == "retry":
+        await state.set_state(CareerFlow.REPORT_READINESS_CHECK)
+        await message.answer("Повторяю сборку из сохранённых ответов.", reply_markup=ReplyKeyboardRemove())
+        await _build_and_send_report(message, state, lang)
+        return
+    if _is_restart_intent(action):
+        await state.clear()
+        await message.answer("Сессию сбросил по вашему явному запросу. Напишите /start, чтобы начать заново.", reply_markup=ReplyKeyboardRemove())
+        return
+    await message.answer("Ответы сохранены. Нажмите «Повторить генерацию», чтобы продолжить.")
 
 
 def _question_reply_markup(analysis: dict, index: int):
@@ -7400,7 +7633,9 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
         return
 
     index = int(data.get("route_context_index") or 0)
-    route_context = dict(data.get("route_context") or {})
+    route_context = _normalize_route_context(dict(data.get("route_context") or {}))
+    if str(route_context.get("country") or "").strip() and "country_config" not in route_context:
+        route_context["country_config"] = _resolve_country_config(str(route_context["country"]))
     question = _route_context_question(index, route_context)
     question_id = str(question.get("id") or index)
     options = _route_context_options(question)
@@ -7412,13 +7647,13 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
         await message.answer("Ок, напишите ответ своими словами одним сообщением.", reply_markup=input_method_keyboard())
         return
 
-    if options and text_mode_for != question_id and raw not in options:
-        await message.answer("Выберите вариант кнопкой или нажмите «Другое / расскажу своими словами».", reply_markup=_route_context_reply_markup(question))
+    if options and text_mode_for != question_id and not _route_context_answer_is_valid(raw, options, question_id):
+        await message.answer("Выберите вариант кнопкой, либо отправьте несколько подходящих вариантов через запятую/точку с запятой, либо нажмите «Другое / расскажу своими словами».", reply_markup=_route_context_reply_markup(question))
         return
 
     await state.update_data(route_context_text_mode_for="")
     parsed_values, next_index = _route_context_next_index(index, raw, keys)
-    route_context.update(parsed_values)
+    route_context.update(_normalize_route_context(parsed_values))
 
     # After country answer (Q1): compute and persist structured country_config
     if question_id == "country" and str(parsed_values.get("country") or "").strip():
@@ -7431,6 +7666,7 @@ async def handle_route_context_input(message: Message, state: FSMContext) -> Non
     if next_index >= len(_ROUTE_CONTEXT_FIELDS):
         public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
         session_id = str(data.get("session_id") or "").strip()
+        route_context = _normalize_route_context(route_context)
         await state.update_data(awaiting_route_context=False)
         snapshot = _build_profile_snapshot({**data, "route_context": route_context})
         await state.update_data(profile_snapshot=snapshot)
@@ -7511,6 +7747,7 @@ async def barriers_fallback(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CareerFlow.GENERATING_REPORT, F.text | F.voice | F.document | F.photo | F.sticker)
+@router.message(CareerFlow.REPORT_GENERATING, F.text | F.voice | F.document | F.photo | F.sticker)
 @router.message(CareerFlow.PDF_GENERATING, F.text | F.voice | F.document | F.photo | F.sticker)
 async def generation_lock_fallback(message: Message, state: FSMContext) -> None:
     lang = _user_language(await state.get_data())
@@ -7815,6 +8052,7 @@ async def handle_answers_text(message: Message, state: FSMContext) -> None:
 
 @router.message(CareerFlow.ROUTE_SELECTION, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
 @router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
+@router.message(CareerFlow.REPORT_READY, F.text.in_(ALL_ROUTE_CHOICE_ACTIONS))
 async def handle_route_selection_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
@@ -8167,12 +8405,13 @@ async def handle_specialist_routing_actions(message: Message, state: FSMContext)
 
     await _track_event(message, state, "specialist_routing_selected", action=action, meta={"notify_action": notify_action})
     await _notify_specialist_request_owner(message, state, notify_action)
-    await state.set_state(CareerFlow.FINAL_READY)
+    await state.set_state(CareerFlow.REPORT_GENERATING)
     await message.answer(followup, reply_markup=result_actions_keyboard())
 
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_RESULT_ACTIONS))
 @router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_RESULT_ACTIONS))
+@router.message(CareerFlow.REPORT_READY, F.text.in_(ALL_RESULT_ACTIONS))
 async def handle_post_result_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
@@ -8186,7 +8425,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await _track_event(message, state, "user_disagreed", action=action)
 
     if action == MAP_CHECK_TRUE:
-        await state.set_state(CareerFlow.FINAL_READY)
+        await state.set_state(CareerFlow.REPORT_GENERATING)
         await message.answer(t(lang, "map_validation_true_reply"), reply_markup=result_actions_keyboard())
         return
 
@@ -8375,6 +8614,59 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         return
 
     await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+
+
+@router.message(CareerFlow.REPORT_NEEDS_CLARIFICATION, F.text)
+async def handle_report_readiness_clarification(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    lang = _user_language(data)
+    answer = (message.text or "").strip()
+    if not answer:
+        await message.answer("Выберите вариант, чтобы я завершил карту.", reply_markup=report_readiness_keyboard())
+        return
+
+    route_priority = "income_stability" if answer == ROUTE_CHOICE_STABLE else "route_experiment"
+    system_may_select_route = answer in {
+        ROUTE_CHOICE_STABLE,
+        "⏭️ Не знаю, предложите сами",
+        "🧪 Сравнить несколько вариантов",
+    }
+    clarification = {
+        "question": "Какой вариант вы готовы проверить первым?",
+        "answer": answer,
+        "route_priority": route_priority,
+        "preferred_first_experiment": None if system_may_select_route else answer,
+        "system_may_select_route": system_may_select_route,
+    }
+    answers_text = str(data.get("answers_text") or "").strip()
+    answers_text = (answers_text + "\n\nУточнение готовности маршрута:\n" + answer).strip()
+    await state.update_data(
+        answers_text=answers_text,
+        readiness_clarification=clarification,
+        route_priority=route_priority,
+        preferred_first_experiment=clarification["preferred_first_experiment"],
+        system_may_select_route=system_may_select_route,
+        readiness_clarification_count=int(data.get("readiness_clarification_count") or 0) + 1,
+    )
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    session_id = str(data.get("session_id") or "").strip()
+    save_profile_version(
+        public_user_id,
+        "readiness_clarification",
+        {
+            "previous_snapshot": data.get("profile_snapshot") or {},
+            "clarification_answer": clarification,
+            "answers_text": answers_text,
+            "route_priority": route_priority,
+            "preferred_first_experiment": clarification["preferred_first_experiment"],
+            "system_may_select_route": system_may_select_route,
+        },
+        session_id=session_id,
+    )
+    await _track_event(message, state, "report_readiness_clarification", meta=clarification)
+    await state.set_state(CareerFlow.REPORT_READINESS_CHECK)
+    await message.answer("Ответ сохранил. Проверяю готовность карты и собираю заключение.", reply_markup=ReplyKeyboardRemove())
+    await _build_and_send_report(message, state, lang)
 
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text)

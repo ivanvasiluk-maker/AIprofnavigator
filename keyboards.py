@@ -720,6 +720,20 @@ def route_choice_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def report_readiness_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📦 Продуктовый менеджмент")],
+            [KeyboardButton(text="🎓 Образовательный проект")],
+            [KeyboardButton(text="💬 Консультирование")],
+            [KeyboardButton(text="🧪 Сравнить несколько вариантов")],
+            [KeyboardButton(text=ROUTE_CHOICE_STABLE)],
+            [KeyboardButton(text="⏭️ Не знаю, предложите сами")],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def career_strategy_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[

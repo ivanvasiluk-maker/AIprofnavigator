@@ -32,11 +32,3 @@ reports/*.html
 reports/*.pdf
 !reports/nextyou_report_example.html
 
-# Private bot and GPT runtime code
-bot.py
-handlers/
-keyboards.py
-localization.py
-openai_client.py
-prompts.py
-states.py

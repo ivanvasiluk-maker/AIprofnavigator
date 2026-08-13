@@ -12,13 +12,18 @@ from __future__ import annotations
 
 import unittest
 
+from services.evidence_profile import CareerEvidenceProfile, EvidenceItem, FunctionEvidence
+from services.interview_policy import evaluate_report_readiness
+
 from handlers.career import (
     _build_profile_snapshot,
     _income_options_for_currency,
     _is_route_context_stale_input,
     _language_options_for_country,
+    _normalize_route_context,
     _report_draft_is_empty,
     _resolve_country_config,
+    _route_context_answer_is_valid,
     _route_context_question,
     _snapshot_is_ready_for_report,
 )
@@ -193,31 +198,78 @@ class SnapshotReadinessGateTest(unittest.TestCase):
                     "city": "Вильнюс",
                     "current_language_level": "A2",
                     "target_language": "B1",
-                    "income_urgency": "Немедленно",
+                    "income_urgency": "1-2 месяца",
                     "minimum_monthly_income": "1000 EUR/мес",
                     "desired_monthly_income": "2000 EUR/мес",
                     "training_budget": "200 EUR",
                     "available_time_for_study": "6 часов/неделю",
-                    "career_goal_type": "Product marketing",
-                    "work_preferences": "Remote",
-                    "health_or_schedule_limits": "Нет",
-                    "documents_and_work_rights": "Есть право на работу",
-                    "diploma_status": "Высшее",
-                    "portfolio_or_references": "Есть",
+                    "career_goal_type": "Полностью сменить сферу",
+                    "work_preferences": "Лучше без активных продаж",
+                    "health_or_schedule_limits": "Есть ограничения по графику",
+                    "documents_and_work_rights": "Право на работу нужно уточнить",
+                    "diploma_status": "Диплом подтверждён",
+                    "portfolio_or_references": "Есть портфолио",
                 },
+                "selected_psych_markers": ["страх неуспеха", "переделать себя"],
+                "selected_barriers": ["без активных продаж"],
+                "selected_fears": ["потеря дохода"],
                 "answers_text": "Пользователь готов менять направление",
                 "story_text": "Есть опыт в маркетинге",
             }
         )
         self.assertEqual(snapshot["country_code"], "LT")
         self.assertEqual(snapshot["currency"], "EUR")
+        self.assertEqual(snapshot["city"], "Вильнюс")
+        self.assertEqual(snapshot["income_urgency"], "1-2 месяца")
+        self.assertEqual(snapshot["minimum_income"], "1000 EUR/мес")
+        self.assertEqual(snapshot["target_income"], "2000 EUR/мес")
+        self.assertEqual(snapshot["career_goal"], "Полностью сменить сферу")
+        self.assertIn("без активных продаж", snapshot["work_preferences"])
         self.assertTrue(snapshot["ready_for_report"])
         self.assertIn("route_context", snapshot)
+
+    def test_snapshot_keeps_non_empty_values_only(self) -> None:
+        snapshot = _build_profile_snapshot(
+            {
+                "route_context": {
+                    "country": "Литва",
+                    "city": "Вильнюс",
+                    "income_urgency": "1-2 месяца",
+                    "minimum_monthly_income": "1500 EUR/мес",
+                    "desired_monthly_income": "2200 EUR/мес",
+                    "training_budget": "300 EUR",
+                    "available_time_for_study": "10+ часов",
+                    "career_goal_type": "Полностью сменить сферу",
+                    "work_preferences": "Лучше без активных продаж",
+                    "health_or_schedule_limits": "Есть ограничения по графику",
+                    "documents_and_work_rights": "Право на работу нужно уточнить",
+                    "diploma_status": "Диплом подтверждён",
+                    "portfolio_or_references": "Есть портфолио",
+                    "country_config": {"country_code": "LT", "currency": "EUR"},
+                },
+                "selected_psych_markers": ["страх неуспеха"],
+                "selected_barriers": ["без активных продаж"],
+                "selected_fears": [],
+            }
+        )
+        self.assertEqual(snapshot["country_code"], "LT")
+        self.assertEqual(snapshot["currency"], "EUR")
+        self.assertNotIn("-", str(snapshot.get("minimum_income", "")))
+        self.assertNotIn("None", str(snapshot.get("work_preferences", "")))
+        self.assertIsInstance(snapshot.get("psychological_barriers", []), list)
+        self.assertTrue(len(snapshot.get("psychological_barriers", [])) >= 1)
 
     def test_incomplete_snapshot_is_not_ready(self) -> None:
         snapshot = _build_profile_snapshot({"route_context": {"country": "Литва"}})
         self.assertFalse(_snapshot_is_ready_for_report(snapshot))
 
+    def test_readiness_levels_distinguish_preliminary_and_full(self) -> None:
+        profile = CareerEvidenceProfile(
+            work_history_facts=[EvidenceItem(statement="8 лет в IT-маркетинге", source="user_story", confidence="confirmed")],
+            functions=[FunctionEvidence(function_name="исследования рынка", evidence=[EvidenceItem(statement="исследования рынка", source="user_story", confidence="confirmed")])],
+        )
+        readiness = evaluate_report_readiness(profile)
+        self.assertEqual(readiness.readiness_level, "PRELIMINARY_REPORT_READY")
 
 class RouteContextStaleInputTest(unittest.TestCase):
     def test_stale_text_is_rejected(self) -> None:
@@ -226,6 +278,33 @@ class RouteContextStaleInputTest(unittest.TestCase):
         self.assertTrue(_is_route_context_stale_input("➡️ Продолжить без резюме"))
         self.assertTrue(_is_route_context_stale_input("✅ Отметил(а), что мешает"))
         self.assertFalse(_is_route_context_stale_input("Литва"))
+
+
+class RouteContextNormalizationTest(unittest.TestCase):
+    def test_partial_country_payload_is_normalized_before_report_gate(self) -> None:
+        route_context = {
+            "country": "Литва",
+            "city": "Вильнюс",
+            "goal": "Product marketing",
+            "work": "Remote",
+            "documents": "Есть право на работу",
+            "proof": "Есть портфолио",
+        }
+        normalized = _normalize_route_context(route_context)
+        self.assertEqual(normalized["career_goal_type"], "Product marketing")
+        self.assertEqual(normalized["work_preferences"], "Remote")
+        self.assertEqual(normalized["documents_and_work_rights"], "Есть право на работу")
+        self.assertEqual(normalized["portfolio_or_references"], "Есть портфолио")
+        self.assertEqual(normalized["country_config"]["country_code"], "LT")
+
+    def test_country_language_answers_allow_multiple_values(self) -> None:
+        current_idx = next(i for i, q in enumerate(__import__("handlers.career", fromlist=["_ROUTE_CONTEXT_FIELDS"])._ROUTE_CONTEXT_FIELDS) if q.get("id") == "current_language_level")
+        current_q = _route_context_question(current_idx, {"country": "Литва", "country_config": {"country_code": "LT", "currency": "EUR"}})
+        self.assertTrue(_route_context_answer_is_valid("Литовский: B1+, Английский: B1 и выше", current_q.get("options", []), "current_language_level"))
+
+        health_idx = next(i for i, q in enumerate(__import__("handlers.career", fromlist=["_ROUTE_CONTEXT_FIELDS"])._ROUTE_CONTEXT_FIELDS) if q.get("id") == "health_or_schedule_limits")
+        health_q = _route_context_question(health_idx, {"country": "Литва", "country_config": {"country_code": "LT", "currency": "EUR"}})
+        self.assertTrue(_route_context_answer_is_valid("Есть ограничения по графику, Есть ограничения по здоровью", health_q.get("options", []), "health_or_schedule_limits"))
 
 
 class ReportDraftGateTest(unittest.TestCase):

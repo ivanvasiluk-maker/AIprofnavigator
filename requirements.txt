@@ -1,9 +1,9 @@
 aiogram==3.4.1
-openai
+openai==1.109.1
 python-dotenv
 xhtml2pdf
 fastapi
 uvicorn
 playwright
-aiohttp
+aiohttp==3.9.5
 python-docx

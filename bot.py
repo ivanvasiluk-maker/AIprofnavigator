@@ -9,6 +9,7 @@ from aiogram.types import Update
 
 from config import settings
 from handlers import career, start, voice
+from utils.persistence import save_profile_version, touch_session
 
 
 class SingleInstanceGuard:
@@ -60,6 +61,51 @@ class DedupMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+class SessionCheckpointMiddleware(BaseMiddleware):
+    """Persist FSM progress so a Railway restart does not reset an active interview."""
+
+    async def __call__(self, handler, event: Update, data: dict):  # type: ignore[override]
+        result = await handler(event, data)
+        fsm_state = data.get("state")
+        if fsm_state is None:
+            return result
+        try:
+            state_name = str(await fsm_state.get_state() or "").strip()
+            snapshot = await fsm_state.get_data()
+            session_id = str(snapshot.get("session_id") or "").strip()
+            public_user_id = str(snapshot.get("public_user_id") or "").strip()
+            if not session_id or not public_user_id:
+                return result
+            touch_session(
+                session_id,
+                state_name=state_name,
+                user_mode=str(snapshot.get("user_mode") or ""),
+                language=str(snapshot.get("language") or "ru"),
+            )
+            if state_name.endswith(":INTERVIEW"):
+                save_profile_version(
+                    public_user_id,
+                    "fsm_checkpoint",
+                    {
+                        "session_id": session_id,
+                        "language": snapshot.get("language", "ru"),
+                        "user_mode": snapshot.get("user_mode", "calm_steps"),
+                        "story_text": snapshot.get("story_text", ""),
+                        "story_analysis": snapshot.get("story_analysis", {}),
+                        "qa_answers": snapshot.get("qa_answers", []),
+                        "qa_index": snapshot.get("qa_index", 0),
+                        "answers_text": snapshot.get("answers_text", ""),
+                        "evidence_profile": snapshot.get("evidence_profile", {}),
+                        "interview_context": snapshot.get("interview_context", {}),
+                        "interaction_profile": snapshot.get("interaction_profile", {}),
+                    },
+                    session_id=session_id,
+                )
+        except Exception as exc:
+            print(f"[checkpoint] failed: {exc}", flush=True)
+        return result
+
+
 async def main() -> None:
     settings.validate()
 
@@ -81,6 +127,7 @@ async def main() -> None:
     dp = Dispatcher()
 
     dp.update.outer_middleware(DedupMiddleware())
+    dp.update.outer_middleware(SessionCheckpointMiddleware())
 
     dp.include_router(start.router)
     dp.include_router(career.router)
