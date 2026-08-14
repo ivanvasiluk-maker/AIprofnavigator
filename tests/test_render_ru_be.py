@@ -51,6 +51,7 @@ from handlers.career import (
 )
 from handlers import voice as voice_handlers
 from keyboards import (
+    ALL_ROUTE_SELECTION_ACTIONS,
     CAREER_STRATEGY_HELP,
     INPUT_TEXT,
     INPUT_VOICE,
@@ -287,6 +288,11 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertIn("Нужен доход в ближайшие 1–2 месяца", keyboard_dump)
         self.assertIn("Готов(а) готовиться 3–6 месяцев ради работы ближе к моему опыту", keyboard_dump)
 
+    def test_route_selection_action_set_includes_strategy_buttons(self) -> None:
+        self.assertIn("Нужен доход в ближайшие 1–2 месяца", ALL_ROUTE_SELECTION_ACTIONS)
+        self.assertIn("Готов(а) готовиться 3–6 месяцев ради работы ближе к моему опыту", ALL_ROUTE_SELECTION_ACTIONS)
+        self.assertIn("Не уверен(а), помоги выбрать", ALL_ROUTE_SELECTION_ACTIONS)
+
 
 class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_route_selection_requires_strategy_choice_before_comparison(self) -> None:
@@ -346,6 +352,31 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(save_profile.called)
         self.assertEqual(save_profile.call_args.args[1], "career_strategy_selected")
         self.assertEqual(save_profile.call_args.args[2]["career_strategy"], "fast_income")
+
+    async def test_route_selection_accepts_ascii_hyphen_strategy_text(self) -> None:
+        report = {"career_decision": {"recommended_main_path": "Administrative Assistant"}, "action_plan": {"today": {"action": "Открыть 5 вакансий"}}}
+        state = FakeState(
+            data={
+                "language": "ru",
+                "public_user_id": "pub-2",
+                "session_id": "sess-2",
+                "user_mode": "calm_steps",
+                "report_generation_id": "rid-2",
+                "final_report": report,
+                "awaiting_career_strategy_choice": True,
+            },
+            current_state=CareerFlow.ROUTE_SELECTION.state,
+        )
+        message = FakeMessage(text="Готов(а) готовиться 3-6 месяцев ради работы ближе к моему опыту")
+
+        with patch("handlers.career.save_profile_version") as save_profile:
+            with patch("handlers.career._track_event", new=AsyncMock()):
+                await handle_route_selection_actions(message, state)
+
+        self.assertEqual(state.data.get("career_strategy"), "upskill_for_profile")
+        self.assertEqual(state.data.get("career_strategy_label"), "Готов(а) готовиться 3–6 месяцев ради работы ближе к моему опыту")
+        self.assertFalse(state.data.get("awaiting_career_strategy_choice"))
+        self.assertTrue(save_profile.called)
 
     async def test_route_selection_saves_new_report_version(self) -> None:
         report = {

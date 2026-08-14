@@ -142,6 +142,15 @@ def _professional_core_summary(report: dict) -> str:
 
 
 def _detect_country(report: dict) -> str:
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    snapshot = report.get("profile_snapshot") if isinstance(report.get("profile_snapshot"), dict) else {}
+    country_name = (
+        str(decision.get("country_name") or snapshot.get("country_name") or report.get("country_name") or "").strip()
+        or str(snapshot.get("country_code") or "").strip()
+        or str((snapshot.get("route_context") or {}).get("country") or "").strip()
+    )
+    if country_name:
+        return country_name
     profile = str((report.get("digital_human") or {}).get("current_state", "")).lower()
     if "польш" in profile or "poland" in profile:
         return "Poland"
@@ -540,7 +549,7 @@ def build_telegram_summary(report: dict) -> str:
 
     cannot_claim_block = "\n".join(f"- {item}" for item in unknowns[:4]) if unknowns else "- Категоричные выводы делать нельзя: данных недостаточно."
     constraints_block = "\n".join(f"- {item}" for item in weaknesses[:5] if str(item).strip()) or "- данных недостаточно"
-    main_route = _safe_text(decision.get("recommended_main_path"), "Возможный маршрут")
+    main_route = _decision_route_title(decision)
     backup_route = _safe_text(decision.get("backup_path"), "Предварительная гипотеза")
 
     summary = [
@@ -609,9 +618,30 @@ def build_offer_text() -> str:
     )
 
 
+def _decision_route_title(decision: dict) -> str:
+    main_route = decision.get("main_route") if isinstance(decision.get("main_route"), dict) else None
+    if main_route:
+        title = str(main_route.get("title") or main_route.get("name") or "").strip()
+        if title:
+            return title
+    return str(decision.get("recommended_main_path") or decision.get("main_route") or decision.get("route") or "Возможный маршрут").strip() or "Возможный маршрут"
+
+
+def _decision_country_label(report: dict, decision: dict) -> tuple[str, str]:
+    snapshot = report.get("profile_snapshot") if isinstance(report.get("profile_snapshot"), dict) else {}
+    country_name = str(decision.get("country_name") or snapshot.get("country_name") or report.get("country_name") or "").strip()
+    city = str(decision.get("city") or snapshot.get("city") or report.get("city") or "").strip()
+    if not country_name:
+        country_name = str((snapshot.get("route_context") or {}).get("country") or "").strip() or "Не уточнено"
+    if not city:
+        city = str((snapshot.get("route_context") or {}).get("city") or "").strip()
+    return country_name or "Не уточнено", city or "Не уточнено"
+
+
 def render_report_html(report: dict, meta: ReportMeta) -> str:
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
+    country_name, city = _decision_country_label(report, decision)
     market = report.get("market_analysis", []) if isinstance(report.get("market_analysis"), list) else []
     recommendations = report.get("career_recommendations", []) if isinstance(report.get("career_recommendations"), list) else []
     real_solutions = report.get("real_solutions", []) if isinstance(report.get("real_solutions"), list) else []
@@ -924,7 +954,8 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
                     <p class='subtitle'>Персональная карта карьерного перехода</p>
                     <div class='meta'>
                         <p><b>Имя пользователя:</b> {escape(meta.user_name)}</p>
-                        <p><b>Страна:</b> {escape(meta.country)}</p>
+                        <p><b>Страна:</b> {escape(country_name)}</p>
+                        <p><b>Город:</b> {escape(city)}</p>
                         <p><b>Дата:</b> {escape(meta.created_at)}</p>
                         <p><b>Режим:</b> {escape(meta.mode)}</p>
                         <p><b>Версия профиля:</b> {escape(meta.profile_version)}</p>
