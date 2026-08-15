@@ -252,10 +252,10 @@ def validate_test_package(
             findings.append({"issue": "expected_invalid_json", "path": str(path), "error": str(exc)})
             continue
 
-        profile_id = str(payload.get("profile_id") or "").strip()
+        profile_id = str(payload.get("profile_id") or payload.get("id") or "").strip()
         if not profile_id:
             statuses.add(INPUT_EXPECTED_ID_MISMATCH)
-            findings.append({"issue": "expected_missing_profile_id", "path": str(path)})
+            findings.append({"issue": "expected_missing_id", "path": str(path)})
             continue
         if profile_id in expected_profiles:
             statuses.add(INPUT_EXPECTED_ID_MISMATCH)

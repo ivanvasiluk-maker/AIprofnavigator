@@ -1,0 +1,66 @@
+{
+  "id": "profile_06_career_break",
+  "title": "Наталья — HR-специалист после девятилетнего перерыва",
+  "expected": {
+    "professional_core": [
+      "HR-специалист по подбору",
+      "Onboarding",
+      "Координация обучения"
+    ],
+    "secondary_functions": [
+      "HR Operations"
+    ],
+    "seniority": {
+      "current": "Прошлый middle/senior; реалистичный возврат coordinator/strong assistant/junior-middle",
+      "notes": "Перерыв влияет на актуальную готовность, но не уничтожает опыт."
+    },
+    "primary_routes": [
+      "Recruitment Coordinator",
+      "Onboarding Coordinator"
+    ],
+    "transition_routes": [
+      "HR Assistant с содержательными задачами",
+      "HR Operations"
+    ],
+    "quick_income": [
+      "Candidate Support",
+      "HR Coordination",
+      "Onboarding Support"
+    ],
+    "emergency_routes": [
+      "Office Administration",
+      "Customer Service"
+    ],
+    "required_questions": [
+      "Подбор или onboarding",
+      "Готовность к coordinator-level",
+      "Минимальный доход",
+      "Доступный объём занятости",
+      "Уровень ATS и sourcing"
+    ],
+    "forbidden_recommendations": [
+      "Secretary как основной путь",
+      "Senior HRBP",
+      "Head of HR",
+      "Психолог",
+      "Карьерный консультант",
+      "Педагог",
+      "Социальный работник"
+    ],
+    "mandatory_conclusions": [
+      "Перерыв не равен обнулению профессии",
+      "Возвратный уровень нужно определять отдельно от прошлого seniority"
+    ],
+    "critical_errors": [
+      "Обнуление 12 лет опыта",
+      "Автоматический возврат на senior",
+      "Профессионализация семейной заботы",
+      "Совет скрыть перерыв",
+      "Длительная бесплатная стажировка"
+    ],
+    "logic_rules": [
+      "Разделять профессиональную зрелость и актуальную готовность",
+      "Не превращать семейную заботу в профессию"
+    ]
+  }
+}

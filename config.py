@@ -24,6 +24,12 @@ class Settings:
         self.specialist_notify_chat_id = os.getenv("SPECIALIST_NOTIFY_CHAT_ID", "").strip()
         self.support_group_telegram_url = os.getenv("SUPPORT_GROUP_TELEGRAM_URL", "").strip()
         self.app_db_path = os.getenv("APP_DB_PATH", "reports/app_data.sqlite3").strip()
+        self.environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        self.legacy_career_report_enabled = os.getenv("LEGACY_CAREER_REPORT_ENABLED", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
     def validate(self) -> None:
         missing = []

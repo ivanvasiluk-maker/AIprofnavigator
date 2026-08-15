@@ -1,0 +1,70 @@
+{
+  "id": "profile_09_senior_developer",
+  "title": "Алексей — senior-разработчик с сильным профессиональным выгоранием",
+  "expected": {
+    "professional_core": [
+      "Senior Backend Engineer",
+      "Distributed Systems Engineer",
+      "Product-oriented Engineer"
+    ],
+    "secondary_functions": [
+      "Software Architect",
+      "Technical Lead без people management"
+    ],
+    "seniority": {
+      "current": "Senior; возможен Lead/Staff при соответствии",
+      "notes": "Новый стек не обнуляет инженерный seniority."
+    },
+    "primary_routes": [
+      "Senior Individual Contributor в новом продукте",
+      "Senior Backend Engineer",
+      "Senior Product Engineer"
+    ],
+    "transition_routes": [
+      "Senior Engineer в AI-enabled продукте",
+      "Developer Tools Engineer",
+      "Founding Engineer с ограниченной управленческой нагрузкой"
+    ],
+    "quick_income": [
+      "Senior Backend role",
+      "Высокоуровневый технический контракт"
+    ],
+    "emergency_routes": [
+      "Краткосрочный senior technical contract"
+    ],
+    "required_questions": [
+      "Полный отказ или ограничение people management",
+      "Риск стартапа",
+      "Главный приоритет: продукт/стек/режим",
+      "Минимальный доход",
+      "Желаемая доля product work"
+    ],
+    "forbidden_recommendations": [
+      "Полная смена профессии",
+      "Engineering Manager",
+      "Team Lead с people management",
+      "Project Manager",
+      "Преподавание",
+      "Консалтинг",
+      "SRE/on-call",
+      "Junior AI Developer",
+      "CTO без анализа"
+    ],
+    "mandatory_conclusions": [
+      "Выгорание связано с условиями и функциями, а не обязательно с профессией",
+      "Отказ от people management не означает снижение уровня"
+    ],
+    "critical_errors": [
+      "Уход из IT как основной совет",
+      "Возврат в management",
+      "Снижение seniority из-за нового стека",
+      "Романтизация стартапа",
+      "Игнорирование переработок и on-call"
+    ],
+    "logic_rules": [
+      "Разделять профессию и условия работы",
+      "Не считать management универсальным ростом",
+      "Оценивать Staff/Founding Engineer по фактическим функциям"
+    ]
+  }
+}

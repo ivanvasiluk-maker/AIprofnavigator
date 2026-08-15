@@ -1,0 +1,62 @@
+{
+  "id": "profile_03_accountant_exit",
+  "title": "Андрей — senior-бухгалтер, который хочет уйти из бухгалтерии",
+  "expected": {
+    "professional_core": [
+      "Senior Accountant",
+      "Специалист по финансовым процессам и ERP"
+    ],
+    "secondary_functions": [
+      "Process improvement",
+      "Работа с требованиями и тестированием ERP"
+    ],
+    "seniority": {
+      "current": "Senior в бухгалтерии; junior/strong junior/lower-middle в новой функции",
+      "notes": "Seniority не переносится автоматически между функциями."
+    },
+    "primary_routes": [
+      "Finance / ERP Business Analyst после доработки компетенций",
+      "Financial Systems Specialist"
+    ],
+    "transition_routes": [
+      "ERP Support",
+      "Process Specialist",
+      "Internal systems role"
+    ],
+    "quick_income": [
+      "Сохранение текущей работы",
+      "Внутренний переход к системным задачам"
+    ],
+    "emergency_routes": [
+      "Временная бухгалтерская роль как финансовый мост"
+    ],
+    "required_questions": [
+      "Уход только из бухгалтерии или из финансов полностью",
+      "Любимые задачи ERP-проекта",
+      "Допустимое снижение дохода",
+      "Готовность начать ниже в новой функции"
+    ],
+    "forbidden_recommendations": [
+      "Главный бухгалтер",
+      "Аудитор",
+      "Налоговый консультант",
+      "Бухгалтерская фирма",
+      "Senior Business Analyst без опыта",
+      "Project Manager"
+    ],
+    "mandatory_conclusions": [
+      "Прошлый опыт можно перенести без продолжения прежней профессии",
+      "Новый уровень нужно оценивать отдельно"
+    ],
+    "critical_errors": [
+      "Игнорирование отказа от бухгалтерии",
+      "Автоматический перенос seniority",
+      "Назначение Project Manager",
+      "Полное обнуление финансового опыта"
+    ],
+    "logic_rules": [
+      "Прямой отказ пользователя приоритетен",
+      "Переносимый капитал не равен обязательству продолжать профессию"
+    ]
+  }
+}

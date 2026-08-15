@@ -1387,6 +1387,16 @@ def generate_html_report_file(report: dict, output_dir: str, user_name: str = ""
     return html_path
 
 
+def generate_assessment_html_file(assessment, output_dir: str) -> Path:
+    from services.career_assessment import render_assessment_html  # noqa: PLC0415
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    html_path = output_path / f"career_assessment_{assessment.assessment_id}.html"
+    html_path.write_text(render_assessment_html(assessment), encoding="utf-8")
+    return html_path
+
+
 def generate_docx_report_file(
     report: dict,
     output_dir: str,

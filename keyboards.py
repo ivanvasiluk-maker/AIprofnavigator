@@ -1,5 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
+from services.career_assessment import CareerAssessment, STEP_BUTTON_LABELS
+
 
 LANG_RU = "ru"
 LANG_BE = "be"
@@ -9,6 +11,27 @@ LANG_BUTTON_TO_CODE = {
     LANG_RU_BUTTON: LANG_RU,
     LANG_BE_BUTTON: LANG_BE,
 }
+
+
+def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=STEP_BUTTON_LABELS[step.type],
+                callback_data=f"select_first_step:{assessment.assessment_id}:{step.step_id}",
+            )
+        ]
+        for step in assessment.first_steps
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def other_first_steps_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Показать другие варианты", callback_data=f"show_first_steps:{assessment_id}")]
+        ]
+    )
 
 CONFIRM_YES = "✅ Да, использовать"
 CONFIRM_EDIT = "✍️ Исправить текстом"

@@ -2,11 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "CareerBaselineExpectedProfile",
   "type": "object",
-  "required": [
-    "profile_id"
+  "anyOf": [
+    {"required": ["profile_id"]},
+    {"required": ["id"]}
   ],
   "properties": {
     "profile_id": {"type": "string"},
+    "id": {"type": "string"},
+    "title": {"type": "string"},
+    "expected": {"type": "object", "additionalProperties": true},
     "expected_routes": {"type": "array", "items": {"type": "string"}},
     "route_expectations": {
       "type": "object",

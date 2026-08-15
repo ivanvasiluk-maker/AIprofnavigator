@@ -1,0 +1,71 @@
+{
+  "id": "profile_08_small_business",
+  "title": "Светлана — владелица небольшого розничного бизнеса, переходящая в найм",
+  "expected": {
+    "professional_core": [
+      "Специалист по малому retail",
+      "Закупки",
+      "Ассортимент",
+      "Операционное управление"
+    ],
+    "secondary_functions": [
+      "Работа с поставщиками",
+      "Управление небольшой командой"
+    ],
+    "seniority": {
+      "current": "Experienced owner-operator; junior/middle в корпоративной функции",
+      "notes": "Титул владельца не равен C-level."
+    },
+    "primary_routes": [
+      "Purchasing Coordinator",
+      "Junior Buyer",
+      "Retail Operations Coordinator"
+    ],
+    "transition_routes": [
+      "Purchasing Assistant",
+      "Supplier Coordinator",
+      "Merchandise Assistant",
+      "Inventory Specialist"
+    ],
+    "quick_income": [
+      "Assistant Store Manager",
+      "Retail support",
+      "Purchasing support"
+    ],
+    "emergency_routes": [
+      "Линейный retail",
+      "Customer Service"
+    ],
+    "required_questions": [
+      "Любимые функции",
+      "Интерес к retail",
+      "Допустимый стартовый уровень",
+      "Подтверждённые цифры",
+      "Минимальный доход"
+    ],
+    "forbidden_recommendations": [
+      "CEO крупной компании",
+      "Business Consultant",
+      "Project Manager",
+      "Marketing Manager",
+      "HR Manager",
+      "Financial Manager",
+      "Procurement Manager без этапа входа"
+    ],
+    "mandatory_conclusions": [
+      "Предпринимательский опыт оценивается по функциям и масштабу",
+      "Нельзя ни завышать до C-level, ни сводить к продавцу"
+    ],
+    "critical_errors": [
+      "Назвать CEO",
+      "Обнулить 12 лет бизнеса",
+      "Предложить только продавца",
+      "Выдать простые финансы за финансовый менеджмент",
+      "Навязать бизнес"
+    ],
+    "logic_rules": [
+      "Оценивать каждую функцию отдельно",
+      "Масштаб бизнеса определяет переносимый уровень"
+    ]
+  }
+}

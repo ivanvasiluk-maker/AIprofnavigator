@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Document, FSInputFile, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, Document, FSInputFile, Message, ReplyKeyboardRemove
 from pypdf import PdfReader
 
 from config import settings
@@ -170,6 +170,8 @@ from keyboards import (
     story_confirmation_keyboard,
     telegram_link_keyboard,
     think_reminder_keyboard,
+    first_step_selection_keyboard,
+    other_first_steps_keyboard,
 )
 from localization import t
 from openai_client import ai_client
@@ -180,11 +182,19 @@ from services.evidence_profile import (
     next_question_from_profile,
     profile_ready_for_safe_conclusion,
 )
+from services.career_assessment import (
+    build_preliminary_assessment,
+    career_assessment_from_dict,
+    render_first_step_instruction,
+    render_route_comparison,
+    render_telegram_map,
+    validate_career_assessment,
+)
 from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
 from utils.reporting import build_telegram_summary, generate_docx_report_file, generate_pdf_report
-from utils.reporting import generate_html_report_file, generate_pdf_from_html_file_with_error
+from utils.reporting import generate_assessment_html_file, generate_html_report_file, generate_pdf_from_html_file_with_error
 
 router = Router()
 _REMINDER_TASKS: dict[int, asyncio.Task] = {}
@@ -6656,6 +6666,10 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     
     if await _maybe_switch_to_crisis_support(message, state, lang, combined_input, source="report_build"):
         return
+
+    if not settings.legacy_career_report_enabled:
+        await _build_and_send_career_assessment(message, state, lang, data)
+        return
     
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     if report_generation_id:
@@ -6953,6 +6967,215 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         report = _ensure_preliminary_report(report, data)
         await state.update_data(final_report=report, report_readiness_status="PRELIMINARY_REPORT_READY")
     await _send_final_map_bundle(message, state, lang, report)
+
+
+async def _build_and_send_career_assessment(message: Message, state: FSMContext, lang: str, data: dict) -> None:
+    stored_payload = data.get("career_assessment")
+    if not isinstance(stored_payload, dict):
+        candidate = data.get("final_report")
+        stored_payload = candidate if isinstance(candidate, dict) and candidate.get("assessment_id") else None
+    if isinstance(stored_payload, dict):
+        try:
+            stored_assessment = career_assessment_from_dict(stored_payload)
+            validate_career_assessment(stored_assessment).require_valid()
+        except (TypeError, ValueError):
+            stored_assessment = None
+        if stored_assessment is not None:
+            await message.answer(
+                render_telegram_map(stored_assessment),
+                reply_markup=first_step_selection_keyboard(stored_assessment),
+            )
+            html_report_path = str(data.get("html_report_path") or "").strip()
+            if html_report_path and Path(html_report_path).is_file():
+                await message.answer_document(
+                    FSInputFile(html_report_path),
+                    caption=t(lang, "web_report_ready"),
+                )
+            await state.set_state(CareerFlow.REPORT_READY)
+            await state.update_data(
+                career_assessment=stored_assessment.to_dict(),
+                final_report=stored_assessment.to_dict(),
+                final_report_generated=True,
+                assessment_id=stored_assessment.assessment_id,
+                report_generation_id=stored_assessment.assessment_id,
+                report_generation_status="ASSESSMENT_REUSED",
+            )
+            await _track_event(
+                message,
+                state,
+                "report_reused_idempotent",
+                meta={"pipeline": "career_assessment_v2", "assessment_id": stored_assessment.assessment_id},
+            )
+            return
+
+    snapshot = _build_profile_snapshot(data)
+    if not _snapshot_is_ready_for_report(snapshot):
+        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
+        await _start_route_context_intake(message, state, lang)
+        return
+
+    public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
+    session_id = str(data.get("session_id") or "").strip()
+    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    profile_version = str(data.get("profile_version") or assessment_id)
+    save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
+    await state.update_data(
+        profile_snapshot=snapshot,
+        assessment_id=assessment_id,
+        report_generation_id=assessment_id,
+    )
+    await state.set_state(CareerFlow.REPORT_GENERATING)
+    await message.answer(t(lang, "report_generation_compact"), reply_markup=ReplyKeyboardRemove())
+    await _track_event(message, state, "report_started", meta={"pipeline": "career_assessment_v2"})
+
+    try:
+        assessment = await ai_client.build_career_assessment(
+            snapshot,
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+            story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+            resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+            language=lang,
+        )
+    except Exception as exc:
+        preliminary = build_preliminary_assessment(
+            snapshot,
+            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+        preliminary_payload = preliminary.to_dict()
+        save_report_version(assessment_id, public_user_id, preliminary_payload, session_id=session_id)
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await state.update_data(
+            career_assessment=preliminary_payload,
+            final_report=preliminary_payload,
+            report_generation_status="ASSESSMENT_VALIDATION_FAILED",
+            report_generation_error=type(exc).__name__,
+        )
+        await _track_event(
+            message,
+            state,
+            "report_failed",
+            meta={"pipeline": "career_assessment_v2", "error": type(exc).__name__},
+        )
+        await message.answer(
+            render_telegram_map(preliminary),
+            reply_markup=first_step_selection_keyboard(preliminary),
+        )
+        await message.answer(
+            "Это краткая предварительная карта. Полное заключение не прошло проверку, поэтому сломанный HTML не отправлен. "
+            "Профиль сохранён для повторной сборки.",
+        )
+        return
+
+    assessment_payload = assessment.to_dict()
+    save_report_version(assessment_id, public_user_id, assessment_payload, session_id=session_id)
+    await state.update_data(
+        career_assessment=assessment_payload,
+        final_report=assessment_payload,
+        final_report_generated=True,
+        report_generation_status="ASSESSMENT_READY",
+        route_comparison=render_route_comparison(assessment),
+    )
+    await _track_event(
+        message,
+        state,
+        "report_generated",
+        meta={"pipeline": "career_assessment_v2", "assessment_id": assessment_id},
+    )
+
+    await message.answer(
+        render_telegram_map(assessment),
+        reply_markup=first_step_selection_keyboard(assessment),
+    )
+
+    html_report_path = ""
+    try:
+        html_path = generate_assessment_html_file(assessment, settings.report_output_dir)
+        html_report_path = _normalize_report_path(str(html_path))
+        html_url = _report_public_url(Path(html_report_path))
+        await message.answer_document(
+            FSInputFile(html_report_path),
+            caption=t(lang, "web_report_ready"),
+            reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else None,
+        )
+        await _track_event(
+            message,
+            state,
+            "html_ready",
+            meta={"assessment_id": assessment_id, "path": Path(html_report_path).name},
+        )
+    except Exception as exc:
+        await _track_event(
+            message,
+            state,
+            "html_failed",
+            meta={"assessment_id": assessment_id, "error": type(exc).__name__},
+        )
+        await message.answer("Краткая карта готова, но HTML не собрался. Профиль сохранён для повторной сборки.")
+
+    await state.set_state(CareerFlow.REPORT_READY)
+    await state.update_data(html_report_path=html_report_path, selected_first_step_id=None)
+    update_report_files(assessment_id, html_report_path=html_report_path)
+
+
+@router.callback_query(F.data.startswith("select_first_step:"))
+async def select_first_step(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    payload = data.get("career_assessment")
+    if len(parts) != 3 or not isinstance(payload, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    _, assessment_id, step_id = parts
+    assessment = career_assessment_from_dict(payload)
+    if assessment.assessment_id != assessment_id:
+        await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    try:
+        instruction = render_first_step_instruction(assessment, step_id)
+    except ValueError:
+        await callback.answer("Шаг не найден", show_alert=True)
+        return
+    await state.update_data(
+        career_assessment=assessment.to_dict(),
+        selected_first_step_id=step_id,
+    )
+    public_user_id = str(data.get("public_user_id") or "").strip()
+    if public_user_id:
+        save_report_version(
+            assessment_id,
+            public_user_id,
+            assessment.to_dict(),
+            session_id=str(data.get("session_id") or "").strip(),
+            html_report_path=str(data.get("html_report_path") or "").strip(),
+        )
+    if callback.message:
+        await callback.message.answer(instruction, reply_markup=other_first_steps_keyboard(assessment_id))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("show_first_steps:"))
+async def show_first_steps(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    payload = data.get("career_assessment")
+    assessment_id = str(callback.data or "").partition(":")[2]
+    if not isinstance(payload, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    assessment = career_assessment_from_dict(payload)
+    if assessment.assessment_id != assessment_id:
+        await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    if callback.message:
+        await callback.message.answer(
+            "С какого шага хотите начать?",
+            reply_markup=first_step_selection_keyboard(assessment),
+        )
+    await callback.answer()
 
 
 @router.message(CareerFlow.REPORT_GENERATION_FAILED, F.text)

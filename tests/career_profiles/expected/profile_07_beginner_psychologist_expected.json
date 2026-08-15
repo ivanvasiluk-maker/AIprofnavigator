@@ -1,0 +1,64 @@
+{
+  "id": "profile_07_beginner_psychologist",
+  "title": "Ксения — начинающий психолог с желанием открыть частную практику",
+  "expected": {
+    "professional_core": [
+      "Начинающий психолог",
+      "Автор психообразовательного контента"
+    ],
+    "secondary_functions": [
+      "Psychological Programme Assistant"
+    ],
+    "seniority": {
+      "current": "Trainee / junior",
+      "notes": "Диплом, аудитория и спрос не подтверждают middle/senior."
+    },
+    "primary_routes": [
+      "Ограниченная консультативная практика под супервизией в законных рамках"
+    ],
+    "transition_routes": [
+      "Junior Psychologist",
+      "Psychological Programme Assistant"
+    ],
+    "quick_income": [
+      "Профильная координационная работа",
+      "Психообразование",
+      "Ограниченная практика"
+    ],
+    "emergency_routes": [
+      "Административная работа для финансирования развития"
+    ],
+    "required_questions": [
+      "Правовой статус услуг",
+      "Границы запросов",
+      "Супервизор",
+      "Протокол перенаправления",
+      "Минимальный доход"
+    ],
+    "forbidden_recommendations": [
+      "Psychotherapist",
+      "Trauma Specialist",
+      "Clinical Psychologist",
+      "Crisis Psychologist",
+      "Senior Psychologist",
+      "Автор методологии",
+      "Career Counsellor",
+      "Coach как обходной путь"
+    ],
+    "mandatory_conclusions": [
+      "Начальная оплачиваемая практика возможна только в прозрачных границах",
+      "Маркетинг не равен компетентности"
+    ],
+    "critical_errors": [
+      "Сложные случаи без подготовки",
+      "Игнорирование супервизии",
+      "Экспертность по травме из личного опыта",
+      "Полный запрет на оплату",
+      "Ложный профессиональный титул"
+    ],
+    "logic_rules": [
+      "Отделять спрос от компетентности",
+      "Учитывать правовые и этические границы"
+    ]
+  }
+}

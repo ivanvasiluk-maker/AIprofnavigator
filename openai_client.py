@@ -9,6 +9,13 @@ from openai import OpenAI
 
 from config import settings
 from prompts import FINAL_REPORT_PROMPT, RESUME_ANALYSIS_PROMPT, STORY_ANALYSIS_PROMPT, SYSTEM_PROMPT
+from services.career_assessment import (
+    CAREER_ASSESSMENT_SCHEMA,
+    CareerAssessment,
+    career_assessment_from_dict,
+    validate_career_assessment,
+)
+from services.runtime_isolation import assert_expected_profiles_not_loaded
 
 
 CONSTRUCTION_ESTIMATION_DOMAIN = "construction_engineering_cost_estimation"
@@ -1102,6 +1109,85 @@ class CareerOpenAIClient:
             language=language,
         )
         return await self._run_json(prompt, RESUME_ANALYSIS_FALLBACK, RESUME_ANALYSIS_SCHEMA, language)
+
+    async def build_career_assessment(
+        self,
+        profile_snapshot: dict[str, Any],
+        *,
+        assessment_id: str,
+        session_id: str,
+        profile_version: str,
+        story_analysis: dict[str, Any] | None = None,
+        resume_analysis: dict[str, Any] | None = None,
+        language: str = "ru",
+    ) -> CareerAssessment:
+        """Build the one canonical assessment consumed by every output renderer."""
+        language = "be" if language == "be" else "ru"
+        assert_expected_profiles_not_loaded(settings.environment, profile_snapshot)
+        fixed_identity = {
+            "assessment_id": assessment_id,
+            "session_id": session_id,
+            "profile_version": profile_version,
+        }
+        prompt = """Собери единый CareerAssessment по входному ProfileSnapshot.
+
+Это единственный аналитический вызов. Он должен определить профессиональное ядро, вторичные функции,
+текущий и переходный seniority, доказательства, выбор пользователя, ограничения, маршруты, вопросы,
+обязательные выводы и 3-5 разных первых шагов.
+
+Правила:
+- используй только факты из входа, не превращай гипотезы в факты;
+- формируй самостоятельное заключение из фактов пользователя, не пытайся воспроизводить готовый образец;
+- основной маршрут обязан ссылаться минимум на два evidence_id;
+- primary_routes обязательны;
+- transition_routes добавляй только для доказанного карьерного моста;
+- quick_income_routes добавляй только при приоритете быстрого дохода;
+- emergency_routes добавляй только при подтверждённой срочности;
+- не создавай пустые маршруты и название «Возможный маршрут»;
+- не предлагай административную работу, документооборот, психологию, бизнес или обнуление опыта без прямых доказательств и выбора пользователя;
+- не добавляй SWOT, психологический профиль, универсальные сценарии или неподтверждённый миграционный вывод;
+- прямой отказ пользователя от функции или профессии имеет приоритет над похожестью прошлого опыта;
+- переносимый профессиональный капитал не обязывает продолжать прежнюю профессию;
+- оценивай текущий seniority и уровень входа в новую функцию отдельно; не переноси и не обнуляй уровень автоматически;
+- перерыв, миграция, новый стек, язык или отсутствие локального допуска сами по себе не уничтожают профессиональный уровень;
+- для регулируемой деятельности разделяй квалификацию и законное право практиковать;
+- титулы owner, lead и manager проверяй по функциям, масштабу и ответственности, а не по названию;
+- недовольство условиями, people management, on-call или выгорание не считай автоматическим отказом от профессии;
+- практическую квалифицированную профессию не направляй в офис как универсальный карьерный рост;
+- при разрозненном опыте допустимо честно указать отсутствие устойчивого экспертного ядра;
+- не присваивай регулируемую профессию, клиническую компетентность или инженерный статус без подтверждения;
+- вопросы должны включать только неизвестные, способные изменить решение;
+- first_steps должны иметь 3-5 разных type, быть конкретными и не требовать увольнения;
+- learning допустим только для конкретного доказанного пробела;
+- country_code и валюты дословно перенеси из ProfileSnapshot;
+- значения assessment_id, session_id и profile_version дословно перенеси из fixed_identity;
+- selected_first_step_id верни null.
+
+ВХОД:
+""" + json.dumps(
+            {
+                "fixed_identity": fixed_identity,
+                "profile_snapshot": profile_snapshot,
+                "story_analysis": story_analysis or {},
+                "resume_analysis": resume_analysis or {},
+            },
+            ensure_ascii=False,
+        )
+        payload = await self._run_json(prompt, {}, CAREER_ASSESSMENT_SCHEMA, language)
+        assessment = career_assessment_from_dict(payload)
+        if (
+            assessment.assessment_id != assessment_id
+            or assessment.session_id != session_id
+            or assessment.profile_version != profile_version
+        ):
+            raise ValueError("CareerAssessment identity does not match the requested build")
+        validation = validate_career_assessment(
+            assessment,
+            snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+            snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+        )
+        validation.require_valid()
+        return assessment
 
     async def build_report(
         self,

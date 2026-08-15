@@ -1,0 +1,66 @@
+{
+  "id": "profile_04_fragmented",
+  "title": "Марина — разрозненный опыт без устойчивой профессиональной идентичности",
+  "expected": {
+    "professional_core": [
+      "Клиентский сервис",
+      "Операционная координация"
+    ],
+    "secondary_functions": [
+      "Административная поддержка",
+      "Помощь в мероприятиях"
+    ],
+    "seniority": {
+      "current": "Middle в customer service/administration; strong junior в project/event coordination",
+      "notes": "Не создавать seniority без доказательств."
+    },
+    "primary_routes": [
+      "Project Assistant / Junior Project Coordinator",
+      "Office / Operations Coordinator"
+    ],
+    "transition_routes": [
+      "Customer Operations",
+      "Event Assistant",
+      "Recruitment Coordinator как гипотеза"
+    ],
+    "quick_income": [
+      "Customer Support",
+      "Office Coordination",
+      "Project Assistance"
+    ],
+    "emergency_routes": [
+      "Администратор",
+      "Receptionist",
+      "Временная розница"
+    ],
+    "required_questions": [
+      "Люди или процессы",
+      "Готовность к assistant-level",
+      "Минимальный доход",
+      "Комфортный объём общения",
+      "Интерес к проектной работе"
+    ],
+    "forbidden_recommendations": [
+      "Project Manager",
+      "Event Manager высокого уровня",
+      "HR Manager",
+      "Marketing Specialist",
+      "Operations Manager",
+      "Business Consultant"
+    ],
+    "mandatory_conclusions": [
+      "Отсутствие устойчивого экспертного ядра — допустимый вывод",
+      "Assistant/coordinator role может быть нормальным развитием"
+    ],
+    "critical_errors": [
+      "Искусственный seniority",
+      "Помощь на мероприятиях названа управлением проектами",
+      "HR выбран только из-за общительности",
+      "Случайный список профессий"
+    ],
+    "logic_rules": [
+      "Выводы строятся по повторяющимся функциям",
+      "Не присваивать уровень по единичным эпизодам"
+    ]
+  }
+}
