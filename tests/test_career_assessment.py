@@ -159,7 +159,7 @@ class CareerAssessmentTest(unittest.TestCase):
         callback_values = [row[0].callback_data for row in keyboard.inline_keyboard]
         self.assertEqual(
             callback_values[0],
-            "step_callback:assessment-profile-10:clarify:1",
+            "step_callback:assessment-profile-10:0",
         )
         self.assertTrue(all(value and len(value.encode("utf-8")) <= 64 for value in callback_values))
         selected_keyboard = selected_step_actions_keyboard(self.assessment, "clarify")
@@ -167,6 +167,16 @@ class CareerAssessmentTest(unittest.TestCase):
             [row[0].text for row in selected_keyboard.inline_keyboard],
             ["Показать другие варианты", "Отметить выполненным", "Сделать проще", "Вернуться к карте"],
         )
+
+    def test_callback_data_stays_valid_with_long_model_step_and_profile_ids(self) -> None:
+        self.assessment.profile_version = "profile-version-" + "x" * 80
+        self.assessment.first_steps[0].step_id = "model-generated-step-" + "y" * 100
+        keyboards = [
+            first_step_selection_keyboard(self.assessment),
+            selected_step_actions_keyboard(self.assessment, self.assessment.first_steps[0].step_id),
+        ]
+        callback_values = [button.callback_data for keyboard in keyboards for row in keyboard.inline_keyboard for button in row]
+        self.assertTrue(all(value and len(value.encode("utf-8")) <= 64 for value in callback_values), callback_values)
 
     def test_legacy_report_is_disabled_by_default(self) -> None:
         self.assertFalse(settings.legacy_career_report_enabled)

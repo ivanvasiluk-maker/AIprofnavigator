@@ -7209,14 +7209,19 @@ async def select_first_step(callback: CallbackQuery, state: FSMContext) -> None:
     callback_token = str(callback.data or "")
     parts = callback_token.split(":", 3)
     payload = data.get("career_assessment")
-    if len(parts) != 4 or not isinstance(payload, dict):
+    if len(parts) not in {3, 4} or not isinstance(payload, dict):
         await callback.answer("Заключение не найдено", show_alert=True)
         return
-    _, assessment_id, step_id, profile_version = parts
+    assessment_id = parts[1]
     assessment = career_assessment_from_dict(payload)
-    if assessment.assessment_id != assessment_id or assessment.profile_version != profile_version:
+    if assessment.assessment_id != assessment_id or (len(parts) == 4 and assessment.profile_version != parts[3]):
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
         return
+    step_reference = parts[2]
+    if len(parts) == 3 and step_reference.isdigit() and int(step_reference) < len(assessment.first_steps):
+        step_id = assessment.first_steps[int(step_reference)].step_id
+    else:
+        step_id = step_reference
     processed_callbacks = set(data.get("processed_step_callbacks") or [])
     if callback_token in processed_callbacks:
         await callback.answer("Этот шаг уже выбран")
@@ -7252,12 +7257,12 @@ async def show_first_steps(callback: CallbackQuery, state: FSMContext) -> None:
     payload = data.get("career_assessment")
     callback_token = str(callback.data or "")
     parts = callback_token.split(":", 2)
-    if len(parts) != 3 or not isinstance(payload, dict):
+    if len(parts) not in {2, 3} or not isinstance(payload, dict):
         await callback.answer("Заключение не найдено", show_alert=True)
         return
-    _, assessment_id, profile_version = parts
+    assessment_id = parts[1]
     assessment = career_assessment_from_dict(payload)
-    if assessment.assessment_id != assessment_id or assessment.profile_version != profile_version:
+    if assessment.assessment_id != assessment_id or (len(parts) == 3 and assessment.profile_version != parts[2]):
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
         return
     shown_menus = set(data.get("shown_step_menus") or [])
@@ -7277,10 +7282,10 @@ async def show_first_steps(callback: CallbackQuery, state: FSMContext) -> None:
 def _assessment_from_step_callback(data: dict, callback_data: str, expected_parts: int) -> tuple[CareerAssessment | None, list[str]]:
     parts = callback_data.split(":", expected_parts - 1)
     payload = data.get("career_assessment")
-    if len(parts) != expected_parts or not isinstance(payload, dict):
+    if len(parts) not in {expected_parts - 1, expected_parts} or not isinstance(payload, dict):
         return None, parts
     assessment = career_assessment_from_dict(payload)
-    if assessment.assessment_id != parts[1] or assessment.profile_version != parts[-1]:
+    if assessment.assessment_id != parts[1] or (len(parts) == expected_parts and assessment.profile_version != parts[-1]):
         return None, parts
     return assessment, parts
 
@@ -7292,7 +7297,12 @@ async def mark_first_step_done(callback: CallbackQuery, state: FSMContext) -> No
     if assessment is None:
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
         return
-    step_id = parts[2]
+    step_reference = parts[2]
+    step_id = (
+        assessment.first_steps[int(step_reference)].step_id
+        if len(parts) == 3 and step_reference.isdigit() and int(step_reference) < len(assessment.first_steps)
+        else step_reference
+    )
     completed = set(data.get("completed_first_step_ids") or [])
     completed.add(step_id)
     await state.update_data(completed_first_step_ids=sorted(completed))
@@ -7306,7 +7316,13 @@ async def simplify_first_step(callback: CallbackQuery, state: FSMContext) -> Non
     if assessment is None:
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
         return
-    step = next((item for item in assessment.first_steps if item.step_id == parts[2]), None)
+    step_reference = parts[2]
+    step_id = (
+        assessment.first_steps[int(step_reference)].step_id
+        if len(parts) == 3 and step_reference.isdigit() and int(step_reference) < len(assessment.first_steps)
+        else step_reference
+    )
+    step = next((item for item in assessment.first_steps if item.step_id == step_id), None)
     if step is None:
         await callback.answer("Шаг не найден", show_alert=True)
         return

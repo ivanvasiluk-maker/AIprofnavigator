@@ -18,21 +18,22 @@ def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboar
         [
             InlineKeyboardButton(
                 text=STEP_BUTTON_LABELS[step.type],
-                callback_data=f"step_callback:{assessment.assessment_id}:{step.step_id}:{assessment.profile_version}",
+                callback_data=f"step_callback:{assessment.assessment_id}:{index}",
             )
         ]
-        for step in assessment.first_steps
+        for index, step in enumerate(assessment.first_steps)
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def selected_step_actions_keyboard(assessment: CareerAssessment, step_id: str) -> InlineKeyboardMarkup:
+    step_index = next(index for index, step in enumerate(assessment.first_steps) if step.step_id == step_id)
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Показать другие варианты", callback_data=f"show_first_steps:{assessment.assessment_id}:{assessment.profile_version}")],
-            [InlineKeyboardButton(text="Отметить выполненным", callback_data=f"step_done:{assessment.assessment_id}:{step_id}:{assessment.profile_version}")],
-            [InlineKeyboardButton(text="Сделать проще", callback_data=f"step_simplify:{assessment.assessment_id}:{step_id}:{assessment.profile_version}")],
-            [InlineKeyboardButton(text="Вернуться к карте", callback_data=f"step_back:{assessment.assessment_id}:{assessment.profile_version}")],
+            [InlineKeyboardButton(text="Показать другие варианты", callback_data=f"show_first_steps:{assessment.assessment_id}")],
+            [InlineKeyboardButton(text="Отметить выполненным", callback_data=f"step_done:{assessment.assessment_id}:{step_index}")],
+            [InlineKeyboardButton(text="Сделать проще", callback_data=f"step_simplify:{assessment.assessment_id}:{step_index}")],
+            [InlineKeyboardButton(text="Вернуться к карте", callback_data=f"step_back:{assessment.assessment_id}")],
         ]
     )
 
