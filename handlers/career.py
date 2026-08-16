@@ -184,6 +184,9 @@ from services.evidence_profile import (
     profile_ready_for_safe_conclusion,
 )
 from services.career_assessment import (
+    CAREER_HTML_RENDERER_VERSION,
+    CAREER_PIPELINE_VERSION,
+    CAREER_TELEGRAM_RENDERER_VERSION,
     CareerAssessment,
     build_preliminary_assessment,
     career_assessment_from_dict,
@@ -1142,6 +1145,8 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         "market_locale": str((country_config or {}).get("market_locale") or "unknown").strip(),
         "answers_text": str(data.get("answers_text") or "").strip(),
         "story_text": str(data.get("story_text") or "").strip(),
+        "story_analysis": dict(data.get("story_analysis") or {}) if isinstance(data.get("story_analysis"), dict) else {},
+        "resume_analysis": dict(data.get("resume_analysis") or {}) if isinstance(data.get("resume_analysis"), dict) else {},
         "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip() and key != "country_config"},
         "ready_for_report": False,
     }
@@ -6972,6 +6977,12 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
 
 async def _build_and_send_career_assessment(message: Message, state: FSMContext, lang: str, data: dict) -> None:
+    runtime_meta = {
+        "commit_sha": str(os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown"),
+        "pipeline_version": CAREER_PIPELINE_VERSION,
+        "telegram_renderer_version": CAREER_TELEGRAM_RENDERER_VERSION,
+        "html_renderer_version": CAREER_HTML_RENDERER_VERSION,
+    }
     stored_payload = data.get("career_assessment")
     if not isinstance(stored_payload, dict):
         candidate = data.get("final_report")
@@ -6988,7 +6999,21 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 reply_markup=first_step_selection_keyboard(stored_assessment),
             )
             html_report_path = str(data.get("html_report_path") or "").strip()
-            if html_report_path and Path(html_report_path).is_file():
+            if not html_report_path or not Path(html_report_path).is_file():
+                try:
+                    html_report_path = _normalize_report_path(
+                        str(generate_assessment_html_file(stored_assessment, settings.report_output_dir))
+                    )
+                    update_report_files(stored_assessment.assessment_id, html_report_path=html_report_path)
+                except Exception as exc:
+                    await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+                    await state.update_data(html_report_path="", report_generation_error=type(exc).__name__)
+                    await message.answer(
+                        "Краткая карта готова, но HTML не собрался. Профиль сохранён для повторной сборки.",
+                        reply_markup=assessment_recovery_keyboard(),
+                    )
+                    return
+            if Path(html_report_path).is_file():
                 await message.answer_document(
                     FSInputFile(html_report_path),
                     caption=t(lang, "web_report_ready"),
@@ -7006,7 +7031,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 message,
                 state,
                 "report_reused_idempotent",
-                meta={"pipeline": "career_assessment_v2", "assessment_id": stored_assessment.assessment_id},
+                meta={
+                    **runtime_meta,
+                    "assessment_id": stored_assessment.assessment_id,
+                    "profile_version": stored_assessment.profile_version,
+                },
             )
             return
 
@@ -7028,7 +7057,12 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     )
     await state.set_state(CareerFlow.REPORT_GENERATING)
     await message.answer(t(lang, "report_generation_compact"), reply_markup=ReplyKeyboardRemove())
-    await _track_event(message, state, "report_started", meta={"pipeline": "career_assessment_v2"})
+    await _track_event(
+        message,
+        state,
+        "report_started",
+        meta={**runtime_meta, "assessment_id": assessment_id, "profile_version": profile_version},
+    )
 
     try:
         assessment = await ai_client.build_career_assessment(
@@ -7061,7 +7095,12 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             message,
             state,
             "report_failed",
-            meta={"pipeline": "career_assessment_v2", "error": type(exc).__name__},
+            meta={
+                **runtime_meta,
+                "assessment_id": assessment_id,
+                "profile_version": profile_version,
+                "error": type(exc).__name__,
+            },
         )
         await message.answer(
             render_telegram_map(preliminary),
@@ -7081,6 +7120,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     )
     validation.require_valid()
     diagnostics = dict(assessment.metadata)
+    diagnostics.update(runtime_meta)
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
     generation_status = {
         "repair": "ASSESSMENT_REPAIRED",
@@ -7102,7 +7142,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         state,
         "report_generated",
         meta={
-            "pipeline": "career_assessment_v2",
+            **runtime_meta,
             "assessment_id": assessment_id,
             "profile_version": profile_version,
             "recovered_by": recovered_by,
@@ -7130,16 +7170,33 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             message,
             state,
             "html_ready",
-            meta={"assessment_id": assessment_id, "path": Path(html_report_path).name},
+            meta={
+                **runtime_meta,
+                "assessment_id": assessment_id,
+                "profile_version": profile_version,
+                "path": Path(html_report_path).name,
+            },
         )
     except Exception as exc:
         await _track_event(
             message,
             state,
             "html_failed",
-            meta={"assessment_id": assessment_id, "error": type(exc).__name__},
+            meta={
+                **runtime_meta,
+                "assessment_id": assessment_id,
+                "profile_version": profile_version,
+                "error": type(exc).__name__,
+            },
         )
-        await message.answer("Краткая карта готова, но HTML не собрался. Профиль сохранён для повторной сборки.")
+        await message.answer(
+            "Краткая карта готова, но HTML не собрался. Профиль сохранён для повторной сборки.",
+            reply_markup=assessment_recovery_keyboard(),
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await state.update_data(html_report_path="", selected_first_step_id=None)
+        update_report_files(assessment_id, html_report_path="")
+        return
 
     await state.set_state(CareerFlow.REPORT_READY)
     await state.update_data(html_report_path=html_report_path, selected_first_step_id=None)

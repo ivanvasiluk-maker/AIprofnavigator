@@ -1,5 +1,7 @@
 import asyncio
 import hashlib
+import json
+import os
 import socket
 import sys
 from contextlib import suppress
@@ -9,6 +11,11 @@ from aiogram.types import Update
 
 from config import settings
 from handlers import career, start, voice
+from services.career_assessment import (
+    CAREER_HTML_RENDERER_VERSION,
+    CAREER_PIPELINE_VERSION,
+    CAREER_TELEGRAM_RENDERER_VERSION,
+)
 from utils.persistence import save_profile_version, touch_session
 
 
@@ -114,6 +121,19 @@ async def main() -> None:
         print("Local instance is already running. Stop other local bot.py process and retry.")
         sys.exit(1)
 
+    print(
+        json.dumps(
+            {
+                "event": "career_pipeline_started",
+                "commit_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown",
+                "pipeline_version": CAREER_PIPELINE_VERSION,
+                "telegram_renderer_version": CAREER_TELEGRAM_RENDERER_VERSION,
+                "html_renderer_version": CAREER_HTML_RENDERER_VERSION,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     print("Starting bot polling...", flush=True)
     webhook_configured = bool(str(settings.google_sheets_webhook_url or "").strip())
     print(

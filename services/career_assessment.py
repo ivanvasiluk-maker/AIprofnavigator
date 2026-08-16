@@ -17,6 +17,10 @@ FirstStepType = Literal[
 ]
 ValidationSeverity = Literal["warning", "error", "critical"]
 
+CAREER_PIPELINE_VERSION = "career-assessment-v2"
+CAREER_TELEGRAM_RENDERER_VERSION = "career-assessment-telegram-v1"
+CAREER_HTML_RENDERER_VERSION = "career-assessment-html-v1"
+
 
 def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -1019,7 +1023,9 @@ def validate_career_assessment(
         )
         assessment.metadata["user_choice_hypothesis"] = "Остаться в широком профессиональном поле, но сменить роль или контекст"
 
-    visible_values = _all_strings(assessment.to_dict())
+    visible_assessment = assessment.to_dict()
+    visible_assessment.pop("metadata", None)
+    visible_values = _all_strings(visible_assessment)
     forbidden_placeholders = {"-", "\\-", "данных недостаточно", "возможный маршрут"}
     if any(value.strip().casefold() in forbidden_placeholders for value in visible_values):
         add_error("FORBIDDEN_OUTPUT_PATTERN", "$", "placeholder user-facing value detected", "placeholder")
@@ -1160,7 +1166,7 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Карьерное заключение {escape(assessment.assessment_id)}</title>
 <style>body{{font-family:Georgia,serif;max-width:900px;margin:32px auto;padding:0 20px;color:#17211d;line-height:1.55}}h1,h2{{font-family:Arial,sans-serif}}section{{border-top:1px solid #b8c2bc;padding:20px 0}}article{{margin:16px 0}}.meta{{color:#526159}}</style></head><body>
-<h1>Карьерное заключение</h1><p class="meta">Assessment ID: {escape(assessment.assessment_id)} · версия {escape(assessment.profile_version)}</p>
+<h1>Карьерное заключение</h1><p class="meta">Assessment ID: {escape(assessment.assessment_id)} · версия {escape(assessment.profile_version)} · renderer {CAREER_HTML_RENDERER_VERSION}</p>
 <section><h2>1. Ваша профессиональная идентичность</h2>{_list_html(assessment.identity.professional_core)}<p>{escape(assessment.identity.core_description)}</p><h3>Вторичные функции</h3>{_list_html(assessment.identity.secondary_functions)}</section>
 <section><h2>2. Ваш профессиональный уровень</h2><p><strong>Текущий:</strong> {escape(assessment.identity.seniority_current)}</p>{f'<p><strong>В переходной функции:</strong> {escape(assessment.identity.seniority_transition)}</p>' if assessment.identity.seniority_transition else ''}<p>{escape(assessment.identity.seniority_notes)}</p></section>
 <section><h2>3. Что подтверждает этот вывод</h2>{_list_html(list(evidence.values()))}</section>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import unittest
 from unittest.mock import AsyncMock
 import json
@@ -7,11 +8,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from config import settings
-from handlers.career import _build_and_send_career_assessment
+from handlers.career import _build_and_send_career_assessment, _build_profile_snapshot
 from keyboards import first_step_selection_keyboard, selected_step_actions_keyboard
 from openai_client import CareerOpenAIClient
 from services.career_assessment import (
     CAREER_ASSESSMENT_SCHEMA,
+    CAREER_HTML_RENDERER_VERSION,
+    CAREER_PIPELINE_VERSION,
+    CAREER_TELEGRAM_RENDERER_VERSION,
     build_preliminary_assessment,
     career_assessment_from_dict,
     render_assessment_html,
@@ -99,6 +103,11 @@ def profile_10_assessment_payload() -> dict:
             {"step_id": "consulting-test", "title": "Проверка консультирования", "purpose": "Проверить спрос без увольнения.", "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.", "expected_result": "Один подтверждающий или опровергающий сигнал спроса.", "duration_minutes": 30, "related_route_id": "consulting", "type": "clarification"},
         ],
     }
+
+
+def profile_10_e2e_fixture() -> dict:
+    fixture_path = Path(__file__).parent / "fixtures" / "career_assessment_profile_10.json"
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 class CareerAssessmentTest(unittest.TestCase):
@@ -243,6 +252,114 @@ class CareerAssessmentTest(unittest.TestCase):
 
 
 class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
+    async def test_fixture_runs_snapshot_repair_validation_telegram_and_html_end_to_end(self) -> None:
+        fixture = profile_10_e2e_fixture()
+        state_data = fixture["state_data"]
+        snapshot = _build_profile_snapshot(state_data)
+        snapshot_text = json.dumps(snapshot, ensure_ascii=False).casefold()
+        for expected_fact in (
+            "восемь лет",
+            "руководство маркетинговой командой",
+            "исследования рынка, клиентов и конкурентов",
+            "интервью с клиентами",
+            "позиционирование b2b-продуктов",
+            "продуктовые запуски",
+            "маркетинговая стратегия и бюджет",
+            "рост входящих заявок на 35%",
+            "образовательного контента и онлайн-курсов",
+            "проведение вебинаров",
+            "product management fundamentals",
+            "customer development",
+            "вильнюс",
+        ):
+            self.assertIn(expected_fact, snapshot_text)
+        self.assertEqual(snapshot["answers_text"].count("\n") + 1, 15)
+        self.assertEqual(snapshot["country_code"], "LT")
+        self.assertTrue(snapshot["resume_analysis"])
+
+        invalid_payload = profile_10_assessment_payload()
+        invalid_payload["assessment_id"] = fixture["assessment_id"]
+        invalid_payload["session_id"] = fixture["session_id"]
+        invalid_payload["profile_version"] = fixture["profile_version"]
+        invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
+        invalid_payload["identity"]["seniority_current"] = "средний"
+        invalid_payload["routes"]["primary_routes"][0]["title"] = "Смежные роли"
+        valid_payload = profile_10_assessment_payload()
+        valid_payload["assessment_id"] = fixture["assessment_id"]
+        valid_payload["session_id"] = fixture["session_id"]
+        valid_payload["profile_version"] = fixture["profile_version"]
+
+        client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
+        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload])  # type: ignore[method-assign]
+        assessment = await client.build_career_assessment(
+            snapshot,
+            assessment_id=fixture["assessment_id"],
+            session_id=fixture["session_id"],
+            profile_version=fixture["profile_version"],
+            story_analysis=snapshot["story_analysis"],
+            resume_analysis=snapshot["resume_analysis"],
+        )
+
+        self.assertIsInstance(assessment, type(career_assessment_from_dict(valid_payload)))
+        self.assertEqual(assessment.metadata["raw_model_output"], invalid_payload)
+        self.assertEqual(assessment.metadata["parsed_before_repair"]["identity"]["seniority_current"], "средний")
+        before_errors = {item["code"] for item in assessment.metadata["validation_before_repair"]["errors"]}
+        self.assertTrue({"RAW_USER_SUMMARY_AS_TITLE", "INVALID_SENIORITY", "GENERIC_ROUTE_TITLE"} <= before_errors)
+        self.assertTrue(assessment.metadata["repair_started"])
+        self.assertEqual(assessment.metadata["recovered_by"], "repair")
+        validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
+        self.assertTrue(validation.valid, validation.errors)
+        self.assertEqual(validation.errors, ())
+
+        telegram = render_telegram_map(assessment)
+        for forbidden in ("Пользователь имеет опыт", "Смежные роли", "{'", '"route_id"', "\n-\n"):
+            self.assertNotIn(forbidden, telegram)
+        with TemporaryDirectory() as output_dir:
+            html_path = generate_assessment_html_file(assessment, output_dir)
+            html = html_path.read_text(encoding="utf-8")
+            self.assertTrue(html_path.is_file())
+            self.assertIn(assessment.assessment_id, html_path.name)
+            self.assertIn(assessment.assessment_id, html)
+            self.assertIn(CAREER_HTML_RENDERER_VERSION, html)
+
+    async def test_fixture_two_failed_repairs_fall_back_and_create_html(self) -> None:
+        fixture = profile_10_e2e_fixture()
+        snapshot = _build_profile_snapshot(fixture["state_data"])
+        invalid_payload = profile_10_assessment_payload()
+        invalid_payload["assessment_id"] = fixture["assessment_id"]
+        invalid_payload["session_id"] = fixture["session_id"]
+        invalid_payload["profile_version"] = fixture["profile_version"]
+        invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
+        invalid_payload["routes"]["primary_routes"][0]["route_id"] = ""
+        invalid_payload["routes"]["primary_routes"][0]["title"] = "-"
+        invalid_payload["conclusions"]["main_conclusion"] = ""
+
+        client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
+        client._run_json = AsyncMock(side_effect=[copy.deepcopy(invalid_payload) for _ in range(3)])  # type: ignore[method-assign]
+        assessment = await client.build_career_assessment(
+            snapshot,
+            assessment_id=fixture["assessment_id"],
+            session_id=fixture["session_id"],
+            profile_version=fixture["profile_version"],
+            story_analysis=snapshot["story_analysis"],
+            resume_analysis=snapshot["resume_analysis"],
+        )
+        validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
+        self.assertTrue(validation.valid, validation.errors)
+        self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
+        self.assertEqual(client._run_json.await_count, 3)
+        self.assertEqual(assessment.identity.professional_core[:3], [
+            "Руководитель IT-маркетинга",
+            "Product Marketing Specialist",
+            "Специалист по исследованию рынка и клиентов",
+        ])
+        self.assertEqual(assessment.routes.primary_routes[0].title, "Product Marketing Manager")
+        self.assertEqual(assessment.routes.primary_routes[1].title, "Product Discovery / Customer Insights")
+        with TemporaryDirectory() as output_dir:
+            html_path = generate_assessment_html_file(assessment, output_dir)
+            self.assertTrue(html_path.is_file())
+            self.assertIn(assessment.assessment_id, html_path.read_text(encoding="utf-8"))
+
     async def test_build_uses_exactly_one_structured_call(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
         payload = profile_10_assessment_payload()
@@ -343,12 +460,18 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
                 "answer_document": AsyncMock(),
             },
         )()
-        with unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock()) as build:
-            with unittest.mock.patch("handlers.career._track_event", new=AsyncMock()):
+        with TemporaryDirectory() as output_dir:
+            html_path = Path(output_dir) / "career_assessment_assessment-profile-10.html"
+            html_path.write_text(render_assessment_html(career_assessment_from_dict(profile_10_assessment_payload())), encoding="utf-8")
+            with unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock()) as build, \
+                 unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path), \
+                 unittest.mock.patch("handlers.career.update_report_files"), \
+                 unittest.mock.patch("handlers.career._track_event", new=AsyncMock()):
                 await _build_and_send_career_assessment(message, state, "ru", state.data)
         build.assert_not_awaited()
         self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REUSED")
         self.assertTrue(state.data["final_report_generated"])
+        message.answer_document.assert_awaited_once()
 
     async def test_successful_repair_renders_html_and_sets_report_ready(self) -> None:
         class State:
@@ -374,19 +497,72 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as output_dir:
             html_path = Path(output_dir) / "career_assessment_assessment-profile-10.html"
             html_path.write_text(render_assessment_html(repaired), encoding="utf-8")
-            with unittest.mock.patch("handlers.career._build_profile_snapshot", return_value={"country_code": "LT", "country_name": "Литва", "currency": "EUR", "ready_for_report": True}), \
-                 unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=True), \
-                 unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=repaired)), \
-                 unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path), \
-                 unittest.mock.patch("handlers.career._track_event", new=AsyncMock()), \
-                 unittest.mock.patch("handlers.career.save_profile_version"), \
-                 unittest.mock.patch("handlers.career.save_report_version"), \
-                 unittest.mock.patch("handlers.career.update_report_files"):
+            with (
+                unittest.mock.patch("handlers.career._build_profile_snapshot", return_value={"country_code": "LT", "country_name": "Литва", "currency": "EUR", "ready_for_report": True}),
+                unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=True),
+                unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=repaired)),
+                unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path),
+                unittest.mock.patch("handlers.career._track_event", new=AsyncMock()) as track_event,
+                unittest.mock.patch("handlers.career.save_profile_version"),
+                unittest.mock.patch("handlers.career.save_report_version"),
+                unittest.mock.patch("handlers.career.update_report_files"),
+                unittest.mock.patch.dict("os.environ", {"RAILWAY_GIT_COMMIT_SHA": "5775a3abcd9f23ee2f2617fa0dd4390ce9c694c6"}),
+            ):
                 await _build_and_send_career_assessment(message, state, "ru", state.data)
         self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
         self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REPAIRED")
         self.assertTrue(state.data["final_report_generated"])
         message.answer_document.assert_awaited_once()
+        generated_meta = next(call.kwargs["meta"] for call in track_event.await_args_list if call.args[2] == "report_generated")
+        self.assertEqual(generated_meta["commit_sha"], "5775a3abcd9f23ee2f2617fa0dd4390ce9c694c6")
+        self.assertEqual(generated_meta["pipeline_version"], CAREER_PIPELINE_VERSION)
+        self.assertEqual(generated_meta["telegram_renderer_version"], CAREER_TELEGRAM_RENDERER_VERSION)
+        self.assertEqual(generated_meta["html_renderer_version"], CAREER_HTML_RENDERER_VERSION)
+        self.assertEqual(generated_meta["assessment_id"], "assessment-profile-10")
+        self.assertEqual(generated_meta["profile_version"], "1")
+
+    async def test_html_failure_keeps_assessment_and_offers_document_retry(self) -> None:
+        class State:
+            def __init__(self) -> None:
+                self.data = {
+                    "public_user_id": "public-test-user",
+                    "session_id": "session-profile-10",
+                    "assessment_id": "assessment-profile-10",
+                    "profile_version": "1",
+                }
+                self.current_state = None
+
+            async def update_data(self, **kwargs) -> None:
+                self.data.update(kwargs)
+
+            async def set_state(self, value) -> None:
+                self.current_state = value
+
+        state = State()
+        message = type("MessageStub", (), {"answer": AsyncMock(), "answer_document": AsyncMock()})()
+        assessment = career_assessment_from_dict(profile_10_assessment_payload())
+        with (
+            unittest.mock.patch("handlers.career._build_profile_snapshot", return_value={"country_code": "LT", "country_name": "Литва", "currency": "EUR", "ready_for_report": True}),
+            unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=True),
+            unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=assessment)),
+            unittest.mock.patch("handlers.career.generate_assessment_html_file", side_effect=OSError("disk unavailable")),
+            unittest.mock.patch("handlers.career._track_event", new=AsyncMock()),
+            unittest.mock.patch("handlers.career.save_profile_version"),
+            unittest.mock.patch("handlers.career.save_report_version"),
+            unittest.mock.patch("handlers.career.update_report_files"),
+        ):
+            await _build_and_send_career_assessment(message, state, "ru", state.data)
+
+        self.assertEqual(state.current_state, CareerFlow.REPORT_GENERATION_FAILED)
+        self.assertTrue(state.data["final_report_generated"])
+        self.assertEqual(state.data["career_assessment"]["assessment_id"], "assessment-profile-10")
+        self.assertEqual(state.data["html_report_path"], "")
+        self.assertGreaterEqual(message.answer.await_count, 3)
+        failure_call = message.answer.await_args_list[-1]
+        self.assertIn("HTML не собрался", failure_call.args[0])
+        retry_labels = [button.text for row in failure_call.kwargs["reply_markup"].keyboard for button in row]
+        self.assertIn("Повторить создание документа", retry_labels)
+        message.answer_document.assert_not_awaited()
 
 
 class RuntimeIsolationTest(unittest.TestCase):

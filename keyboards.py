@@ -40,7 +40,7 @@ def selected_step_actions_keyboard(assessment: CareerAssessment, step_id: str) -
 def assessment_recovery_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔄 Пересобрать документ")],
+            [KeyboardButton(text="Повторить создание документа")],
             [KeyboardButton(text="✏️ Уточнить цель"), KeyboardButton(text="🧭 Показать маршруты")],
             [KeyboardButton(text="⚡ Выбрать первый шаг")],
         ],

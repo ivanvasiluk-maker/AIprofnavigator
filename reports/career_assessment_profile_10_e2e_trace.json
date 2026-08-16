@@ -1,0 +1,3743 @@
+{
+  "commit_sha": "5775a3abcd9f23ee2f2617fa0dd4390ce9c694c6",
+  "pipeline_version": "career-assessment-v2",
+  "assessment_id": "assessment-profile-10-e2e",
+  "profile_version": "fixture-v1",
+  "renderer_versions": {
+    "telegram": "career-assessment-telegram-v1",
+    "html": "career-assessment-html-v1"
+  },
+  "snapshot_type": "dict",
+  "snapshot": {
+    "country_code": "LT",
+    "country_name": "Литва",
+    "city": "Вильнюс",
+    "currency": "EUR",
+    "local_language": "Литовский",
+    "market_locale": "lt-LT",
+    "answers_text": "1. Что хотите изменить? — Больше продуктовой ответственности.\n2. Что сохранить? — Исследования, стратегию и доход.\n3. Что исключить? — Чистое продвижение без влияния на продукт.\n4. Приоритет? — Не обнулять опыт.\n5. Интересующие направления? — Product Marketing, Product Discovery, Product Management и EdTech.\n6. Срочность дохода? — Доход нужен без длительного перерыва.\n7. Минимальный доход? — 2500 EUR в месяц.\n8. Целевой доход? — 3500 EUR в месяц.\n9. Бюджет обучения? — До 500 EUR.\n10. Время обучения? — 6 часов в неделю.\n11. Формат работы? — Удалённо или гибридно.\n12. Ограничения? — Не увольняться до проверки маршрута.\n13. Документы? — Есть право на работу в Литве.\n14. Портфолио? — Есть маркетинговые кейсы, нужен продуктовый кейс.\n15. Языки? — Русский C2, английский B2, литовский A2.",
+    "story_text": "Восемь лет работаю в IT-маркетинге. Руководил маркетинговой командой, исследовал клиентов и конкурентов, проводил интервью, отвечал за позиционирование, продуктовые запуски, стратегию и бюджет. Увеличил входящие заявки на 35%. Создавал образовательный контент, онлайн-курсы и вебинары. Хочу больше продуктовой ответственности без обнуления опыта.",
+    "story_analysis": {
+      "current_identity": "Руководитель IT-маркетинга",
+      "professional_core_hypotheses": [
+        "Руководитель IT-маркетинга",
+        "Product Marketing Specialist",
+        "Специалист по исследованию рынка и клиентов"
+      ],
+      "facts_extracted": [
+        "8 лет в IT-маркетинге",
+        "руководство командой",
+        "исследования клиентов и конкурентов",
+        "интервью с клиентами",
+        "позиционирование",
+        "продуктовые запуски",
+        "стратегия и бюджет",
+        "рост заявок на 35%"
+      ],
+      "skills": [
+        "Customer Development",
+        "Product Discovery",
+        "позиционирование"
+      ],
+      "seniority_hypotheses": [
+        "Senior/lead в маркетинге"
+      ]
+    },
+    "resume_analysis": {
+      "summary": "8 лет в IT-маркетинге, руководство командой и ответственность за стратегию и бюджет.",
+      "tasks": [
+        "Руководство маркетинговой командой",
+        "Исследования рынка, клиентов и конкурентов",
+        "Интервью с клиентами",
+        "Позиционирование B2B-продуктов",
+        "Продуктовые запуски",
+        "Маркетинговая стратегия и бюджет",
+        "Создание образовательного контента и онлайн-курсов",
+        "Проведение вебинаров"
+      ],
+      "achievements": [
+        "Рост входящих заявок на 35%"
+      ],
+      "education": [
+        "Product Management Fundamentals",
+        "Customer Development"
+      ],
+      "languages": [
+        "Русский C2",
+        "Английский B2"
+      ],
+      "what_is_good": [
+        "исследования",
+        "позиционирование",
+        "управление командой"
+      ],
+      "what_is_missing": [
+        "кейс полного продуктового цикла"
+      ],
+      "inconsistencies": [],
+      "clarifying_questions": []
+    },
+    "route_context": {
+      "country": "Литва",
+      "city": "Вильнюс",
+      "current_language_level": "Английский B2, литовский A2",
+      "target_language": "Литовский B1",
+      "income_urgency": "Доход нужен без длительного перерыва",
+      "minimum_monthly_income": "2500 EUR",
+      "desired_monthly_income": "3500 EUR",
+      "training_budget": "до 500 EUR",
+      "available_time_for_study": "6 часов в неделю",
+      "career_goal_type": "Перейти ближе к продукту без обнуления опыта",
+      "work_preferences": "Удалённо или гибридно",
+      "health_or_schedule_limits": "Не увольняться до проверки маршрута",
+      "documents_and_work_rights": "Есть право на работу в Литве",
+      "diploma_status": "Диплом признания не требует",
+      "portfolio_or_references": "Есть маркетинговые кейсы, нужен продуктовый кейс"
+    },
+    "ready_for_report": true,
+    "income_urgency": "Доход нужен без длительного перерыва",
+    "minimum_income": "2500 EUR",
+    "target_income": "3500 EUR",
+    "learning_budget": "до 500 EUR",
+    "learning_hours_week": "6 часов в неделю",
+    "career_goal": "Перейти ближе к продукту без обнуления опыта",
+    "work_preferences": "Удалённо или гибридно",
+    "care_constraints": true,
+    "work_authorization_status": "Есть право на работу в Литве",
+    "qualification_status": "Диплом признания не требует",
+    "portfolio_status": "Есть маркетинговые кейсы, нужен продуктовый кейс",
+    "behavioral_barriers": [
+      "Не хватает продуктового кейса"
+    ],
+    "external_barriers": [
+      "Резкое снижение дохода"
+    ]
+  },
+  "raw_model_output": {
+    "assessment_id": "assessment-profile-10-e2e",
+    "session_id": "session-profile-10-e2e",
+    "profile_version": "fixture-v1",
+    "status": "full",
+    "context": {
+      "country_code": "LT",
+      "country_name": "Литва",
+      "city": "Вильнюс",
+      "income_target": {
+        "amount": 3000,
+        "currency": "EUR",
+        "period": "month"
+      }
+    },
+    "identity": {
+      "professional_core": [
+        "Пользователь имеет опыт в маркетинге."
+      ],
+      "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+      "secondary_functions": [
+        "Product Discovery",
+        "Позиционирование продукта",
+        "Образовательный контент",
+        "Управление командой"
+      ],
+      "seniority_current": "средний",
+      "seniority_transition": "В Product Management оценивается отдельно",
+      "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+      "professional_capital": [
+        "восемь лет опыта",
+        "подтверждённые запуски"
+      ],
+      "transferable_functions": [
+        "исследования",
+        "позиционирование",
+        "координация"
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "e1",
+        "fact": "Восемь лет в IT-маркетинге",
+        "source_type": "history",
+        "source_reference": "story:1"
+      },
+      {
+        "evidence_id": "e2",
+        "fact": "Исследовал рынок и клиентов для запусков",
+        "source_type": "resume",
+        "source_reference": "resume:experience"
+      },
+      {
+        "evidence_id": "e3",
+        "fact": "Управлял маркетинговой командой",
+        "source_type": "resume",
+        "source_reference": "resume:leadership"
+      },
+      {
+        "evidence_id": "e4",
+        "fact": "Отвечал за маркетинговую стратегию и бюджет",
+        "source_type": "resume",
+        "source_reference": "resume:strategy"
+      },
+      {
+        "evidence_id": "e5",
+        "fact": "Проводил интервью с клиентами",
+        "source_type": "resume",
+        "source_reference": "resume:interviews"
+      },
+      {
+        "evidence_id": "e6",
+        "fact": "Работал с B2B-продуктами",
+        "source_type": "resume",
+        "source_reference": "resume:b2b"
+      },
+      {
+        "evidence_id": "e7",
+        "fact": "Разрабатывал позиционирование продуктов",
+        "source_type": "resume",
+        "source_reference": "resume:positioning"
+      },
+      {
+        "evidence_id": "e8",
+        "fact": "Создавал образовательный контент и онлайн-курсы",
+        "source_type": "resume",
+        "source_reference": "resume:education"
+      },
+      {
+        "evidence_id": "e9",
+        "fact": "Проводил вебинары",
+        "source_type": "resume",
+        "source_reference": "resume:webinars"
+      },
+      {
+        "evidence_id": "e10",
+        "fact": "Увеличил входящие заявки на 35 процентов",
+        "source_type": "resume",
+        "source_reference": "resume:result"
+      },
+      {
+        "evidence_id": "e11",
+        "fact": "Прошёл Product Management Fundamentals",
+        "source_type": "resume",
+        "source_reference": "resume:education-product"
+      },
+      {
+        "evidence_id": "e12",
+        "fact": "Изучал Customer Development",
+        "source_type": "resume",
+        "source_reference": "resume:education-custdev"
+      },
+      {
+        "evidence_id": "e13",
+        "fact": "Английский язык B2",
+        "source_type": "resume",
+        "source_reference": "resume:language"
+      }
+    ],
+    "user_choice": {
+      "desired_change": "более осмысленная продуктовая роль",
+      "preferred_directions": [
+        "продукт",
+        "образование"
+      ],
+      "functions_to_preserve": [
+        "исследования",
+        "стратегию"
+      ],
+      "functions_to_avoid": [
+        "чистое продвижение"
+      ],
+      "priorities": [
+        "сохранить доход",
+        "не обнулять опыт"
+      ],
+      "acceptable_income_drop": "требует уточнения"
+    },
+    "constraints": [
+      {
+        "title": "Допустимое снижение дохода не определено",
+        "impact": "Ограничивает выбор уровня входа.",
+        "evidence_ids": [
+          "e1"
+        ],
+        "confirmed": true
+      }
+    ],
+    "routes": {
+      "primary_routes": [
+        {
+          "route_id": "pm-marketing",
+          "title": "Смежные роли",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "discovery",
+          "title": "Product Discovery / Customer Insights",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "transition_routes": [
+        {
+          "route_id": "product-manager",
+          "title": "Product Manager через продуктовые кейсы",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e3"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "edtech",
+          "title": "EdTech Product или Program Manager",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e4"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "quick_income_routes": [
+        {
+          "route_id": "consulting",
+          "title": "Маркетинговый или продуктовый консалтинг",
+          "category": "quick_income",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "emergency_routes": [],
+      "recommended_route_id": "pm-marketing",
+      "alternative_route_ids": [
+        "discovery",
+        "edtech"
+      ]
+    },
+    "questions": {
+      "answered_critical_questions": [
+        "Какие функции сохранить"
+      ],
+      "unanswered_critical_questions": [
+        "Какое снижение дохода допустимо?",
+        "Локальный или международный рынок?"
+      ],
+      "optional_questions": []
+    },
+    "conclusions": {
+      "mandatory_conclusions": [
+        "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+        "Безопасный переход не требует обнуления профессионального капитала",
+        "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+      ],
+      "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+      "what_may_change_conclusion": [
+        "неподходящая продуктовая ответственность",
+        "недопустимое снижение дохода"
+      ],
+      "forbidden_recommendations_checked": [
+        "административная работа",
+        "психолог без квалификации"
+      ],
+      "critical_errors_detected": []
+    },
+    "first_steps": [
+      {
+        "step_id": "clarify",
+        "title": "Быстрое прояснение",
+        "purpose": "Отделить желаемые функции от условий текущей работы.",
+        "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+        "expected_result": "Два списка по три функции.",
+        "duration_minutes": 15,
+        "related_route_id": "pm-marketing",
+        "type": "quick_action"
+      },
+      {
+        "step_id": "market",
+        "title": "Проверка рынка",
+        "purpose": "Сравнить три смежных направления.",
+        "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+        "expected_result": "Таблица требований по двум направлениям.",
+        "duration_minutes": 45,
+        "related_route_id": "pm-marketing",
+        "type": "market_research"
+      },
+      {
+        "step_id": "case",
+        "title": "Портфолио",
+        "purpose": "Показать продуктовую часть опыта.",
+        "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+        "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+        "duration_minutes": 60,
+        "related_route_id": "pm-marketing",
+        "type": "portfolio"
+      },
+      {
+        "step_id": "contact",
+        "title": "Профессиональный контакт",
+        "purpose": "Проверить кейс у специалиста.",
+        "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+        "expected_result": "Одна предметная обратная связь.",
+        "duration_minutes": 20,
+        "related_route_id": "pm-marketing",
+        "type": "networking"
+      },
+      {
+        "step_id": "consulting-test",
+        "title": "Проверка консультирования",
+        "purpose": "Проверить спрос без увольнения.",
+        "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+        "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+        "duration_minutes": 30,
+        "related_route_id": "consulting",
+        "type": "clarification"
+      }
+    ]
+  },
+  "json_parsing_result": {
+    "assessment_id": "assessment-profile-10-e2e",
+    "session_id": "session-profile-10-e2e",
+    "profile_version": "fixture-v1",
+    "status": "full",
+    "context": {
+      "country_code": "LT",
+      "country_name": "Литва",
+      "city": "Вильнюс",
+      "current_languages": [],
+      "target_languages": [],
+      "work_authorization": null,
+      "income_minimum": null,
+      "income_target": {
+        "amount": 3000.0,
+        "currency": "EUR",
+        "period": "month"
+      },
+      "income_urgency": null,
+      "available_learning_time": null,
+      "learning_budget": null
+    },
+    "identity": {
+      "professional_core": [
+        "Пользователь имеет опыт в маркетинге."
+      ],
+      "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+      "secondary_functions": [
+        "Product Discovery",
+        "Позиционирование продукта",
+        "Образовательный контент",
+        "Управление командой"
+      ],
+      "seniority_current": "средний",
+      "seniority_transition": "В Product Management оценивается отдельно",
+      "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+      "professional_capital": [
+        "восемь лет опыта",
+        "подтверждённые запуски"
+      ],
+      "transferable_functions": [
+        "исследования",
+        "позиционирование",
+        "координация"
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "e1",
+        "fact": "Восемь лет в IT-маркетинге",
+        "source_type": "history",
+        "source_reference": "story:1"
+      },
+      {
+        "evidence_id": "e2",
+        "fact": "Исследовал рынок и клиентов для запусков",
+        "source_type": "resume",
+        "source_reference": "resume:experience"
+      },
+      {
+        "evidence_id": "e3",
+        "fact": "Управлял маркетинговой командой",
+        "source_type": "resume",
+        "source_reference": "resume:leadership"
+      },
+      {
+        "evidence_id": "e4",
+        "fact": "Отвечал за маркетинговую стратегию и бюджет",
+        "source_type": "resume",
+        "source_reference": "resume:strategy"
+      },
+      {
+        "evidence_id": "e5",
+        "fact": "Проводил интервью с клиентами",
+        "source_type": "resume",
+        "source_reference": "resume:interviews"
+      },
+      {
+        "evidence_id": "e6",
+        "fact": "Работал с B2B-продуктами",
+        "source_type": "resume",
+        "source_reference": "resume:b2b"
+      },
+      {
+        "evidence_id": "e7",
+        "fact": "Разрабатывал позиционирование продуктов",
+        "source_type": "resume",
+        "source_reference": "resume:positioning"
+      },
+      {
+        "evidence_id": "e8",
+        "fact": "Создавал образовательный контент и онлайн-курсы",
+        "source_type": "resume",
+        "source_reference": "resume:education"
+      },
+      {
+        "evidence_id": "e9",
+        "fact": "Проводил вебинары",
+        "source_type": "resume",
+        "source_reference": "resume:webinars"
+      },
+      {
+        "evidence_id": "e10",
+        "fact": "Увеличил входящие заявки на 35 процентов",
+        "source_type": "resume",
+        "source_reference": "resume:result"
+      },
+      {
+        "evidence_id": "e11",
+        "fact": "Прошёл Product Management Fundamentals",
+        "source_type": "resume",
+        "source_reference": "resume:education-product"
+      },
+      {
+        "evidence_id": "e12",
+        "fact": "Изучал Customer Development",
+        "source_type": "resume",
+        "source_reference": "resume:education-custdev"
+      },
+      {
+        "evidence_id": "e13",
+        "fact": "Английский язык B2",
+        "source_type": "resume",
+        "source_reference": "resume:language"
+      }
+    ],
+    "user_choice": {
+      "desired_change": "более осмысленная продуктовая роль",
+      "preferred_directions": [
+        "продукт",
+        "образование"
+      ],
+      "functions_to_preserve": [
+        "исследования",
+        "стратегию"
+      ],
+      "functions_to_avoid": [
+        "чистое продвижение"
+      ],
+      "priorities": [
+        "сохранить доход",
+        "не обнулять опыт"
+      ],
+      "acceptable_income_drop": "требует уточнения"
+    },
+    "constraints": [
+      {
+        "title": "Допустимое снижение дохода не определено",
+        "impact": "Ограничивает выбор уровня входа.",
+        "evidence_ids": [
+          "e1"
+        ],
+        "confirmed": true
+      }
+    ],
+    "routes": {
+      "primary_routes": [
+        {
+          "route_id": "pm-marketing",
+          "title": "Смежные роли",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "discovery",
+          "title": "Product Discovery / Customer Insights",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "transition_routes": [
+        {
+          "route_id": "product-manager",
+          "title": "Product Manager через продуктовые кейсы",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e3"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "edtech",
+          "title": "EdTech Product или Program Manager",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e4"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "quick_income_routes": [
+        {
+          "route_id": "consulting",
+          "title": "Маркетинговый или продуктовый консалтинг",
+          "category": "quick_income",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "emergency_routes": [],
+      "recommended_route_id": "pm-marketing",
+      "alternative_route_ids": [
+        "discovery",
+        "edtech"
+      ]
+    },
+    "questions": {
+      "answered_critical_questions": [
+        "Какие функции сохранить"
+      ],
+      "unanswered_critical_questions": [
+        "Какое снижение дохода допустимо?",
+        "Локальный или международный рынок?"
+      ],
+      "optional_questions": []
+    },
+    "conclusions": {
+      "mandatory_conclusions": [
+        "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+        "Безопасный переход не требует обнуления профессионального капитала",
+        "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+      ],
+      "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+      "what_may_change_conclusion": [
+        "неподходящая продуктовая ответственность",
+        "недопустимое снижение дохода"
+      ],
+      "forbidden_recommendations_checked": [
+        "административная работа",
+        "психолог без квалификации"
+      ],
+      "critical_errors_detected": []
+    },
+    "first_steps": [
+      {
+        "step_id": "clarify",
+        "title": "Быстрое прояснение",
+        "purpose": "Отделить желаемые функции от условий текущей работы.",
+        "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+        "expected_result": "Два списка по три функции.",
+        "duration_minutes": 15,
+        "related_route_id": "pm-marketing",
+        "type": "quick_action"
+      },
+      {
+        "step_id": "market",
+        "title": "Проверка рынка",
+        "purpose": "Сравнить три смежных направления.",
+        "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+        "expected_result": "Таблица требований по двум направлениям.",
+        "duration_minutes": 45,
+        "related_route_id": "pm-marketing",
+        "type": "market_research"
+      },
+      {
+        "step_id": "case",
+        "title": "Портфолио",
+        "purpose": "Показать продуктовую часть опыта.",
+        "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+        "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+        "duration_minutes": 60,
+        "related_route_id": "pm-marketing",
+        "type": "portfolio"
+      },
+      {
+        "step_id": "contact",
+        "title": "Профессиональный контакт",
+        "purpose": "Проверить кейс у специалиста.",
+        "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+        "expected_result": "Одна предметная обратная связь.",
+        "duration_minutes": 20,
+        "related_route_id": "pm-marketing",
+        "type": "networking"
+      },
+      {
+        "step_id": "consulting-test",
+        "title": "Проверка консультирования",
+        "purpose": "Проверить спрос без увольнения.",
+        "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+        "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+        "duration_minutes": 30,
+        "related_route_id": "consulting",
+        "type": "clarification"
+      }
+    ],
+    "selected_first_step_id": null,
+    "metadata": {
+      "seniority_reason_codes": [
+        "years_experience_8",
+        "team_leadership",
+        "strategy_ownership",
+        "budget_responsibility",
+        "measurable_result_35_percent"
+      ],
+      "resume_important_facts_count": 12,
+      "validation": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "RAW_USER_SUMMARY_AS_TITLE",
+            "field_path": "identity.professional_core[0]",
+            "message": "professional_core must be a concise professional role or function, not a user summary",
+            "actual_value": "Пользователь имеет опыт в маркетинге.",
+            "severity": "error"
+          },
+          {
+            "code": "INVALID_SENIORITY",
+            "field_path": "identity.seniority_current",
+            "message": "current seniority is below the level supported by experience and responsibility facts",
+            "actual_value": {
+              "value": "средний",
+              "reason_codes": [
+                "years_experience_8",
+                "team_leadership",
+                "strategy_ownership",
+                "budget_responsibility",
+                "measurable_result_35_percent"
+              ]
+            },
+            "severity": "error"
+          },
+          {
+            "code": "GENERIC_ROUTE_TITLE",
+            "field_path": "routes.all_routes[0].title",
+            "message": "route title must name a concrete role",
+            "actual_value": "Смежные роли",
+            "severity": "error"
+          },
+          {
+            "code": "MISSING_ROUTE_TEST",
+            "field_path": "first_steps.market.action",
+            "message": "market research action must use the related route title",
+            "actual_value": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "severity": "error"
+          }
+        ],
+        "warnings": []
+      }
+    }
+  },
+  "validation_before_repair": {
+    "valid": false,
+    "errors": [
+      {
+        "code": "RAW_USER_SUMMARY_AS_TITLE",
+        "field_path": "identity.professional_core[0]",
+        "message": "professional_core must be a concise professional role or function, not a user summary",
+        "actual_value": "Пользователь имеет опыт в маркетинге.",
+        "severity": "error"
+      },
+      {
+        "code": "INVALID_SENIORITY",
+        "field_path": "identity.seniority_current",
+        "message": "current seniority is below the level supported by experience and responsibility facts",
+        "actual_value": {
+          "value": "средний",
+          "reason_codes": [
+            "years_experience_8",
+            "team_leadership",
+            "strategy_ownership",
+            "budget_responsibility",
+            "measurable_result_35_percent"
+          ]
+        },
+        "severity": "error"
+      },
+      {
+        "code": "GENERIC_ROUTE_TITLE",
+        "field_path": "routes.all_routes[0].title",
+        "message": "route title must name a concrete role",
+        "actual_value": "Смежные роли",
+        "severity": "error"
+      },
+      {
+        "code": "MISSING_ROUTE_TEST",
+        "field_path": "first_steps.market.action",
+        "message": "market research action must use the related route title",
+        "actual_value": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+        "severity": "error"
+      }
+    ],
+    "warnings": []
+  },
+  "repair_started": true,
+  "repair_attempts": [
+    {
+      "attempt": 1,
+      "raw_output": {
+        "assessment_id": "assessment-profile-10-e2e",
+        "session_id": "session-profile-10-e2e",
+        "profile_version": "fixture-v1",
+        "status": "full",
+        "context": {
+          "country_code": "LT",
+          "country_name": "Литва",
+          "city": "Вильнюс",
+          "income_target": {
+            "amount": 3000,
+            "currency": "EUR",
+            "period": "month"
+          }
+        },
+        "identity": {
+          "professional_core": [
+            "Руководитель IT-маркетинга",
+            "Product Marketing Specialist",
+            "Специалист по исследованию рынка и клиентов"
+          ],
+          "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+          "secondary_functions": [
+            "Product Discovery",
+            "Позиционирование продукта",
+            "Образовательный контент",
+            "Управление командой"
+          ],
+          "seniority_current": "Senior / lead в маркетинге",
+          "seniority_transition": "В Product Management оценивается отдельно",
+          "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+          "professional_capital": [
+            "восемь лет опыта",
+            "подтверждённые запуски"
+          ],
+          "transferable_functions": [
+            "исследования",
+            "позиционирование",
+            "координация"
+          ]
+        },
+        "evidence": [
+          {
+            "evidence_id": "e1",
+            "fact": "Восемь лет в IT-маркетинге",
+            "source_type": "history",
+            "source_reference": "story:1"
+          },
+          {
+            "evidence_id": "e2",
+            "fact": "Исследовал рынок и клиентов для запусков",
+            "source_type": "resume",
+            "source_reference": "resume:experience"
+          },
+          {
+            "evidence_id": "e3",
+            "fact": "Управлял маркетинговой командой",
+            "source_type": "resume",
+            "source_reference": "resume:leadership"
+          },
+          {
+            "evidence_id": "e4",
+            "fact": "Отвечал за маркетинговую стратегию и бюджет",
+            "source_type": "resume",
+            "source_reference": "resume:strategy"
+          },
+          {
+            "evidence_id": "e5",
+            "fact": "Проводил интервью с клиентами",
+            "source_type": "resume",
+            "source_reference": "resume:interviews"
+          },
+          {
+            "evidence_id": "e6",
+            "fact": "Работал с B2B-продуктами",
+            "source_type": "resume",
+            "source_reference": "resume:b2b"
+          },
+          {
+            "evidence_id": "e7",
+            "fact": "Разрабатывал позиционирование продуктов",
+            "source_type": "resume",
+            "source_reference": "resume:positioning"
+          },
+          {
+            "evidence_id": "e8",
+            "fact": "Создавал образовательный контент и онлайн-курсы",
+            "source_type": "resume",
+            "source_reference": "resume:education"
+          },
+          {
+            "evidence_id": "e9",
+            "fact": "Проводил вебинары",
+            "source_type": "resume",
+            "source_reference": "resume:webinars"
+          },
+          {
+            "evidence_id": "e10",
+            "fact": "Увеличил входящие заявки на 35 процентов",
+            "source_type": "resume",
+            "source_reference": "resume:result"
+          },
+          {
+            "evidence_id": "e11",
+            "fact": "Прошёл Product Management Fundamentals",
+            "source_type": "resume",
+            "source_reference": "resume:education-product"
+          },
+          {
+            "evidence_id": "e12",
+            "fact": "Изучал Customer Development",
+            "source_type": "resume",
+            "source_reference": "resume:education-custdev"
+          },
+          {
+            "evidence_id": "e13",
+            "fact": "Английский язык B2",
+            "source_type": "resume",
+            "source_reference": "resume:language"
+          }
+        ],
+        "user_choice": {
+          "desired_change": "более осмысленная продуктовая роль",
+          "preferred_directions": [
+            "продукт",
+            "образование"
+          ],
+          "functions_to_preserve": [
+            "исследования",
+            "стратегию"
+          ],
+          "functions_to_avoid": [
+            "чистое продвижение"
+          ],
+          "priorities": [
+            "сохранить доход",
+            "не обнулять опыт"
+          ],
+          "acceptable_income_drop": "требует уточнения"
+        },
+        "constraints": [
+          {
+            "title": "Допустимое снижение дохода не определено",
+            "impact": "Ограничивает выбор уровня входа.",
+            "evidence_ids": [
+              "e1"
+            ],
+            "confirmed": true
+          }
+        ],
+        "routes": {
+          "primary_routes": [
+            {
+              "route_id": "pm-marketing",
+              "title": "Product Marketing Manager",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "discovery",
+              "title": "Product Discovery / Customer Insights",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "transition_routes": [
+            {
+              "route_id": "product-manager",
+              "title": "Product Manager через продуктовые кейсы",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e3"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "edtech",
+              "title": "EdTech Product или Program Manager",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e4"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "quick_income_routes": [
+            {
+              "route_id": "consulting",
+              "title": "Маркетинговый или продуктовый консалтинг",
+              "category": "quick_income",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "emergency_routes": [],
+          "recommended_route_id": "pm-marketing",
+          "alternative_route_ids": [
+            "discovery",
+            "edtech"
+          ]
+        },
+        "questions": {
+          "answered_critical_questions": [
+            "Какие функции сохранить"
+          ],
+          "unanswered_critical_questions": [
+            "Какое снижение дохода допустимо?",
+            "Локальный или международный рынок?"
+          ],
+          "optional_questions": []
+        },
+        "conclusions": {
+          "mandatory_conclusions": [
+            "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+            "Безопасный переход не требует обнуления профессионального капитала",
+            "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+          ],
+          "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+          "what_may_change_conclusion": [
+            "неподходящая продуктовая ответственность",
+            "недопустимое снижение дохода"
+          ],
+          "forbidden_recommendations_checked": [
+            "административная работа",
+            "психолог без квалификации"
+          ],
+          "critical_errors_detected": []
+        },
+        "first_steps": [
+          {
+            "step_id": "clarify",
+            "title": "Быстрое прояснение",
+            "purpose": "Отделить желаемые функции от условий текущей работы.",
+            "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+            "expected_result": "Два списка по три функции.",
+            "duration_minutes": 15,
+            "related_route_id": "pm-marketing",
+            "type": "quick_action"
+          },
+          {
+            "step_id": "market",
+            "title": "Проверка рынка",
+            "purpose": "Сравнить три смежных направления.",
+            "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "expected_result": "Таблица требований по двум направлениям.",
+            "duration_minutes": 45,
+            "related_route_id": "pm-marketing",
+            "type": "market_research"
+          },
+          {
+            "step_id": "case",
+            "title": "Портфолио",
+            "purpose": "Показать продуктовую часть опыта.",
+            "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+            "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+            "duration_minutes": 60,
+            "related_route_id": "pm-marketing",
+            "type": "portfolio"
+          },
+          {
+            "step_id": "contact",
+            "title": "Профессиональный контакт",
+            "purpose": "Проверить кейс у специалиста.",
+            "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+            "expected_result": "Одна предметная обратная связь.",
+            "duration_minutes": 20,
+            "related_route_id": "pm-marketing",
+            "type": "networking"
+          },
+          {
+            "step_id": "consulting-test",
+            "title": "Проверка консультирования",
+            "purpose": "Проверить спрос без увольнения.",
+            "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+            "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+            "duration_minutes": 30,
+            "related_route_id": "consulting",
+            "type": "clarification"
+          }
+        ]
+      },
+      "parsed_assessment": {
+        "assessment_id": "assessment-profile-10-e2e",
+        "session_id": "session-profile-10-e2e",
+        "profile_version": "fixture-v1",
+        "status": "full",
+        "context": {
+          "country_code": "LT",
+          "country_name": "Литва",
+          "city": "Вильнюс",
+          "current_languages": [],
+          "target_languages": [],
+          "work_authorization": null,
+          "income_minimum": null,
+          "income_target": {
+            "amount": 3000.0,
+            "currency": "EUR",
+            "period": "month"
+          },
+          "income_urgency": null,
+          "available_learning_time": null,
+          "learning_budget": null
+        },
+        "identity": {
+          "professional_core": [
+            "Руководитель IT-маркетинга",
+            "Product Marketing Specialist",
+            "Специалист по исследованию рынка и клиентов"
+          ],
+          "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+          "secondary_functions": [
+            "Product Discovery",
+            "Позиционирование продукта",
+            "Образовательный контент",
+            "Управление командой"
+          ],
+          "seniority_current": "Senior / lead в маркетинге",
+          "seniority_transition": "В Product Management оценивается отдельно",
+          "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+          "professional_capital": [
+            "восемь лет опыта",
+            "подтверждённые запуски"
+          ],
+          "transferable_functions": [
+            "исследования",
+            "позиционирование",
+            "координация"
+          ]
+        },
+        "evidence": [
+          {
+            "evidence_id": "e1",
+            "fact": "Восемь лет в IT-маркетинге",
+            "source_type": "history",
+            "source_reference": "story:1"
+          },
+          {
+            "evidence_id": "e2",
+            "fact": "Исследовал рынок и клиентов для запусков",
+            "source_type": "resume",
+            "source_reference": "resume:experience"
+          },
+          {
+            "evidence_id": "e3",
+            "fact": "Управлял маркетинговой командой",
+            "source_type": "resume",
+            "source_reference": "resume:leadership"
+          },
+          {
+            "evidence_id": "e4",
+            "fact": "Отвечал за маркетинговую стратегию и бюджет",
+            "source_type": "resume",
+            "source_reference": "resume:strategy"
+          },
+          {
+            "evidence_id": "e5",
+            "fact": "Проводил интервью с клиентами",
+            "source_type": "resume",
+            "source_reference": "resume:interviews"
+          },
+          {
+            "evidence_id": "e6",
+            "fact": "Работал с B2B-продуктами",
+            "source_type": "resume",
+            "source_reference": "resume:b2b"
+          },
+          {
+            "evidence_id": "e7",
+            "fact": "Разрабатывал позиционирование продуктов",
+            "source_type": "resume",
+            "source_reference": "resume:positioning"
+          },
+          {
+            "evidence_id": "e8",
+            "fact": "Создавал образовательный контент и онлайн-курсы",
+            "source_type": "resume",
+            "source_reference": "resume:education"
+          },
+          {
+            "evidence_id": "e9",
+            "fact": "Проводил вебинары",
+            "source_type": "resume",
+            "source_reference": "resume:webinars"
+          },
+          {
+            "evidence_id": "e10",
+            "fact": "Увеличил входящие заявки на 35 процентов",
+            "source_type": "resume",
+            "source_reference": "resume:result"
+          },
+          {
+            "evidence_id": "e11",
+            "fact": "Прошёл Product Management Fundamentals",
+            "source_type": "resume",
+            "source_reference": "resume:education-product"
+          },
+          {
+            "evidence_id": "e12",
+            "fact": "Изучал Customer Development",
+            "source_type": "resume",
+            "source_reference": "resume:education-custdev"
+          },
+          {
+            "evidence_id": "e13",
+            "fact": "Английский язык B2",
+            "source_type": "resume",
+            "source_reference": "resume:language"
+          }
+        ],
+        "user_choice": {
+          "desired_change": "более осмысленная продуктовая роль",
+          "preferred_directions": [
+            "продукт",
+            "образование"
+          ],
+          "functions_to_preserve": [
+            "исследования",
+            "стратегию"
+          ],
+          "functions_to_avoid": [
+            "чистое продвижение"
+          ],
+          "priorities": [
+            "сохранить доход",
+            "не обнулять опыт"
+          ],
+          "acceptable_income_drop": "требует уточнения"
+        },
+        "constraints": [
+          {
+            "title": "Допустимое снижение дохода не определено",
+            "impact": "Ограничивает выбор уровня входа.",
+            "evidence_ids": [
+              "e1"
+            ],
+            "confirmed": true
+          }
+        ],
+        "routes": {
+          "primary_routes": [
+            {
+              "route_id": "pm-marketing",
+              "title": "Product Marketing Manager",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "discovery",
+              "title": "Product Discovery / Customer Insights",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "transition_routes": [
+            {
+              "route_id": "product-manager",
+              "title": "Product Manager через продуктовые кейсы",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e3"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "edtech",
+              "title": "EdTech Product или Program Manager",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e4"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "quick_income_routes": [
+            {
+              "route_id": "consulting",
+              "title": "Маркетинговый или продуктовый консалтинг",
+              "category": "quick_income",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "emergency_routes": [],
+          "recommended_route_id": "pm-marketing",
+          "alternative_route_ids": [
+            "discovery",
+            "edtech"
+          ]
+        },
+        "questions": {
+          "answered_critical_questions": [
+            "Какие функции сохранить"
+          ],
+          "unanswered_critical_questions": [
+            "Какое снижение дохода допустимо?",
+            "Локальный или международный рынок?"
+          ],
+          "optional_questions": []
+        },
+        "conclusions": {
+          "mandatory_conclusions": [
+            "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+            "Безопасный переход не требует обнуления профессионального капитала",
+            "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+          ],
+          "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+          "what_may_change_conclusion": [
+            "неподходящая продуктовая ответственность",
+            "недопустимое снижение дохода"
+          ],
+          "forbidden_recommendations_checked": [
+            "административная работа",
+            "психолог без квалификации"
+          ],
+          "critical_errors_detected": []
+        },
+        "first_steps": [
+          {
+            "step_id": "clarify",
+            "title": "Быстрое прояснение",
+            "purpose": "Отделить желаемые функции от условий текущей работы.",
+            "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+            "expected_result": "Два списка по три функции.",
+            "duration_minutes": 15,
+            "related_route_id": "pm-marketing",
+            "type": "quick_action"
+          },
+          {
+            "step_id": "market",
+            "title": "Проверка рынка",
+            "purpose": "Сравнить три смежных направления.",
+            "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "expected_result": "Таблица требований по двум направлениям.",
+            "duration_minutes": 45,
+            "related_route_id": "pm-marketing",
+            "type": "market_research"
+          },
+          {
+            "step_id": "case",
+            "title": "Портфолио",
+            "purpose": "Показать продуктовую часть опыта.",
+            "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+            "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+            "duration_minutes": 60,
+            "related_route_id": "pm-marketing",
+            "type": "portfolio"
+          },
+          {
+            "step_id": "contact",
+            "title": "Профессиональный контакт",
+            "purpose": "Проверить кейс у специалиста.",
+            "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+            "expected_result": "Одна предметная обратная связь.",
+            "duration_minutes": 20,
+            "related_route_id": "pm-marketing",
+            "type": "networking"
+          },
+          {
+            "step_id": "consulting-test",
+            "title": "Проверка консультирования",
+            "purpose": "Проверить спрос без увольнения.",
+            "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+            "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+            "duration_minutes": 30,
+            "related_route_id": "consulting",
+            "type": "clarification"
+          }
+        ],
+        "selected_first_step_id": null,
+        "metadata": {
+          "seniority_reason_codes": [
+            "years_experience_8",
+            "team_leadership",
+            "strategy_ownership",
+            "budget_responsibility",
+            "measurable_result_35_percent"
+          ],
+          "resume_important_facts_count": 12,
+          "validation": {
+            "valid": true,
+            "errors": [],
+            "warnings": []
+          }
+        }
+      },
+      "validation": {
+        "valid": true,
+        "errors": [],
+        "warnings": []
+      },
+      "identity_matches": true
+    }
+  ],
+  "career_assessment_after": {
+    "assessment_id": "assessment-profile-10-e2e",
+    "session_id": "session-profile-10-e2e",
+    "profile_version": "fixture-v1",
+    "status": "full",
+    "context": {
+      "country_code": "LT",
+      "country_name": "Литва",
+      "city": "Вильнюс",
+      "current_languages": [],
+      "target_languages": [],
+      "work_authorization": null,
+      "income_minimum": null,
+      "income_target": {
+        "amount": 3000.0,
+        "currency": "EUR",
+        "period": "month"
+      },
+      "income_urgency": null,
+      "available_learning_time": null,
+      "learning_budget": null
+    },
+    "identity": {
+      "professional_core": [
+        "Руководитель IT-маркетинга",
+        "Product Marketing Specialist",
+        "Специалист по исследованию рынка и клиентов"
+      ],
+      "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+      "secondary_functions": [
+        "Product Discovery",
+        "Позиционирование продукта",
+        "Образовательный контент",
+        "Управление командой"
+      ],
+      "seniority_current": "Senior / lead в маркетинге",
+      "seniority_transition": "В Product Management оценивается отдельно",
+      "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+      "professional_capital": [
+        "восемь лет опыта",
+        "подтверждённые запуски"
+      ],
+      "transferable_functions": [
+        "исследования",
+        "позиционирование",
+        "координация"
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "e1",
+        "fact": "Восемь лет в IT-маркетинге",
+        "source_type": "history",
+        "source_reference": "story:1"
+      },
+      {
+        "evidence_id": "e2",
+        "fact": "Исследовал рынок и клиентов для запусков",
+        "source_type": "resume",
+        "source_reference": "resume:experience"
+      },
+      {
+        "evidence_id": "e3",
+        "fact": "Управлял маркетинговой командой",
+        "source_type": "resume",
+        "source_reference": "resume:leadership"
+      },
+      {
+        "evidence_id": "e4",
+        "fact": "Отвечал за маркетинговую стратегию и бюджет",
+        "source_type": "resume",
+        "source_reference": "resume:strategy"
+      },
+      {
+        "evidence_id": "e5",
+        "fact": "Проводил интервью с клиентами",
+        "source_type": "resume",
+        "source_reference": "resume:interviews"
+      },
+      {
+        "evidence_id": "e6",
+        "fact": "Работал с B2B-продуктами",
+        "source_type": "resume",
+        "source_reference": "resume:b2b"
+      },
+      {
+        "evidence_id": "e7",
+        "fact": "Разрабатывал позиционирование продуктов",
+        "source_type": "resume",
+        "source_reference": "resume:positioning"
+      },
+      {
+        "evidence_id": "e8",
+        "fact": "Создавал образовательный контент и онлайн-курсы",
+        "source_type": "resume",
+        "source_reference": "resume:education"
+      },
+      {
+        "evidence_id": "e9",
+        "fact": "Проводил вебинары",
+        "source_type": "resume",
+        "source_reference": "resume:webinars"
+      },
+      {
+        "evidence_id": "e10",
+        "fact": "Увеличил входящие заявки на 35 процентов",
+        "source_type": "resume",
+        "source_reference": "resume:result"
+      },
+      {
+        "evidence_id": "e11",
+        "fact": "Прошёл Product Management Fundamentals",
+        "source_type": "resume",
+        "source_reference": "resume:education-product"
+      },
+      {
+        "evidence_id": "e12",
+        "fact": "Изучал Customer Development",
+        "source_type": "resume",
+        "source_reference": "resume:education-custdev"
+      },
+      {
+        "evidence_id": "e13",
+        "fact": "Английский язык B2",
+        "source_type": "resume",
+        "source_reference": "resume:language"
+      }
+    ],
+    "user_choice": {
+      "desired_change": "более осмысленная продуктовая роль",
+      "preferred_directions": [
+        "продукт",
+        "образование"
+      ],
+      "functions_to_preserve": [
+        "исследования",
+        "стратегию"
+      ],
+      "functions_to_avoid": [
+        "чистое продвижение"
+      ],
+      "priorities": [
+        "сохранить доход",
+        "не обнулять опыт"
+      ],
+      "acceptable_income_drop": "требует уточнения"
+    },
+    "constraints": [
+      {
+        "title": "Допустимое снижение дохода не определено",
+        "impact": "Ограничивает выбор уровня входа.",
+        "evidence_ids": [
+          "e1"
+        ],
+        "confirmed": true
+      }
+    ],
+    "routes": {
+      "primary_routes": [
+        {
+          "route_id": "pm-marketing",
+          "title": "Product Marketing Manager",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "discovery",
+          "title": "Product Discovery / Customer Insights",
+          "category": "primary",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "transition_routes": [
+        {
+          "route_id": "product-manager",
+          "title": "Product Manager через продуктовые кейсы",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e3"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        },
+        {
+          "route_id": "edtech",
+          "title": "EdTech Product или Program Manager",
+          "category": "transition",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e2",
+            "e4"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "quick_income_routes": [
+        {
+          "route_id": "consulting",
+          "title": "Маркетинговый или продуктовый консалтинг",
+          "category": "quick_income",
+          "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+          "evidence_ids": [
+            "e1",
+            "e2"
+          ],
+          "preserves": [
+            "исследование рынка",
+            "позиционирование"
+          ],
+          "risks": [
+            "нужно проверить продуктовую ответственность"
+          ],
+          "missing": [
+            "продуктовый кейс"
+          ],
+          "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+          "disconfirming_conditions": [
+            "роль требует неподтверждённого владения продуктовой разработкой"
+          ],
+          "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+        }
+      ],
+      "emergency_routes": [],
+      "recommended_route_id": "pm-marketing",
+      "alternative_route_ids": [
+        "discovery",
+        "edtech"
+      ]
+    },
+    "questions": {
+      "answered_critical_questions": [
+        "Какие функции сохранить"
+      ],
+      "unanswered_critical_questions": [
+        "Какое снижение дохода допустимо?",
+        "Локальный или международный рынок?"
+      ],
+      "optional_questions": []
+    },
+    "conclusions": {
+      "mandatory_conclusions": [
+        "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+        "Безопасный переход не требует обнуления профессионального капитала",
+        "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+      ],
+      "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+      "what_may_change_conclusion": [
+        "неподходящая продуктовая ответственность",
+        "недопустимое снижение дохода"
+      ],
+      "forbidden_recommendations_checked": [
+        "административная работа",
+        "психолог без квалификации"
+      ],
+      "critical_errors_detected": []
+    },
+    "first_steps": [
+      {
+        "step_id": "clarify",
+        "title": "Быстрое прояснение",
+        "purpose": "Отделить желаемые функции от условий текущей работы.",
+        "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+        "expected_result": "Два списка по три функции.",
+        "duration_minutes": 15,
+        "related_route_id": "pm-marketing",
+        "type": "quick_action"
+      },
+      {
+        "step_id": "market",
+        "title": "Проверка рынка",
+        "purpose": "Сравнить три смежных направления.",
+        "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+        "expected_result": "Таблица требований по двум направлениям.",
+        "duration_minutes": 45,
+        "related_route_id": "pm-marketing",
+        "type": "market_research"
+      },
+      {
+        "step_id": "case",
+        "title": "Портфолио",
+        "purpose": "Показать продуктовую часть опыта.",
+        "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+        "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+        "duration_minutes": 60,
+        "related_route_id": "pm-marketing",
+        "type": "portfolio"
+      },
+      {
+        "step_id": "contact",
+        "title": "Профессиональный контакт",
+        "purpose": "Проверить кейс у специалиста.",
+        "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+        "expected_result": "Одна предметная обратная связь.",
+        "duration_minutes": 20,
+        "related_route_id": "pm-marketing",
+        "type": "networking"
+      },
+      {
+        "step_id": "consulting-test",
+        "title": "Проверка консультирования",
+        "purpose": "Проверить спрос без увольнения.",
+        "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+        "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+        "duration_minutes": 30,
+        "related_route_id": "consulting",
+        "type": "clarification"
+      }
+    ],
+    "selected_first_step_id": null,
+    "metadata": {
+      "seniority_reason_codes": [
+        "years_experience_8",
+        "team_leadership",
+        "strategy_ownership",
+        "budget_responsibility",
+        "measurable_result_35_percent"
+      ],
+      "resume_important_facts_count": 12,
+      "validation": {
+        "valid": true,
+        "errors": [],
+        "warnings": []
+      },
+      "assessment_id": "assessment-profile-10-e2e",
+      "profile_version": "fixture-v1",
+      "raw_model_output": {
+        "assessment_id": "assessment-profile-10-e2e",
+        "session_id": "session-profile-10-e2e",
+        "profile_version": "fixture-v1",
+        "status": "full",
+        "context": {
+          "country_code": "LT",
+          "country_name": "Литва",
+          "city": "Вильнюс",
+          "income_target": {
+            "amount": 3000,
+            "currency": "EUR",
+            "period": "month"
+          }
+        },
+        "identity": {
+          "professional_core": [
+            "Пользователь имеет опыт в маркетинге."
+          ],
+          "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+          "secondary_functions": [
+            "Product Discovery",
+            "Позиционирование продукта",
+            "Образовательный контент",
+            "Управление командой"
+          ],
+          "seniority_current": "средний",
+          "seniority_transition": "В Product Management оценивается отдельно",
+          "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+          "professional_capital": [
+            "восемь лет опыта",
+            "подтверждённые запуски"
+          ],
+          "transferable_functions": [
+            "исследования",
+            "позиционирование",
+            "координация"
+          ]
+        },
+        "evidence": [
+          {
+            "evidence_id": "e1",
+            "fact": "Восемь лет в IT-маркетинге",
+            "source_type": "history",
+            "source_reference": "story:1"
+          },
+          {
+            "evidence_id": "e2",
+            "fact": "Исследовал рынок и клиентов для запусков",
+            "source_type": "resume",
+            "source_reference": "resume:experience"
+          },
+          {
+            "evidence_id": "e3",
+            "fact": "Управлял маркетинговой командой",
+            "source_type": "resume",
+            "source_reference": "resume:leadership"
+          },
+          {
+            "evidence_id": "e4",
+            "fact": "Отвечал за маркетинговую стратегию и бюджет",
+            "source_type": "resume",
+            "source_reference": "resume:strategy"
+          },
+          {
+            "evidence_id": "e5",
+            "fact": "Проводил интервью с клиентами",
+            "source_type": "resume",
+            "source_reference": "resume:interviews"
+          },
+          {
+            "evidence_id": "e6",
+            "fact": "Работал с B2B-продуктами",
+            "source_type": "resume",
+            "source_reference": "resume:b2b"
+          },
+          {
+            "evidence_id": "e7",
+            "fact": "Разрабатывал позиционирование продуктов",
+            "source_type": "resume",
+            "source_reference": "resume:positioning"
+          },
+          {
+            "evidence_id": "e8",
+            "fact": "Создавал образовательный контент и онлайн-курсы",
+            "source_type": "resume",
+            "source_reference": "resume:education"
+          },
+          {
+            "evidence_id": "e9",
+            "fact": "Проводил вебинары",
+            "source_type": "resume",
+            "source_reference": "resume:webinars"
+          },
+          {
+            "evidence_id": "e10",
+            "fact": "Увеличил входящие заявки на 35 процентов",
+            "source_type": "resume",
+            "source_reference": "resume:result"
+          },
+          {
+            "evidence_id": "e11",
+            "fact": "Прошёл Product Management Fundamentals",
+            "source_type": "resume",
+            "source_reference": "resume:education-product"
+          },
+          {
+            "evidence_id": "e12",
+            "fact": "Изучал Customer Development",
+            "source_type": "resume",
+            "source_reference": "resume:education-custdev"
+          },
+          {
+            "evidence_id": "e13",
+            "fact": "Английский язык B2",
+            "source_type": "resume",
+            "source_reference": "resume:language"
+          }
+        ],
+        "user_choice": {
+          "desired_change": "более осмысленная продуктовая роль",
+          "preferred_directions": [
+            "продукт",
+            "образование"
+          ],
+          "functions_to_preserve": [
+            "исследования",
+            "стратегию"
+          ],
+          "functions_to_avoid": [
+            "чистое продвижение"
+          ],
+          "priorities": [
+            "сохранить доход",
+            "не обнулять опыт"
+          ],
+          "acceptable_income_drop": "требует уточнения"
+        },
+        "constraints": [
+          {
+            "title": "Допустимое снижение дохода не определено",
+            "impact": "Ограничивает выбор уровня входа.",
+            "evidence_ids": [
+              "e1"
+            ],
+            "confirmed": true
+          }
+        ],
+        "routes": {
+          "primary_routes": [
+            {
+              "route_id": "pm-marketing",
+              "title": "Смежные роли",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "discovery",
+              "title": "Product Discovery / Customer Insights",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "transition_routes": [
+            {
+              "route_id": "product-manager",
+              "title": "Product Manager через продуктовые кейсы",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e3"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "edtech",
+              "title": "EdTech Product или Program Manager",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e4"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "quick_income_routes": [
+            {
+              "route_id": "consulting",
+              "title": "Маркетинговый или продуктовый консалтинг",
+              "category": "quick_income",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "emergency_routes": [],
+          "recommended_route_id": "pm-marketing",
+          "alternative_route_ids": [
+            "discovery",
+            "edtech"
+          ]
+        },
+        "questions": {
+          "answered_critical_questions": [
+            "Какие функции сохранить"
+          ],
+          "unanswered_critical_questions": [
+            "Какое снижение дохода допустимо?",
+            "Локальный или международный рынок?"
+          ],
+          "optional_questions": []
+        },
+        "conclusions": {
+          "mandatory_conclusions": [
+            "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+            "Безопасный переход не требует обнуления профессионального капитала",
+            "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+          ],
+          "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+          "what_may_change_conclusion": [
+            "неподходящая продуктовая ответственность",
+            "недопустимое снижение дохода"
+          ],
+          "forbidden_recommendations_checked": [
+            "административная работа",
+            "психолог без квалификации"
+          ],
+          "critical_errors_detected": []
+        },
+        "first_steps": [
+          {
+            "step_id": "clarify",
+            "title": "Быстрое прояснение",
+            "purpose": "Отделить желаемые функции от условий текущей работы.",
+            "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+            "expected_result": "Два списка по три функции.",
+            "duration_minutes": 15,
+            "related_route_id": "pm-marketing",
+            "type": "quick_action"
+          },
+          {
+            "step_id": "market",
+            "title": "Проверка рынка",
+            "purpose": "Сравнить три смежных направления.",
+            "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "expected_result": "Таблица требований по двум направлениям.",
+            "duration_minutes": 45,
+            "related_route_id": "pm-marketing",
+            "type": "market_research"
+          },
+          {
+            "step_id": "case",
+            "title": "Портфолио",
+            "purpose": "Показать продуктовую часть опыта.",
+            "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+            "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+            "duration_minutes": 60,
+            "related_route_id": "pm-marketing",
+            "type": "portfolio"
+          },
+          {
+            "step_id": "contact",
+            "title": "Профессиональный контакт",
+            "purpose": "Проверить кейс у специалиста.",
+            "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+            "expected_result": "Одна предметная обратная связь.",
+            "duration_minutes": 20,
+            "related_route_id": "pm-marketing",
+            "type": "networking"
+          },
+          {
+            "step_id": "consulting-test",
+            "title": "Проверка консультирования",
+            "purpose": "Проверить спрос без увольнения.",
+            "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+            "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+            "duration_minutes": 30,
+            "related_route_id": "consulting",
+            "type": "clarification"
+          }
+        ]
+      },
+      "parsed_before_repair": {
+        "assessment_id": "assessment-profile-10-e2e",
+        "session_id": "session-profile-10-e2e",
+        "profile_version": "fixture-v1",
+        "status": "full",
+        "context": {
+          "country_code": "LT",
+          "country_name": "Литва",
+          "city": "Вильнюс",
+          "current_languages": [],
+          "target_languages": [],
+          "work_authorization": null,
+          "income_minimum": null,
+          "income_target": {
+            "amount": 3000.0,
+            "currency": "EUR",
+            "period": "month"
+          },
+          "income_urgency": null,
+          "available_learning_time": null,
+          "learning_budget": null
+        },
+        "identity": {
+          "professional_core": [
+            "Пользователь имеет опыт в маркетинге."
+          ],
+          "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+          "secondary_functions": [
+            "Product Discovery",
+            "Позиционирование продукта",
+            "Образовательный контент",
+            "Управление командой"
+          ],
+          "seniority_current": "средний",
+          "seniority_transition": "В Product Management оценивается отдельно",
+          "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+          "professional_capital": [
+            "восемь лет опыта",
+            "подтверждённые запуски"
+          ],
+          "transferable_functions": [
+            "исследования",
+            "позиционирование",
+            "координация"
+          ]
+        },
+        "evidence": [
+          {
+            "evidence_id": "e1",
+            "fact": "Восемь лет в IT-маркетинге",
+            "source_type": "history",
+            "source_reference": "story:1"
+          },
+          {
+            "evidence_id": "e2",
+            "fact": "Исследовал рынок и клиентов для запусков",
+            "source_type": "resume",
+            "source_reference": "resume:experience"
+          },
+          {
+            "evidence_id": "e3",
+            "fact": "Управлял маркетинговой командой",
+            "source_type": "resume",
+            "source_reference": "resume:leadership"
+          },
+          {
+            "evidence_id": "e4",
+            "fact": "Отвечал за маркетинговую стратегию и бюджет",
+            "source_type": "resume",
+            "source_reference": "resume:strategy"
+          },
+          {
+            "evidence_id": "e5",
+            "fact": "Проводил интервью с клиентами",
+            "source_type": "resume",
+            "source_reference": "resume:interviews"
+          },
+          {
+            "evidence_id": "e6",
+            "fact": "Работал с B2B-продуктами",
+            "source_type": "resume",
+            "source_reference": "resume:b2b"
+          },
+          {
+            "evidence_id": "e7",
+            "fact": "Разрабатывал позиционирование продуктов",
+            "source_type": "resume",
+            "source_reference": "resume:positioning"
+          },
+          {
+            "evidence_id": "e8",
+            "fact": "Создавал образовательный контент и онлайн-курсы",
+            "source_type": "resume",
+            "source_reference": "resume:education"
+          },
+          {
+            "evidence_id": "e9",
+            "fact": "Проводил вебинары",
+            "source_type": "resume",
+            "source_reference": "resume:webinars"
+          },
+          {
+            "evidence_id": "e10",
+            "fact": "Увеличил входящие заявки на 35 процентов",
+            "source_type": "resume",
+            "source_reference": "resume:result"
+          },
+          {
+            "evidence_id": "e11",
+            "fact": "Прошёл Product Management Fundamentals",
+            "source_type": "resume",
+            "source_reference": "resume:education-product"
+          },
+          {
+            "evidence_id": "e12",
+            "fact": "Изучал Customer Development",
+            "source_type": "resume",
+            "source_reference": "resume:education-custdev"
+          },
+          {
+            "evidence_id": "e13",
+            "fact": "Английский язык B2",
+            "source_type": "resume",
+            "source_reference": "resume:language"
+          }
+        ],
+        "user_choice": {
+          "desired_change": "более осмысленная продуктовая роль",
+          "preferred_directions": [
+            "продукт",
+            "образование"
+          ],
+          "functions_to_preserve": [
+            "исследования",
+            "стратегию"
+          ],
+          "functions_to_avoid": [
+            "чистое продвижение"
+          ],
+          "priorities": [
+            "сохранить доход",
+            "не обнулять опыт"
+          ],
+          "acceptable_income_drop": "требует уточнения"
+        },
+        "constraints": [
+          {
+            "title": "Допустимое снижение дохода не определено",
+            "impact": "Ограничивает выбор уровня входа.",
+            "evidence_ids": [
+              "e1"
+            ],
+            "confirmed": true
+          }
+        ],
+        "routes": {
+          "primary_routes": [
+            {
+              "route_id": "pm-marketing",
+              "title": "Смежные роли",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "discovery",
+              "title": "Product Discovery / Customer Insights",
+              "category": "primary",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "transition_routes": [
+            {
+              "route_id": "product-manager",
+              "title": "Product Manager через продуктовые кейсы",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e3"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            },
+            {
+              "route_id": "edtech",
+              "title": "EdTech Product или Program Manager",
+              "category": "transition",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e2",
+                "e4"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "quick_income_routes": [
+            {
+              "route_id": "consulting",
+              "title": "Маркетинговый или продуктовый консалтинг",
+              "category": "quick_income",
+              "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+              "evidence_ids": [
+                "e1",
+                "e2"
+              ],
+              "preserves": [
+                "исследование рынка",
+                "позиционирование"
+              ],
+              "risks": [
+                "нужно проверить продуктовую ответственность"
+              ],
+              "missing": [
+                "продуктовый кейс"
+              ],
+              "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+              "disconfirming_conditions": [
+                "роль требует неподтверждённого владения продуктовой разработкой"
+              ],
+              "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+            }
+          ],
+          "emergency_routes": [],
+          "recommended_route_id": "pm-marketing",
+          "alternative_route_ids": [
+            "discovery",
+            "edtech"
+          ]
+        },
+        "questions": {
+          "answered_critical_questions": [
+            "Какие функции сохранить"
+          ],
+          "unanswered_critical_questions": [
+            "Какое снижение дохода допустимо?",
+            "Локальный или международный рынок?"
+          ],
+          "optional_questions": []
+        },
+        "conclusions": {
+          "mandatory_conclusions": [
+            "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+            "Безопасный переход не требует обнуления профессионального капитала",
+            "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+          ],
+          "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+          "what_may_change_conclusion": [
+            "неподходящая продуктовая ответственность",
+            "недопустимое снижение дохода"
+          ],
+          "forbidden_recommendations_checked": [
+            "административная работа",
+            "психолог без квалификации"
+          ],
+          "critical_errors_detected": []
+        },
+        "first_steps": [
+          {
+            "step_id": "clarify",
+            "title": "Быстрое прояснение",
+            "purpose": "Отделить желаемые функции от условий текущей работы.",
+            "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+            "expected_result": "Два списка по три функции.",
+            "duration_minutes": 15,
+            "related_route_id": "pm-marketing",
+            "type": "quick_action"
+          },
+          {
+            "step_id": "market",
+            "title": "Проверка рынка",
+            "purpose": "Сравнить три смежных направления.",
+            "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "expected_result": "Таблица требований по двум направлениям.",
+            "duration_minutes": 45,
+            "related_route_id": "pm-marketing",
+            "type": "market_research"
+          },
+          {
+            "step_id": "case",
+            "title": "Портфолио",
+            "purpose": "Показать продуктовую часть опыта.",
+            "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+            "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+            "duration_minutes": 60,
+            "related_route_id": "pm-marketing",
+            "type": "portfolio"
+          },
+          {
+            "step_id": "contact",
+            "title": "Профессиональный контакт",
+            "purpose": "Проверить кейс у специалиста.",
+            "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+            "expected_result": "Одна предметная обратная связь.",
+            "duration_minutes": 20,
+            "related_route_id": "pm-marketing",
+            "type": "networking"
+          },
+          {
+            "step_id": "consulting-test",
+            "title": "Проверка консультирования",
+            "purpose": "Проверить спрос без увольнения.",
+            "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+            "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+            "duration_minutes": 30,
+            "related_route_id": "consulting",
+            "type": "clarification"
+          }
+        ],
+        "selected_first_step_id": null,
+        "metadata": {
+          "seniority_reason_codes": [
+            "years_experience_8",
+            "team_leadership",
+            "strategy_ownership",
+            "budget_responsibility",
+            "measurable_result_35_percent"
+          ],
+          "resume_important_facts_count": 12,
+          "validation": {
+            "valid": false,
+            "errors": [
+              {
+                "code": "RAW_USER_SUMMARY_AS_TITLE",
+                "field_path": "identity.professional_core[0]",
+                "message": "professional_core must be a concise professional role or function, not a user summary",
+                "actual_value": "Пользователь имеет опыт в маркетинге.",
+                "severity": "error"
+              },
+              {
+                "code": "INVALID_SENIORITY",
+                "field_path": "identity.seniority_current",
+                "message": "current seniority is below the level supported by experience and responsibility facts",
+                "actual_value": {
+                  "value": "средний",
+                  "reason_codes": [
+                    "years_experience_8",
+                    "team_leadership",
+                    "strategy_ownership",
+                    "budget_responsibility",
+                    "measurable_result_35_percent"
+                  ]
+                },
+                "severity": "error"
+              },
+              {
+                "code": "GENERIC_ROUTE_TITLE",
+                "field_path": "routes.all_routes[0].title",
+                "message": "route title must name a concrete role",
+                "actual_value": "Смежные роли",
+                "severity": "error"
+              },
+              {
+                "code": "MISSING_ROUTE_TEST",
+                "field_path": "first_steps.market.action",
+                "message": "market research action must use the related route title",
+                "actual_value": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+                "severity": "error"
+              }
+            ],
+            "warnings": []
+          }
+        }
+      },
+      "validation_before_repair": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "RAW_USER_SUMMARY_AS_TITLE",
+            "field_path": "identity.professional_core[0]",
+            "message": "professional_core must be a concise professional role or function, not a user summary",
+            "actual_value": "Пользователь имеет опыт в маркетинге.",
+            "severity": "error"
+          },
+          {
+            "code": "INVALID_SENIORITY",
+            "field_path": "identity.seniority_current",
+            "message": "current seniority is below the level supported by experience and responsibility facts",
+            "actual_value": {
+              "value": "средний",
+              "reason_codes": [
+                "years_experience_8",
+                "team_leadership",
+                "strategy_ownership",
+                "budget_responsibility",
+                "measurable_result_35_percent"
+              ]
+            },
+            "severity": "error"
+          },
+          {
+            "code": "GENERIC_ROUTE_TITLE",
+            "field_path": "routes.all_routes[0].title",
+            "message": "route title must name a concrete role",
+            "actual_value": "Смежные роли",
+            "severity": "error"
+          },
+          {
+            "code": "MISSING_ROUTE_TEST",
+            "field_path": "first_steps.market.action",
+            "message": "market research action must use the related route title",
+            "actual_value": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+            "severity": "error"
+          }
+        ],
+        "warnings": []
+      },
+      "generation_stopped_at": "identity.professional_core[0]",
+      "repair_started": true,
+      "repair_attempts": [
+        {
+          "attempt": 1,
+          "raw_output": {
+            "assessment_id": "assessment-profile-10-e2e",
+            "session_id": "session-profile-10-e2e",
+            "profile_version": "fixture-v1",
+            "status": "full",
+            "context": {
+              "country_code": "LT",
+              "country_name": "Литва",
+              "city": "Вильнюс",
+              "income_target": {
+                "amount": 3000,
+                "currency": "EUR",
+                "period": "month"
+              }
+            },
+            "identity": {
+              "professional_core": [
+                "Руководитель IT-маркетинга",
+                "Product Marketing Specialist",
+                "Специалист по исследованию рынка и клиентов"
+              ],
+              "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+              "secondary_functions": [
+                "Product Discovery",
+                "Позиционирование продукта",
+                "Образовательный контент",
+                "Управление командой"
+              ],
+              "seniority_current": "Senior / lead в маркетинге",
+              "seniority_transition": "В Product Management оценивается отдельно",
+              "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+              "professional_capital": [
+                "восемь лет опыта",
+                "подтверждённые запуски"
+              ],
+              "transferable_functions": [
+                "исследования",
+                "позиционирование",
+                "координация"
+              ]
+            },
+            "evidence": [
+              {
+                "evidence_id": "e1",
+                "fact": "Восемь лет в IT-маркетинге",
+                "source_type": "history",
+                "source_reference": "story:1"
+              },
+              {
+                "evidence_id": "e2",
+                "fact": "Исследовал рынок и клиентов для запусков",
+                "source_type": "resume",
+                "source_reference": "resume:experience"
+              },
+              {
+                "evidence_id": "e3",
+                "fact": "Управлял маркетинговой командой",
+                "source_type": "resume",
+                "source_reference": "resume:leadership"
+              },
+              {
+                "evidence_id": "e4",
+                "fact": "Отвечал за маркетинговую стратегию и бюджет",
+                "source_type": "resume",
+                "source_reference": "resume:strategy"
+              },
+              {
+                "evidence_id": "e5",
+                "fact": "Проводил интервью с клиентами",
+                "source_type": "resume",
+                "source_reference": "resume:interviews"
+              },
+              {
+                "evidence_id": "e6",
+                "fact": "Работал с B2B-продуктами",
+                "source_type": "resume",
+                "source_reference": "resume:b2b"
+              },
+              {
+                "evidence_id": "e7",
+                "fact": "Разрабатывал позиционирование продуктов",
+                "source_type": "resume",
+                "source_reference": "resume:positioning"
+              },
+              {
+                "evidence_id": "e8",
+                "fact": "Создавал образовательный контент и онлайн-курсы",
+                "source_type": "resume",
+                "source_reference": "resume:education"
+              },
+              {
+                "evidence_id": "e9",
+                "fact": "Проводил вебинары",
+                "source_type": "resume",
+                "source_reference": "resume:webinars"
+              },
+              {
+                "evidence_id": "e10",
+                "fact": "Увеличил входящие заявки на 35 процентов",
+                "source_type": "resume",
+                "source_reference": "resume:result"
+              },
+              {
+                "evidence_id": "e11",
+                "fact": "Прошёл Product Management Fundamentals",
+                "source_type": "resume",
+                "source_reference": "resume:education-product"
+              },
+              {
+                "evidence_id": "e12",
+                "fact": "Изучал Customer Development",
+                "source_type": "resume",
+                "source_reference": "resume:education-custdev"
+              },
+              {
+                "evidence_id": "e13",
+                "fact": "Английский язык B2",
+                "source_type": "resume",
+                "source_reference": "resume:language"
+              }
+            ],
+            "user_choice": {
+              "desired_change": "более осмысленная продуктовая роль",
+              "preferred_directions": [
+                "продукт",
+                "образование"
+              ],
+              "functions_to_preserve": [
+                "исследования",
+                "стратегию"
+              ],
+              "functions_to_avoid": [
+                "чистое продвижение"
+              ],
+              "priorities": [
+                "сохранить доход",
+                "не обнулять опыт"
+              ],
+              "acceptable_income_drop": "требует уточнения"
+            },
+            "constraints": [
+              {
+                "title": "Допустимое снижение дохода не определено",
+                "impact": "Ограничивает выбор уровня входа.",
+                "evidence_ids": [
+                  "e1"
+                ],
+                "confirmed": true
+              }
+            ],
+            "routes": {
+              "primary_routes": [
+                {
+                  "route_id": "pm-marketing",
+                  "title": "Product Marketing Manager",
+                  "category": "primary",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                },
+                {
+                  "route_id": "discovery",
+                  "title": "Product Discovery / Customer Insights",
+                  "category": "primary",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "transition_routes": [
+                {
+                  "route_id": "product-manager",
+                  "title": "Product Manager через продуктовые кейсы",
+                  "category": "transition",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e2",
+                    "e3"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                },
+                {
+                  "route_id": "edtech",
+                  "title": "EdTech Product или Program Manager",
+                  "category": "transition",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e2",
+                    "e4"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "quick_income_routes": [
+                {
+                  "route_id": "consulting",
+                  "title": "Маркетинговый или продуктовый консалтинг",
+                  "category": "quick_income",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "emergency_routes": [],
+              "recommended_route_id": "pm-marketing",
+              "alternative_route_ids": [
+                "discovery",
+                "edtech"
+              ]
+            },
+            "questions": {
+              "answered_critical_questions": [
+                "Какие функции сохранить"
+              ],
+              "unanswered_critical_questions": [
+                "Какое снижение дохода допустимо?",
+                "Локальный или международный рынок?"
+              ],
+              "optional_questions": []
+            },
+            "conclusions": {
+              "mandatory_conclusions": [
+                "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+                "Безопасный переход не требует обнуления профессионального капитала",
+                "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+              ],
+              "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+              "what_may_change_conclusion": [
+                "неподходящая продуктовая ответственность",
+                "недопустимое снижение дохода"
+              ],
+              "forbidden_recommendations_checked": [
+                "административная работа",
+                "психолог без квалификации"
+              ],
+              "critical_errors_detected": []
+            },
+            "first_steps": [
+              {
+                "step_id": "clarify",
+                "title": "Быстрое прояснение",
+                "purpose": "Отделить желаемые функции от условий текущей работы.",
+                "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+                "expected_result": "Два списка по три функции.",
+                "duration_minutes": 15,
+                "related_route_id": "pm-marketing",
+                "type": "quick_action"
+              },
+              {
+                "step_id": "market",
+                "title": "Проверка рынка",
+                "purpose": "Сравнить три смежных направления.",
+                "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+                "expected_result": "Таблица требований по двум направлениям.",
+                "duration_minutes": 45,
+                "related_route_id": "pm-marketing",
+                "type": "market_research"
+              },
+              {
+                "step_id": "case",
+                "title": "Портфолио",
+                "purpose": "Показать продуктовую часть опыта.",
+                "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+                "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+                "duration_minutes": 60,
+                "related_route_id": "pm-marketing",
+                "type": "portfolio"
+              },
+              {
+                "step_id": "contact",
+                "title": "Профессиональный контакт",
+                "purpose": "Проверить кейс у специалиста.",
+                "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+                "expected_result": "Одна предметная обратная связь.",
+                "duration_minutes": 20,
+                "related_route_id": "pm-marketing",
+                "type": "networking"
+              },
+              {
+                "step_id": "consulting-test",
+                "title": "Проверка консультирования",
+                "purpose": "Проверить спрос без увольнения.",
+                "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+                "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+                "duration_minutes": 30,
+                "related_route_id": "consulting",
+                "type": "clarification"
+              }
+            ]
+          },
+          "parsed_assessment": {
+            "assessment_id": "assessment-profile-10-e2e",
+            "session_id": "session-profile-10-e2e",
+            "profile_version": "fixture-v1",
+            "status": "full",
+            "context": {
+              "country_code": "LT",
+              "country_name": "Литва",
+              "city": "Вильнюс",
+              "current_languages": [],
+              "target_languages": [],
+              "work_authorization": null,
+              "income_minimum": null,
+              "income_target": {
+                "amount": 3000.0,
+                "currency": "EUR",
+                "period": "month"
+              },
+              "income_urgency": null,
+              "available_learning_time": null,
+              "learning_budget": null
+            },
+            "identity": {
+              "professional_core": [
+                "Руководитель IT-маркетинга",
+                "Product Marketing Specialist",
+                "Специалист по исследованию рынка и клиентов"
+              ],
+              "core_description": "Превращает исследования в позиционирование, стратегию запуска и координацию реализации.",
+              "secondary_functions": [
+                "Product Discovery",
+                "Позиционирование продукта",
+                "Образовательный контент",
+                "Управление командой"
+              ],
+              "seniority_current": "Senior / lead в маркетинге",
+              "seniority_transition": "В Product Management оценивается отдельно",
+              "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
+              "professional_capital": [
+                "восемь лет опыта",
+                "подтверждённые запуски"
+              ],
+              "transferable_functions": [
+                "исследования",
+                "позиционирование",
+                "координация"
+              ]
+            },
+            "evidence": [
+              {
+                "evidence_id": "e1",
+                "fact": "Восемь лет в IT-маркетинге",
+                "source_type": "history",
+                "source_reference": "story:1"
+              },
+              {
+                "evidence_id": "e2",
+                "fact": "Исследовал рынок и клиентов для запусков",
+                "source_type": "resume",
+                "source_reference": "resume:experience"
+              },
+              {
+                "evidence_id": "e3",
+                "fact": "Управлял маркетинговой командой",
+                "source_type": "resume",
+                "source_reference": "resume:leadership"
+              },
+              {
+                "evidence_id": "e4",
+                "fact": "Отвечал за маркетинговую стратегию и бюджет",
+                "source_type": "resume",
+                "source_reference": "resume:strategy"
+              },
+              {
+                "evidence_id": "e5",
+                "fact": "Проводил интервью с клиентами",
+                "source_type": "resume",
+                "source_reference": "resume:interviews"
+              },
+              {
+                "evidence_id": "e6",
+                "fact": "Работал с B2B-продуктами",
+                "source_type": "resume",
+                "source_reference": "resume:b2b"
+              },
+              {
+                "evidence_id": "e7",
+                "fact": "Разрабатывал позиционирование продуктов",
+                "source_type": "resume",
+                "source_reference": "resume:positioning"
+              },
+              {
+                "evidence_id": "e8",
+                "fact": "Создавал образовательный контент и онлайн-курсы",
+                "source_type": "resume",
+                "source_reference": "resume:education"
+              },
+              {
+                "evidence_id": "e9",
+                "fact": "Проводил вебинары",
+                "source_type": "resume",
+                "source_reference": "resume:webinars"
+              },
+              {
+                "evidence_id": "e10",
+                "fact": "Увеличил входящие заявки на 35 процентов",
+                "source_type": "resume",
+                "source_reference": "resume:result"
+              },
+              {
+                "evidence_id": "e11",
+                "fact": "Прошёл Product Management Fundamentals",
+                "source_type": "resume",
+                "source_reference": "resume:education-product"
+              },
+              {
+                "evidence_id": "e12",
+                "fact": "Изучал Customer Development",
+                "source_type": "resume",
+                "source_reference": "resume:education-custdev"
+              },
+              {
+                "evidence_id": "e13",
+                "fact": "Английский язык B2",
+                "source_type": "resume",
+                "source_reference": "resume:language"
+              }
+            ],
+            "user_choice": {
+              "desired_change": "более осмысленная продуктовая роль",
+              "preferred_directions": [
+                "продукт",
+                "образование"
+              ],
+              "functions_to_preserve": [
+                "исследования",
+                "стратегию"
+              ],
+              "functions_to_avoid": [
+                "чистое продвижение"
+              ],
+              "priorities": [
+                "сохранить доход",
+                "не обнулять опыт"
+              ],
+              "acceptable_income_drop": "требует уточнения"
+            },
+            "constraints": [
+              {
+                "title": "Допустимое снижение дохода не определено",
+                "impact": "Ограничивает выбор уровня входа.",
+                "evidence_ids": [
+                  "e1"
+                ],
+                "confirmed": true
+              }
+            ],
+            "routes": {
+              "primary_routes": [
+                {
+                  "route_id": "pm-marketing",
+                  "title": "Product Marketing Manager",
+                  "category": "primary",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                },
+                {
+                  "route_id": "discovery",
+                  "title": "Product Discovery / Customer Insights",
+                  "category": "primary",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "transition_routes": [
+                {
+                  "route_id": "product-manager",
+                  "title": "Product Manager через продуктовые кейсы",
+                  "category": "transition",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e2",
+                    "e3"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                },
+                {
+                  "route_id": "edtech",
+                  "title": "EdTech Product или Program Manager",
+                  "category": "transition",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e2",
+                    "e4"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "quick_income_routes": [
+                {
+                  "route_id": "consulting",
+                  "title": "Маркетинговый или продуктовый консалтинг",
+                  "category": "quick_income",
+                  "why_it_fits": "Сохраняет исследовательские, стратегические и маркетинговые функции.",
+                  "evidence_ids": [
+                    "e1",
+                    "e2"
+                  ],
+                  "preserves": [
+                    "исследование рынка",
+                    "позиционирование"
+                  ],
+                  "risks": [
+                    "нужно проверить продуктовую ответственность"
+                  ],
+                  "missing": [
+                    "продуктовый кейс"
+                  ],
+                  "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
+                  "disconfirming_conditions": [
+                    "роль требует неподтверждённого владения продуктовой разработкой"
+                  ],
+                  "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу."
+                }
+              ],
+              "emergency_routes": [],
+              "recommended_route_id": "pm-marketing",
+              "alternative_route_ids": [
+                "discovery",
+                "edtech"
+              ]
+            },
+            "questions": {
+              "answered_critical_questions": [
+                "Какие функции сохранить"
+              ],
+              "unanswered_critical_questions": [
+                "Какое снижение дохода допустимо?",
+                "Локальный или международный рынок?"
+              ],
+              "optional_questions": []
+            },
+            "conclusions": {
+              "mandatory_conclusions": [
+                "Пользователь умеет превращать исследования в продуктовые и маркетинговые решения",
+                "Безопасный переход не требует обнуления профессионального капитала",
+                "Product Marketing и Product Discovery нужно проверить раньше полной смены сферы"
+              ],
+              "main_conclusion": "Основной маршрут — Product Marketing Manager: он сохраняет senior-уровень, аналитические функции и доходный потенциал.",
+              "what_may_change_conclusion": [
+                "неподходящая продуктовая ответственность",
+                "недопустимое снижение дохода"
+              ],
+              "forbidden_recommendations_checked": [
+                "административная работа",
+                "психолог без квалификации"
+              ],
+              "critical_errors_detected": []
+            },
+            "first_steps": [
+              {
+                "step_id": "clarify",
+                "title": "Быстрое прояснение",
+                "purpose": "Отделить желаемые функции от условий текущей работы.",
+                "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.",
+                "expected_result": "Два списка по три функции.",
+                "duration_minutes": 15,
+                "related_route_id": "pm-marketing",
+                "type": "quick_action"
+              },
+              {
+                "step_id": "market",
+                "title": "Проверка рынка",
+                "purpose": "Сравнить три смежных направления.",
+                "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.",
+                "expected_result": "Таблица требований по двум направлениям.",
+                "duration_minutes": 45,
+                "related_route_id": "pm-marketing",
+                "type": "market_research"
+              },
+              {
+                "step_id": "case",
+                "title": "Портфолио",
+                "purpose": "Показать продуктовую часть опыта.",
+                "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.",
+                "expected_result": "Один проверяемый продуктово-маркетинговый кейс.",
+                "duration_minutes": 60,
+                "related_route_id": "pm-marketing",
+                "type": "portfolio"
+              },
+              {
+                "step_id": "contact",
+                "title": "Профессиональный контакт",
+                "purpose": "Проверить кейс у специалиста.",
+                "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.",
+                "expected_result": "Одна предметная обратная связь.",
+                "duration_minutes": 20,
+                "related_route_id": "pm-marketing",
+                "type": "networking"
+              },
+              {
+                "step_id": "consulting-test",
+                "title": "Проверка консультирования",
+                "purpose": "Проверить спрос без увольнения.",
+                "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.",
+                "expected_result": "Один подтверждающий или опровергающий сигнал спроса.",
+                "duration_minutes": 30,
+                "related_route_id": "consulting",
+                "type": "clarification"
+              }
+            ],
+            "selected_first_step_id": null,
+            "metadata": {
+              "seniority_reason_codes": [
+                "years_experience_8",
+                "team_leadership",
+                "strategy_ownership",
+                "budget_responsibility",
+                "measurable_result_35_percent"
+              ],
+              "resume_important_facts_count": 12,
+              "validation": {
+                "valid": true,
+                "errors": [],
+                "warnings": []
+              }
+            }
+          },
+          "validation": {
+            "valid": true,
+            "errors": [],
+            "warnings": []
+          },
+          "identity_matches": true
+        }
+      ],
+      "recovered_by": "repair",
+      "successful_repair_attempt": 1
+    }
+  },
+  "validation_after": {
+    "valid": true,
+    "errors": [],
+    "warnings": []
+  },
+  "telegram": "Профессиональное ядро\nРуководитель IT-маркетинга, Product Marketing Specialist, Специалист по исследованию рынка и клиентов\n\nТекущий уровень: Senior / lead в маркетинге\nПереходный уровень: В Product Management оценивается отдельно\n\nОсновной маршрут: Product Marketing Manager\nАльтернатива: Product Discovery / Customer Insights\n\nКлючевое ограничение: Допустимое снижение дохода не определено. Ограничивает выбор уровня входа.\n\nС какого шага хотите начать?\n⚡ Быстро прояснить · 15 мин\n🔎 Проверить рынок · 45 мин\n🧩 Собрать кейс · 60 мин\n💬 Поговорить с человеком из сферы · 20 мин\n⚡ Уточнить приоритеты · 30 мин",
+  "html_path": "reports\\career_assessment_assessment-profile-10-e2e.html",
+  "html_created": true
+}
