@@ -12,6 +12,7 @@ from prompts import FINAL_REPORT_PROMPT, RESUME_ANALYSIS_PROMPT, STORY_ANALYSIS_
 from services.career_assessment import (
     CAREER_ASSESSMENT_SCHEMA,
     CareerAssessment,
+    build_deterministic_assessment,
     career_assessment_from_dict,
     validate_career_assessment,
 )
@@ -1175,19 +1176,119 @@ class CareerOpenAIClient:
         )
         payload = await self._run_json(prompt, {}, CAREER_ASSESSMENT_SCHEMA, language)
         assessment = career_assessment_from_dict(payload)
-        if (
-            assessment.assessment_id != assessment_id
-            or assessment.session_id != session_id
-            or assessment.profile_version != profile_version
-        ):
-            raise ValueError("CareerAssessment identity does not match the requested build")
         validation = validate_career_assessment(
             assessment,
             snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
             snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
         )
-        validation.require_valid()
-        return assessment
+        identity_matches = (
+            assessment.assessment_id == assessment_id
+            and assessment.session_id == session_id
+            and assessment.profile_version == profile_version
+        )
+        diagnostics: dict[str, Any] = {
+            "assessment_id": assessment_id,
+            "profile_version": profile_version,
+            "raw_model_output": copy.deepcopy(payload),
+            "parsed_before_repair": assessment.to_dict(),
+            "validation_before_repair": validation.to_dict(),
+            "generation_stopped_at": validation.errors[0].field_path if validation.errors else None,
+            "repair_started": False,
+            "repair_attempts": [],
+        }
+        if validation.valid and identity_matches:
+            assessment.metadata.update(diagnostics)
+            assessment.metadata["recovered_by"] = "initial_generation"
+            return assessment
+
+        if not identity_matches:
+            diagnostics["identity_error"] = {
+                "expected": fixed_identity,
+                "actual": {
+                    "assessment_id": assessment.assessment_id,
+                    "session_id": assessment.session_id,
+                    "profile_version": assessment.profile_version,
+                },
+            }
+        diagnostics["repair_started"] = True
+        current_assessment = assessment
+        current_validation = validation
+        for attempt in range(1, 3):
+            repair_prompt = """Исправь CareerAssessment по точным ошибкам валидации.
+
+Правила repair:
+- используй только факты из ProfileSnapshot, story_analysis и resume_analysis;
+- не добавляй новые факты и не меняй подтверждённые факты;
+- исправь только поля, перечисленные в validation_errors;
+- сохрани assessment_id, session_id и profile_version из fixed_identity дословно;
+- professional_core содержит только краткие названия ролей или функций;
+- каждый route.title называет конкретную роль;
+- market_research step обязан ссылаться на related_route_id и дословно использовать title этого route;
+- верни полный CareerAssessment, selected_first_step_id=null.
+
+ДАННЫЕ:
+""" + json.dumps(
+                {
+                    "fixed_identity": fixed_identity,
+                    "original_assessment": payload,
+                    "assessment_to_repair": current_assessment.to_dict(),
+                    "validation_errors": [issue.to_dict() for issue in current_validation.errors],
+                    "profile_snapshot": profile_snapshot,
+                    "story_analysis": story_analysis or {},
+                    "resume_analysis": resume_analysis or {},
+                },
+                ensure_ascii=False,
+            )
+            repaired_payload = await self._run_json(repair_prompt, {}, CAREER_ASSESSMENT_SCHEMA, language)
+            repaired = career_assessment_from_dict(repaired_payload)
+            repaired_validation = validate_career_assessment(
+                repaired,
+                snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+                snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+            )
+            repaired_identity_matches = (
+                repaired.assessment_id == assessment_id
+                and repaired.session_id == session_id
+                and repaired.profile_version == profile_version
+            )
+            diagnostics["repair_attempts"].append(
+                {
+                    "attempt": attempt,
+                    "raw_output": copy.deepcopy(repaired_payload),
+                    "parsed_assessment": repaired.to_dict(),
+                    "validation": repaired_validation.to_dict(),
+                    "identity_matches": repaired_identity_matches,
+                }
+            )
+            if repaired_validation.valid and repaired_identity_matches:
+                repaired.metadata.update(diagnostics)
+                repaired.metadata["recovered_by"] = "repair"
+                repaired.metadata["successful_repair_attempt"] = attempt
+                return repaired
+            current_assessment = repaired
+            current_validation = repaired_validation
+
+        fallback = build_deterministic_assessment(
+            profile_snapshot,
+            story_analysis or {},
+            resume_analysis or {},
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+        fallback.metadata.update(diagnostics)
+        fallback.metadata.update(
+            {
+                "recovered_by": "deterministic_fallback",
+                "fallback_reason": "Two repair attempts did not produce a valid CareerAssessment",
+                "fallback_validation": validate_career_assessment(
+                    fallback,
+                    snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+                    snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+                ).to_dict(),
+            }
+        )
+        return fallback
 
     async def build_report(
         self,

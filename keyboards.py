@@ -18,7 +18,7 @@ def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboar
         [
             InlineKeyboardButton(
                 text=STEP_BUTTON_LABELS[step.type],
-                callback_data=f"select_first_step:{assessment.assessment_id}:{step.step_id}",
+                callback_data=f"step_callback:{assessment.assessment_id}:{step.step_id}:{assessment.profile_version}",
             )
         ]
         for step in assessment.first_steps
@@ -26,11 +26,25 @@ def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def other_first_steps_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+def selected_step_actions_keyboard(assessment: CareerAssessment, step_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Показать другие варианты", callback_data=f"show_first_steps:{assessment_id}")]
+            [InlineKeyboardButton(text="Показать другие варианты", callback_data=f"show_first_steps:{assessment.assessment_id}:{assessment.profile_version}")],
+            [InlineKeyboardButton(text="Отметить выполненным", callback_data=f"step_done:{assessment.assessment_id}:{step_id}:{assessment.profile_version}")],
+            [InlineKeyboardButton(text="Сделать проще", callback_data=f"step_simplify:{assessment.assessment_id}:{step_id}:{assessment.profile_version}")],
+            [InlineKeyboardButton(text="Вернуться к карте", callback_data=f"step_back:{assessment.assessment_id}:{assessment.profile_version}")],
         ]
+    )
+
+
+def assessment_recovery_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔄 Пересобрать документ")],
+            [KeyboardButton(text="✏️ Уточнить цель"), KeyboardButton(text="🧭 Показать маршруты")],
+            [KeyboardButton(text="⚡ Выбрать первый шаг")],
+        ],
+        resize_keyboard=True,
     )
 
 CONFIRM_YES = "✅ Да, использовать"

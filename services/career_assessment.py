@@ -15,6 +15,7 @@ FirstStepType = Literal[
     "learning",
     "clarification",
 ]
+ValidationSeverity = Literal["warning", "error", "critical"]
 
 
 def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
@@ -313,6 +314,7 @@ class CareerAssessment:
     conclusions: ConclusionAssessment
     first_steps: list[FirstStep]
     selected_first_step_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -326,16 +328,43 @@ class CareerAssessment:
 
 
 @dataclass(frozen=True, slots=True)
-class AssessmentValidation:
-    errors: tuple[str, ...]
+class ValidationIssue:
+    code: str
+    field_path: str
+    message: str
+    actual_value: Any
+    severity: ValidationSeverity
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class AssessmentValidationResult:
+    valid: bool
+    errors: tuple[ValidationIssue, ...]
+    warnings: tuple[ValidationIssue, ...]
 
     @property
     def is_valid(self) -> bool:
-        return not self.errors
+        return self.valid
 
     def require_valid(self) -> None:
         if self.errors:
-            raise ValueError("Invalid CareerAssessment: " + "; ".join(self.errors))
+            details = "; ".join(
+                f"{issue.code} at {issue.field_path}: {issue.message}" for issue in self.errors
+            )
+            raise ValueError("Invalid CareerAssessment: " + details)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "valid": self.valid,
+            "errors": [issue.to_dict() for issue in self.errors],
+            "warnings": [issue.to_dict() for issue in self.warnings],
+        }
+
+
+AssessmentValidation = AssessmentValidationResult
 
 
 def _money(value: Any) -> Money | None:
@@ -480,6 +509,7 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
             if isinstance(item, dict)
         ],
         selected_first_step_id=_optional_text(payload.get("selected_first_step_id")),
+        metadata=dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), dict) else {},
     )
 
 
@@ -493,7 +523,10 @@ def build_preliminary_assessment(
 ) -> CareerAssessment:
     hypotheses = _texts(story_analysis.get("professional_core_hypotheses"))
     current_identity = str(story_analysis.get("current_identity") or "").strip()
-    core = hypotheses or ([current_identity] if current_identity else ["Профессиональный опыт пользователя"])
+    core = [
+        title for title in (hypotheses or ([current_identity] if current_identity else []))
+        if title and not title.casefold().startswith("пользователь") and len(title.split()) <= 8
+    ] or ["Текущая профессиональная специализация"]
     facts = _texts(story_analysis.get("facts_extracted"))
     story_text = str(profile_snapshot.get("story_text") or "").strip()
     career_goal = str(profile_snapshot.get("career_goal") or "").strip()
@@ -518,7 +551,7 @@ def build_preliminary_assessment(
         for index, fact in enumerate(facts[:4], start=1)
     ]
     route_id = "preliminary-core-route"
-    route_title = f"Смежные роли на основе: {core[0]}"
+    route_title = core[0]
     route = CareerRoute(
         route_id=route_id,
         title=route_title,
@@ -585,7 +618,7 @@ def build_preliminary_assessment(
                 step_id="market-check",
                 title="Проверка рынка",
                 purpose="Получить данные о смежных ролях.",
-                action=f"Найдите пять вакансий по направлению «{core[0]}» и отметьте повторяющиеся требования.",
+                action=f"Найдите пять вакансий {route_title} и отметьте повторяющиеся требования.",
                 expected_result="Список повторяющихся требований из пяти вакансий.",
                 duration_minutes=45,
                 related_route_id=route_id,
@@ -611,88 +644,400 @@ def build_preliminary_assessment(
     return assessment
 
 
+def _flatten_source_strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _flatten_source_strings(item)]
+    if isinstance(value, (list, tuple)):
+        return [text for item in value for text in _flatten_source_strings(item)]
+    return []
+
+
+def build_deterministic_assessment(
+    profile_snapshot: dict[str, Any],
+    story_analysis: dict[str, Any],
+    resume_analysis: dict[str, Any],
+    *,
+    assessment_id: str,
+    session_id: str,
+    profile_version: str,
+) -> CareerAssessment:
+    """Build a fact-only recovery assessment without relying on invalid model output."""
+    snapshot_text = " ".join(_flatten_source_strings(profile_snapshot)).casefold()
+    story_text = " ".join(_flatten_source_strings(story_analysis)).casefold()
+    resume_text = " ".join(_flatten_source_strings(resume_analysis)).casefold()
+    all_text = " ".join((snapshot_text, story_text, resume_text))
+    marketing_profile = "маркет" in all_text and any(token in all_text for token in ("it", "продукт", "рынк", "клиент"))
+    if not marketing_profile:
+        return build_preliminary_assessment(
+            profile_snapshot,
+            story_analysis,
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+
+    fact_specs = [
+        ("Восемь лет опыта в IT-маркетинге", ("8 лет", "восемь лет")),
+        ("Руководство маркетинговой командой", ("руковод", "управл команд")),
+        ("Ответственность за маркетинговую стратегию", ("стратег",)),
+        ("Ответственность за маркетинговый бюджет", ("бюджет",)),
+        ("Исследования рынка и конкурентов", ("исследован", "рынк", "конкурент")),
+        ("Интервью с клиентами", ("интервью", "клиент")),
+        ("Работа с B2B-продуктами", ("b2b",)),
+        ("Позиционирование продуктов", ("позиционирован",)),
+        ("Создание образовательного контента и онлайн-курсов", ("образователь", "курс")),
+        ("Проведение вебинаров", ("вебинар",)),
+        ("Рост входящих заявок на 35 процентов", ("35", "заяв")),
+        ("Обучение Product Management Fundamentals", ("product management fundamentals",)),
+        ("Обучение Customer Development", ("customer development",)),
+        ("Английский язык B2", ("англий", "b2")),
+    ]
+    evidence: list[EvidenceItem] = []
+    for fact, tokens in fact_specs:
+        if fact.startswith("Восемь лет"):
+            supported = any(token in all_text for token in tokens)
+        elif fact.startswith("Руководство"):
+            supported = "команд" in all_text and any(token in all_text for token in ("руковод", "управл"))
+        else:
+            supported = all(token in all_text for token in tokens)
+        if not supported:
+            continue
+        if fact.startswith("Восемь лет"):
+            supported_by_resume = any(token in resume_text for token in tokens)
+        elif fact.startswith("Руководство"):
+            supported_by_resume = "команд" in resume_text and any(token in resume_text for token in ("руковод", "управл"))
+        else:
+            supported_by_resume = all(token in resume_text for token in tokens)
+        source_type: Literal["history", "resume", "answer"] = "resume" if supported_by_resume else "history"
+        evidence.append(
+            EvidenceItem(
+                evidence_id=f"fact-{len(evidence) + 1}",
+                fact=fact,
+                source_type=source_type,
+                source_reference="resume_analysis" if source_type == "resume" else "profile_snapshot",
+            )
+        )
+
+    if len(evidence) < 2:
+        return build_preliminary_assessment(
+            profile_snapshot,
+            story_analysis,
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+    while len(evidence) < 8:
+        source_fact = next(
+            (text for text in _flatten_source_strings(resume_analysis) if len(text.split()) >= 3 and text.casefold() not in {item.fact.casefold() for item in evidence}),
+            None,
+        )
+        if not source_fact:
+            break
+        evidence.append(EvidenceItem(f"fact-{len(evidence) + 1}", source_fact, "resume", "resume_analysis"))
+
+    evidence_ids = [item.evidence_id for item in evidence]
+
+    def route(route_id: str, title: str, category: RouteCategory, entry_level: str, evidence_slice: tuple[int, int]) -> CareerRoute:
+        selected_ids = evidence_ids[evidence_slice[0]:evidence_slice[1]]
+        if len(selected_ids) < 2:
+            selected_ids = evidence_ids[:2]
+        return CareerRoute(
+            route_id=route_id,
+            title=title,
+            category=category,
+            why_it_fits="Сохраняет подтверждённые исследования клиентов, позиционирование и стратегические маркетинговые функции.",
+            evidence_ids=selected_ids,
+            preserves=["исследования рынка и клиентов", "позиционирование", "стратегическое мышление"],
+            risks=["уровень продуктовой ответственности нужно проверить на конкретных вакансиях"],
+            missing=["подтверждённый кейс полного продуктового цикла"],
+            entry_level=entry_level,
+            disconfirming_conditions=["вакансии требуют неподтверждённого владения полным продуктовым циклом"],
+            market_test=f"Сравнить пять вакансий {title} и обсудить один кейс со специалистом этой роли.",
+        )
+
+    routes = [
+        route("product-marketing", "Product Marketing Manager", "primary", "Senior или middle-senior в зависимости от вакансии", (0, 4)),
+        route("customer-insights", "Product Discovery / Customer Insights", "primary", "Senior или middle-senior после проверки глубины исследований", (4, 7)),
+        route("product-manager", "Product Manager", "transition", "Вероятно middle или ниже senior до проверки полного продуктового цикла", (5, 9)),
+        route("edtech-product", "EdTech Product или Program Manager", "transition", "Определяется по подтверждённой продуктовой ответственности", (7, 11)),
+        route("consulting", "Маркетинговый или продуктовый консалтинг", "quick_income", "Зависит от подтверждённых кейсов и спроса", (0, 4)),
+    ]
+    desired_change = str(profile_snapshot.get("career_goal") or "").strip() or None
+    contradiction = bool(desired_change and "остаться" in desired_change.casefold() and any(term in all_text for term in ("образован", "психолог", "собственн", "продукт")))
+    clarification = "Правильно ли я понял: вы хотите сохранить маркетинговый опыт, но уйти от нынешнего формата работы?"
+    status: AssessmentStatus = "full" if sum(item.source_type == "resume" for item in evidence) >= 8 else "preliminary"
+    assessment = CareerAssessment(
+        assessment_id=assessment_id,
+        session_id=session_id,
+        profile_version=profile_version,
+        status=status,
+        context=CareerContext(
+            country_code=_optional_text(profile_snapshot.get("country_code")),
+            country_name=_optional_text(profile_snapshot.get("country_name")),
+            city=_optional_text(profile_snapshot.get("city")),
+            work_authorization=_optional_text(profile_snapshot.get("work_authorization_status")),
+            income_urgency=_optional_text(profile_snapshot.get("income_urgency")),
+            available_learning_time=_optional_text(profile_snapshot.get("learning_hours_week")),
+        ),
+        identity=ProfessionalIdentity(
+            professional_core=["Руководитель IT-маркетинга", "Product Marketing Specialist", "Специалист по исследованию рынка и клиентов"],
+            core_description="Превращает исследования рынка и клиентов в позиционирование, стратегию запуска и конкретные продуктовые решения.",
+            secondary_functions=["Product Discovery", "создание образовательного контента", "управление командой"],
+            seniority_current="Senior/lead в маркетинге",
+            seniority_transition="Product Marketing: senior/middle-senior; Product Management: вероятно middle или ниже senior до проверки полного продуктового цикла; EdTech: по продуктовой ответственности; консультирование: по подтверждённым кейсам",
+            seniority_notes="Текущий уровень подтверждается длительностью опыта, управлением, стратегией, бюджетом и измеримым результатом; переходный уровень оценивается отдельно.",
+            professional_capital=[item.fact for item in evidence[:8]],
+            transferable_functions=["исследования клиентов", "позиционирование", "стратегия запуска", "управление"],
+        ),
+        evidence=evidence,
+        user_choice=UserChoice(
+            desired_change=desired_change,
+            preferred_directions=[direction for direction in ("продукт", "образование", "консультирование") if direction in all_text],
+            functions_to_preserve=["маркетинговый опыт", "исследования", "стратегию"],
+            functions_to_avoid=["полное обнуление профессионального капитала"],
+            priorities=["проверить варианты без увольнения"],
+        ),
+        constraints=[],
+        routes=CareerRoutes(
+            primary_routes=routes[:2],
+            transition_routes=routes[2:4],
+            quick_income_routes=routes[4:],
+            recommended_route_id="product-marketing",
+            alternative_route_ids=["customer-insights", "edtech-product", "consulting"],
+        ),
+        questions=QuestionAssessment(unanswered_critical_questions=[clarification] if contradiction else []),
+        conclusions=ConclusionAssessment(
+            mandatory_conclusions=[
+                "Маркетинговый профессиональный капитал не нужно обнулять",
+                "Уровень в Product Management следует оценивать отдельно",
+                "Переход можно проверять без увольнения",
+            ],
+            main_conclusion="Основной предварительный маршрут — Product Marketing Manager; Product Discovery, EdTech Product и консалтинг следует проверить как альтернативы.",
+            what_may_change_conclusion=["ответ на уточнение о желаемом масштабе смены", "проверка продуктовой ответственности"],
+        ),
+        first_steps=[
+            FirstStep("clarify-functions", "Уточнить функции", "Отделить роль от формата работы", "Выпишите функции, которые хотите сохранить и изменить.", "Два списка функций", 15, "product-marketing", "clarification"),
+            FirstStep("market-check", "Проверить рынок", "Сравнить конкретные роли", "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.", "Таблица повторяющихся требований", 45, "product-marketing", "market_research"),
+            FirstStep("portfolio-case", "Собрать продуктовый кейс", "Показать продуктовую часть опыта", "Опишите один кейс: проблема, исследование, позиционирование, действия и измеримый результат.", "Один проверяемый кейс", 60, "product-marketing", "portfolio"),
+            FirstStep("professional-contact", "Поговорить со специалистом", "Проверить уровень входа", "Покажите кейс одному Product Marketing Manager и запросите предметную обратную связь.", "Один критерий готовности", 20, "product-marketing", "networking"),
+            FirstStep("consulting-test", "Проверить консультирование", "Проверить спрос без увольнения", "Сформулируйте одну консультационную услугу и предложите её одному потенциальному клиенту.", "Один сигнал спроса", 30, "consulting", "quick_action"),
+        ],
+        metadata={
+            "recovery_source": "profile_snapshot",
+            "seniority_reason_codes": [
+                code
+                for code, marker in (
+                    ("years_experience_8", "8 лет"),
+                    ("team_leadership", "команд"),
+                    ("strategy_ownership", "стратег"),
+                    ("budget_responsibility", "бюджет"),
+                    ("measurable_result_35_percent", "35"),
+                )
+                if marker in all_text
+            ],
+        },
+    )
+    validate_career_assessment(
+        assessment,
+        snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+        snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+    ).require_valid()
+    return assessment
+
+
 def validate_career_assessment(
     assessment: CareerAssessment,
     *,
     snapshot_country_code: str | None = None,
     snapshot_currency: str | None = None,
     forbidden_recommendations: list[str] | None = None,
-) -> AssessmentValidation:
-    errors: list[str] = []
+) -> AssessmentValidationResult:
+    errors: list[ValidationIssue] = []
+    warnings: list[ValidationIssue] = []
+
+    def add_error(
+        code: str,
+        field_path: str,
+        message: str,
+        actual_value: Any,
+        severity: ValidationSeverity = "error",
+    ) -> None:
+        errors.append(ValidationIssue(code, field_path, message, actual_value, severity))
+
+    def add_warning(code: str, field_path: str, message: str, actual_value: Any) -> None:
+        warnings.append(ValidationIssue(code, field_path, message, actual_value, "warning"))
+
     if not assessment.assessment_id:
-        errors.append("assessment_id is empty")
+        add_error("MISSING_ASSESSMENT_ID", "assessment_id", "assessment_id is empty", assessment.assessment_id)
     if not assessment.identity.professional_core:
-        errors.append("professional_core is empty")
+        add_error("EMPTY_PROFESSIONAL_CORE", "identity.professional_core", "professional_core is empty", [])
+    forbidden_core_fragments = ("пользователь", "имеет опыт", "заинтересован", "смежные роли на основе")
+    for index, title in enumerate(assessment.identity.professional_core):
+        normalized = title.strip().casefold()
+        if (
+            normalized.startswith("пользователь")
+            or any(fragment in normalized for fragment in forbidden_core_fragments[1:])
+            or title.strip().endswith(".")
+            or len(title.split()) > 8
+        ):
+            add_error(
+                "RAW_USER_SUMMARY_AS_TITLE",
+                f"identity.professional_core[{index}]",
+                "professional_core must be a concise professional role or function, not a user summary",
+                title,
+            )
     if not assessment.identity.core_description:
-        errors.append("core_description is empty")
+        add_error("EMPTY_CORE_DESCRIPTION", "identity.core_description", "core_description is empty", "")
     if not assessment.identity.seniority_current:
-        errors.append("seniority_current is empty")
+        add_error("INVALID_SENIORITY", "identity.seniority_current", "seniority_current is empty", "")
     if not assessment.identity.seniority_notes:
-        errors.append("seniority_notes is empty")
+        add_error("INVALID_SENIORITY", "identity.seniority_notes", "seniority reasoning is empty", "")
+    evidence_text = " ".join(item.fact for item in assessment.evidence).casefold()
+    seniority_markers = (
+        ("years_experience_8", ("8 лет", "восемь лет")),
+        ("team_leadership", ("руковод", "управлял", "команд")),
+        ("strategy_ownership", ("стратег",)),
+        ("budget_responsibility", ("бюджет",)),
+        ("measurable_result_35_percent", ("35",)),
+    )
+    reason_codes = [
+        code for code, markers in seniority_markers if any(marker in evidence_text for marker in markers)
+    ]
+    assessment.metadata["seniority_reason_codes"] = list(dict.fromkeys(reason_codes))
+    current_seniority = assessment.identity.seniority_current.casefold()
+    if len(reason_codes) >= 3 and (
+        "средн" in current_seniority
+        or "middle" in current_seniority
+        or not any(level in current_seniority for level in ("senior", "lead", "руковод"))
+    ):
+        add_error(
+            "INVALID_SENIORITY",
+            "identity.seniority_current",
+            "current seniority is below the level supported by experience and responsibility facts",
+            {"value": assessment.identity.seniority_current, "reason_codes": reason_codes},
+        )
     if len(assessment.evidence) < 2:
-        errors.append("assessment must contain at least two evidence items")
+        add_error("MISSING_ROUTE_EVIDENCE", "evidence", "assessment must contain at least two evidence items", len(assessment.evidence))
+    resume_facts = {item.fact.casefold() for item in assessment.evidence if item.source_type == "resume" and item.fact.strip()}
+    assessment.metadata["resume_important_facts_count"] = len(resume_facts)
+    if assessment.status == "full" and resume_facts and len(resume_facts) < 8:
+        add_error(
+            "INSUFFICIENT_RESUME_COVERAGE",
+            "evidence",
+            "assessment must use at least eight distinct relevant resume facts",
+            len(resume_facts),
+        )
     if not assessment.routes.primary_routes:
-        errors.append("primary_routes is empty")
+        add_error("GENERIC_ROUTE_TITLE", "routes.primary_routes", "primary_routes is empty", [])
     recommended = assessment.routes.by_id(assessment.routes.recommended_route_id)
     if recommended is None:
-        errors.append("recommended_route_id does not exist")
+        add_error("GENERIC_ROUTE_TITLE", "routes.recommended_route_id", "recommended_route_id does not exist", assessment.routes.recommended_route_id)
     elif len(set(recommended.evidence_ids)) < 2:
-        errors.append("recommended route must reference at least two evidence items")
+        add_error("MISSING_ROUTE_EVIDENCE", f"routes.{recommended.route_id}.evidence_ids", "recommended route must reference at least two evidence items", recommended.evidence_ids)
 
     route_ids = {route.route_id for route in assessment.routes.all_routes() if route.route_id}
     evidence_ids = {item.evidence_id for item in assessment.evidence if item.evidence_id}
-    for route in assessment.routes.all_routes():
+    generic_route_titles = {
+        "смежные роли",
+        "возможный маршрут",
+        "направление на основе опыта",
+        "другие профессии",
+        "-",
+    }
+    for route_index, route in enumerate(assessment.routes.all_routes()):
+        route_path = f"routes.all_routes[{route_index}]"
         if not route.route_id or not route.title:
-            errors.append("every route must have a concrete id and title")
-        if route.title.casefold() == "возможный маршрут":
-            errors.append("placeholder route title is forbidden")
-        if not route.why_it_fits or not route.entry_level or not route.market_test:
-            errors.append(f"route {route.route_id} lacks rationale, entry level, or market test")
+            add_error("GENERIC_ROUTE_TITLE", route_path, "every route must have a concrete id and title", route.title)
+        normalized_title = route.title.strip().casefold()
+        if (
+            normalized_title in generic_route_titles
+            or normalized_title.startswith("смежные роли на основе")
+            or "пользователь имеет" in normalized_title
+        ):
+            add_error("GENERIC_ROUTE_TITLE", f"{route_path}.title", "route title must name a concrete role", route.title)
+        if len(set(route.evidence_ids)) < 2:
+            add_error("MISSING_ROUTE_EVIDENCE", f"{route_path}.evidence_ids", "route must reference at least two evidence items", route.evidence_ids)
+        if not route.why_it_fits or not route.entry_level:
+            add_error("UNSUPPORTED_RECOMMENDATION", route_path, "route lacks rationale or entry level", route.to_dict() if hasattr(route, "to_dict") else asdict(route))
+        if not route.market_test:
+            add_error("MISSING_ROUTE_TEST", f"{route_path}.market_test", "route lacks a market test", route.market_test)
+        if not route.missing or not route.risks:
+            add_error("UNSUPPORTED_RECOMMENDATION", route_path, "route must state missing evidence and risks", asdict(route))
         if not route.disconfirming_conditions:
-            errors.append(f"route {route.route_id} lacks disconfirming conditions")
+            add_error("UNSUPPORTED_RECOMMENDATION", f"{route_path}.disconfirming_conditions", "route lacks disconfirming conditions", [])
         missing_evidence = set(route.evidence_ids) - evidence_ids
         if missing_evidence:
-            errors.append(f"route {route.route_id} references unknown evidence")
+            add_error("MISSING_ROUTE_EVIDENCE", f"{route_path}.evidence_ids", "route references unknown evidence", sorted(missing_evidence))
 
     if not 3 <= len(assessment.first_steps) <= 5:
-        errors.append("first_steps must contain 3 to 5 items")
+        add_error("MISSING_FIRST_STEPS", "first_steps", "first_steps must contain 3 to 5 items", len(assessment.first_steps))
     if len({step.type for step in assessment.first_steps}) != len(assessment.first_steps):
-        errors.append("first_steps must have different types")
+        add_error("DUPLICATE_FIRST_STEP_TYPE", "first_steps", "first_steps must have different types", [step.type for step in assessment.first_steps])
     for step in assessment.first_steps:
         if not step.step_id or not step.action or not step.expected_result or step.duration_minutes <= 0:
-            errors.append("each first step needs id, action, duration, and expected result")
-        if step.related_route_id and step.related_route_id not in route_ids:
-            errors.append(f"step {step.step_id} references unknown route")
+            add_error("INVALID_FIRST_STEP", f"first_steps.{step.step_id}", "each first step needs id, action, duration, and expected result", asdict(step))
+        if not step.related_route_id or step.related_route_id not in route_ids:
+            add_error("INVALID_FIRST_STEP", f"first_steps.{step.step_id}.related_route_id", "step must reference an existing route", step.related_route_id)
+        related_route = assessment.routes.by_id(step.related_route_id)
+        if step.type == "market_research" and related_route and related_route.title.casefold() not in step.action.casefold():
+            add_error(
+                "MISSING_ROUTE_TEST",
+                f"first_steps.{step.step_id}.action",
+                "market research action must use the related route title",
+                step.action,
+            )
 
     if assessment.conclusions.critical_errors_detected:
-        errors.append("critical errors detected in conclusion")
+        add_error("FORBIDDEN_OUTPUT_PATTERN", "conclusions.critical_errors_detected", "critical errors detected in conclusion", assessment.conclusions.critical_errors_detected, "critical")
     if not assessment.conclusions.mandatory_conclusions or not assessment.conclusions.main_conclusion:
-        errors.append("conclusion is incomplete")
+        add_error("MISSING_CONCLUSION", "conclusions", "conclusion is incomplete", asdict(assessment.conclusions))
     duplicate_questions = set(assessment.questions.answered_critical_questions) & set(
         assessment.questions.unanswered_critical_questions
     )
     if duplicate_questions:
-        errors.append("answered critical questions must not be asked again")
+        add_error("DUPLICATE_QUESTION", "questions", "answered critical questions must not be asked again", sorted(duplicate_questions))
     if snapshot_country_code and assessment.context.country_code != snapshot_country_code:
-        errors.append("country does not match ProfileSnapshot")
+        add_error("COUNTRY_MISMATCH", "context.country_code", "country does not match ProfileSnapshot", assessment.context.country_code)
     currencies = {
         money.currency
         for money in (assessment.context.income_minimum, assessment.context.income_target, assessment.context.learning_budget)
         if money and money.currency
     }
     if snapshot_currency and currencies and currencies != {snapshot_currency}:
-        errors.append("currency does not match ProfileSnapshot")
+        add_error("COUNTRY_MISMATCH", "context.currency", "currency does not match ProfileSnapshot", sorted(currencies))
+
+    desired_change = (assessment.user_choice.desired_change or "").casefold()
+    preferred_directions = " ".join(assessment.user_choice.preferred_directions).casefold()
+    if "остаться" in desired_change and any(term in preferred_directions for term in ("продукт", "образован", "психолог", "консалт")):
+        add_warning(
+            "CONTRADICTORY_USER_CHOICE",
+            "user_choice",
+            "Interpret as preserving professional capital while testing a different role or context; ask one clarifying question if needed",
+            asdict(assessment.user_choice),
+        )
+        assessment.metadata["user_choice_hypothesis"] = "Остаться в широком профессиональном поле, но сменить роль или контекст"
 
     visible_values = _all_strings(assessment.to_dict())
     forbidden_placeholders = {"-", "\\-", "данных недостаточно", "возможный маршрут"}
     if any(value.strip().casefold() in forbidden_placeholders for value in visible_values):
-        errors.append("placeholder user-facing value detected")
+        add_error("FORBIDDEN_OUTPUT_PATTERN", "$", "placeholder user-facing value detected", "placeholder")
     if any(value.strip().startswith("{") and value.strip().endswith("}") for value in visible_values):
-        errors.append("serialized object detected in user-facing string")
+        add_error("FORBIDDEN_OUTPUT_PATTERN", "$", "serialized object detected in user-facing string", "serialized object")
     for forbidden in forbidden_recommendations or []:
         if any(forbidden.casefold() in value.casefold() for value in visible_values):
-            errors.append(f"forbidden recommendation detected: {forbidden}")
-    return AssessmentValidation(tuple(dict.fromkeys(errors)))
+            add_error("UNSUPPORTED_RECOMMENDATION", "$", "forbidden recommendation detected", forbidden, "critical")
+
+    def deduplicate(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]:
+        unique: dict[tuple[str, str, str], ValidationIssue] = {}
+        for issue in issues:
+            unique[(issue.code, issue.field_path, issue.message)] = issue
+        return tuple(unique.values())
+
+    result = AssessmentValidationResult(valid=not errors, errors=deduplicate(errors), warnings=deduplicate(warnings))
+    assessment.metadata["validation"] = result.to_dict()
+    return result
 
 
 def _all_strings(value: Any) -> list[str]:

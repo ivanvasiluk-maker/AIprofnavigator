@@ -171,7 +171,8 @@ from keyboards import (
     telegram_link_keyboard,
     think_reminder_keyboard,
     first_step_selection_keyboard,
-    other_first_steps_keyboard,
+    selected_step_actions_keyboard,
+    assessment_recovery_keyboard,
 )
 from localization import t
 from openai_client import ai_client
@@ -183,6 +184,7 @@ from services.evidence_profile import (
     profile_ready_for_safe_conclusion,
 )
 from services.career_assessment import (
+    CareerAssessment,
     build_preliminary_assessment,
     career_assessment_from_dict,
     render_first_step_instruction,
@@ -7066,25 +7068,47 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             reply_markup=first_step_selection_keyboard(preliminary),
         )
         await message.answer(
-            "Это краткая предварительная карта. Полное заключение не прошло проверку, поэтому сломанный HTML не отправлен. "
-            "Профиль сохранён для повторной сборки.",
+            "Я сохранил ваши ответы и подготовил предварительную карту, но подробный документ пока не прошёл "
+            "техническую проверку. Вы можете пользоваться кратким выводом, а документ можно попробовать пересобрать.",
+            reply_markup=assessment_recovery_keyboard(),
         )
         return
 
+    validation = validate_career_assessment(
+        assessment,
+        snapshot_country_code=str(snapshot.get("country_code") or "") or None,
+        snapshot_currency=str(snapshot.get("currency") or "") or None,
+    )
+    validation.require_valid()
+    diagnostics = dict(assessment.metadata)
+    recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
+    generation_status = {
+        "repair": "ASSESSMENT_REPAIRED",
+        "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
+    }.get(recovered_by, "ASSESSMENT_READY")
     assessment_payload = assessment.to_dict()
     save_report_version(assessment_id, public_user_id, assessment_payload, session_id=session_id)
     await state.update_data(
         career_assessment=assessment_payload,
         final_report=assessment_payload,
         final_report_generated=True,
-        report_generation_status="ASSESSMENT_READY",
+        report_generation_status=generation_status,
+        assessment_diagnostics=diagnostics,
+        assessment_validation=validation.to_dict(),
         route_comparison=render_route_comparison(assessment),
     )
     await _track_event(
         message,
         state,
         "report_generated",
-        meta={"pipeline": "career_assessment_v2", "assessment_id": assessment_id},
+        meta={
+            "pipeline": "career_assessment_v2",
+            "assessment_id": assessment_id,
+            "profile_version": profile_version,
+            "recovered_by": recovered_by,
+            "validation": validation.to_dict(),
+            "diagnostics": diagnostics,
+        },
     )
 
     await message.answer(
@@ -7122,27 +7146,34 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     update_report_files(assessment_id, html_report_path=html_report_path)
 
 
-@router.callback_query(F.data.startswith("select_first_step:"))
+@router.callback_query(F.data.startswith("step_callback:"))
 async def select_first_step(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
-    parts = str(callback.data or "").split(":", 2)
+    callback_token = str(callback.data or "")
+    parts = callback_token.split(":", 3)
     payload = data.get("career_assessment")
-    if len(parts) != 3 or not isinstance(payload, dict):
+    if len(parts) != 4 or not isinstance(payload, dict):
         await callback.answer("Заключение не найдено", show_alert=True)
         return
-    _, assessment_id, step_id = parts
+    _, assessment_id, step_id, profile_version = parts
     assessment = career_assessment_from_dict(payload)
-    if assessment.assessment_id != assessment_id:
+    if assessment.assessment_id != assessment_id or assessment.profile_version != profile_version:
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    processed_callbacks = set(data.get("processed_step_callbacks") or [])
+    if callback_token in processed_callbacks:
+        await callback.answer("Этот шаг уже выбран")
         return
     try:
         instruction = render_first_step_instruction(assessment, step_id)
     except ValueError:
         await callback.answer("Шаг не найден", show_alert=True)
         return
+    processed_callbacks.add(callback_token)
     await state.update_data(
         career_assessment=assessment.to_dict(),
         selected_first_step_id=step_id,
+        processed_step_callbacks=sorted(processed_callbacks),
     )
     public_user_id = str(data.get("public_user_id") or "").strip()
     if public_user_id:
@@ -7154,7 +7185,7 @@ async def select_first_step(callback: CallbackQuery, state: FSMContext) -> None:
             html_report_path=str(data.get("html_report_path") or "").strip(),
         )
     if callback.message:
-        await callback.message.answer(instruction, reply_markup=other_first_steps_keyboard(assessment_id))
+        await callback.message.answer(instruction, reply_markup=selected_step_actions_keyboard(assessment, step_id))
     await callback.answer()
 
 
@@ -7162,14 +7193,22 @@ async def select_first_step(callback: CallbackQuery, state: FSMContext) -> None:
 async def show_first_steps(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     payload = data.get("career_assessment")
-    assessment_id = str(callback.data or "").partition(":")[2]
-    if not isinstance(payload, dict):
+    callback_token = str(callback.data or "")
+    parts = callback_token.split(":", 2)
+    if len(parts) != 3 or not isinstance(payload, dict):
         await callback.answer("Заключение не найдено", show_alert=True)
         return
+    _, assessment_id, profile_version = parts
     assessment = career_assessment_from_dict(payload)
-    if assessment.assessment_id != assessment_id:
+    if assessment.assessment_id != assessment_id or assessment.profile_version != profile_version:
         await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
         return
+    shown_menus = set(data.get("shown_step_menus") or [])
+    if callback_token in shown_menus:
+        await callback.answer("Варианты уже показаны")
+        return
+    shown_menus.add(callback_token)
+    await state.update_data(shown_step_menus=sorted(shown_menus))
     if callback.message:
         await callback.message.answer(
             "С какого шага хотите начать?",
@@ -7178,15 +7217,84 @@ async def show_first_steps(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+def _assessment_from_step_callback(data: dict, callback_data: str, expected_parts: int) -> tuple[CareerAssessment | None, list[str]]:
+    parts = callback_data.split(":", expected_parts - 1)
+    payload = data.get("career_assessment")
+    if len(parts) != expected_parts or not isinstance(payload, dict):
+        return None, parts
+    assessment = career_assessment_from_dict(payload)
+    if assessment.assessment_id != parts[1] or assessment.profile_version != parts[-1]:
+        return None, parts
+    return assessment, parts
+
+
+@router.callback_query(F.data.startswith("step_done:"))
+async def mark_first_step_done(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    assessment, parts = _assessment_from_step_callback(data, str(callback.data or ""), 4)
+    if assessment is None:
+        await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    step_id = parts[2]
+    completed = set(data.get("completed_first_step_ids") or [])
+    completed.add(step_id)
+    await state.update_data(completed_first_step_ids=sorted(completed))
+    await callback.answer("Шаг отмечен выполненным")
+
+
+@router.callback_query(F.data.startswith("step_simplify:"))
+async def simplify_first_step(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    assessment, parts = _assessment_from_step_callback(data, str(callback.data or ""), 4)
+    if assessment is None:
+        await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    step = next((item for item in assessment.first_steps if item.step_id == parts[2]), None)
+    if step is None:
+        await callback.answer("Шаг не найден", show_alert=True)
+        return
+    if callback.message:
+        await callback.message.answer(
+            f"Упрощённый вариант на 10 минут:\n{step.action}\n\nОстановитесь после первого конкретного результата.",
+            reply_markup=selected_step_actions_keyboard(assessment, step.step_id),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("step_back:"))
+async def return_to_assessment_map(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    assessment, _ = _assessment_from_step_callback(data, str(callback.data or ""), 3)
+    if assessment is None:
+        await callback.answer("Это действие относится к другой версии заключения", show_alert=True)
+        return
+    if callback.message:
+        await callback.message.answer(render_telegram_map(assessment))
+    await callback.answer()
+
+
 @router.message(CareerFlow.REPORT_GENERATION_FAILED, F.text)
 async def handle_report_generation_failed(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
     action = (message.text or "").strip().lower()
-    if "повтор" in action or "сформ" in action or action == "retry":
+    if "повтор" in action or "сформ" in action or "пересоб" in action or action == "retry":
         await state.set_state(CareerFlow.REPORT_READINESS_CHECK)
         await message.answer("Повторяю сборку из сохранённых ответов.", reply_markup=ReplyKeyboardRemove())
         await _build_and_send_report(message, state, lang)
+        return
+    payload = data.get("career_assessment")
+    assessment = career_assessment_from_dict(payload) if isinstance(payload, dict) else None
+    if "маршрут" in action and assessment:
+        await message.answer(render_route_comparison(assessment))
+        return
+    if "первый шаг" in action and assessment:
+        await message.answer("С какого шага хотите начать?", reply_markup=first_step_selection_keyboard(assessment))
+        return
+    if "уточнить цель" in action:
+        await message.answer(
+            "Правильно ли я понял: вы хотите сохранить маркетинговый опыт, но уйти от нынешнего формата работы?"
+        )
         return
     if _is_restart_intent(action):
         await state.clear()

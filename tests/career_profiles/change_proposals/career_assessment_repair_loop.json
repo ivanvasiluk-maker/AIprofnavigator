@@ -1,0 +1,31 @@
+{
+  "change_id": "CAREER_ASSESSMENT_REPAIR_LOOP_2026_08_16",
+  "source_error_codes": [
+    "RAW_USER_SUMMARY_AS_TITLE",
+    "INVALID_SENIORITY",
+    "GENERIC_ROUTE_TITLE",
+    "INSUFFICIENT_RESUME_COVERAGE",
+    "MISSING_ROUTE_EVIDENCE",
+    "MISSING_ROUTE_TEST"
+  ],
+  "affected_profiles_expected_to_improve": [
+    "Profiles with invalid structured CareerAssessment output",
+    "Profiles with substantial resume evidence",
+    "Profiles with a preserve-experience versus change-role choice conflict"
+  ],
+  "profiles_at_regression_risk": [
+    "Profiles with short or absent resumes",
+    "Profiles using long generated route or step identifiers"
+  ],
+  "universal_rule_changed": "Architecture rule: failed CareerAssessment validation must preserve structured diagnostics, attempt bounded fact-only repair, and use a ProfileSnapshot-derived deterministic fallback before report delivery.",
+  "files_to_change": [
+    "services/career_assessment.py",
+    "openai_client.py",
+    "handlers/career.py",
+    "keyboards.py",
+    "tests/test_career_assessment.py"
+  ],
+  "feature_flag": "career_assessment_v2 (LEGACY_CAREER_REPORT_ENABLED=false)",
+  "rollback_condition": "Rollback if repair or fallback accepts unsupported facts, lowers validated seniority, breaks fail-closed HTML delivery, or causes CareerAssessment acceptance tests to fail.",
+  "acceptance_condition": "Tests must reproducibly prove structured validation codes, two bounded repair attempts, ProfileSnapshot fallback, resume coverage >= 8, route-title-based market steps, callback idempotency, and repair-to-HTML REPORT_READY delivery."
+}

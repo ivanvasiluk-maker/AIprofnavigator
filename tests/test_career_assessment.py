@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 from config import settings
 from handlers.career import _build_and_send_career_assessment
-from keyboards import first_step_selection_keyboard
+from keyboards import first_step_selection_keyboard, selected_step_actions_keyboard
 from openai_client import CareerOpenAIClient
 from services.career_assessment import (
     CAREER_ASSESSMENT_SCHEMA,
@@ -21,6 +21,7 @@ from services.career_assessment import (
     validate_career_assessment,
 )
 from services.runtime_isolation import assert_expected_profiles_not_loaded
+from states import CareerFlow
 from tests.career_profiles.evaluators.assessment_evaluator import evaluate_career_assessment
 from utils.reporting import generate_assessment_html_file
 
@@ -30,7 +31,16 @@ def profile_10_assessment_payload() -> dict:
         {"evidence_id": "e1", "fact": "Восемь лет в IT-маркетинге", "source_type": "history", "source_reference": "story:1"},
         {"evidence_id": "e2", "fact": "Исследовал рынок и клиентов для запусков", "source_type": "resume", "source_reference": "resume:experience"},
         {"evidence_id": "e3", "fact": "Управлял маркетинговой командой", "source_type": "resume", "source_reference": "resume:leadership"},
-        {"evidence_id": "e4", "fact": "Создавал курсы и вебинары", "source_type": "answer", "source_reference": "answer:education"},
+        {"evidence_id": "e4", "fact": "Отвечал за маркетинговую стратегию и бюджет", "source_type": "resume", "source_reference": "resume:strategy"},
+        {"evidence_id": "e5", "fact": "Проводил интервью с клиентами", "source_type": "resume", "source_reference": "resume:interviews"},
+        {"evidence_id": "e6", "fact": "Работал с B2B-продуктами", "source_type": "resume", "source_reference": "resume:b2b"},
+        {"evidence_id": "e7", "fact": "Разрабатывал позиционирование продуктов", "source_type": "resume", "source_reference": "resume:positioning"},
+        {"evidence_id": "e8", "fact": "Создавал образовательный контент и онлайн-курсы", "source_type": "resume", "source_reference": "resume:education"},
+        {"evidence_id": "e9", "fact": "Проводил вебинары", "source_type": "resume", "source_reference": "resume:webinars"},
+        {"evidence_id": "e10", "fact": "Увеличил входящие заявки на 35 процентов", "source_type": "resume", "source_reference": "resume:result"},
+        {"evidence_id": "e11", "fact": "Прошёл Product Management Fundamentals", "source_type": "resume", "source_reference": "resume:education-product"},
+        {"evidence_id": "e12", "fact": "Изучал Customer Development", "source_type": "resume", "source_reference": "resume:education-custdev"},
+        {"evidence_id": "e13", "fact": "Английский язык B2", "source_type": "resume", "source_reference": "resume:language"},
     ]
     def route(route_id: str, title: str, category: str, evidence_ids: list[str]) -> dict:
         return {
@@ -83,9 +93,10 @@ def profile_10_assessment_payload() -> dict:
         },
         "first_steps": [
             {"step_id": "clarify", "title": "Быстрое прояснение", "purpose": "Отделить желаемые функции от условий текущей работы.", "action": "Выпишите три функции, которые хотите сохранить, и три, от которых хотите отказаться.", "expected_result": "Два списка по три функции.", "duration_minutes": 15, "related_route_id": "pm-marketing", "type": "quick_action"},
-            {"step_id": "market", "title": "Проверка рынка", "purpose": "Сравнить три смежных направления.", "action": "Найдите по пять вакансий Product Marketing, Product Discovery и EdTech Product и отметьте повторяющиеся требования.", "expected_result": "Таблица требований по трём направлениям.", "duration_minutes": 45, "related_route_id": "pm-marketing", "type": "market_research"},
+            {"step_id": "market", "title": "Проверка рынка", "purpose": "Сравнить три смежных направления.", "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.", "expected_result": "Таблица требований по двум направлениям.", "duration_minutes": 45, "related_route_id": "pm-marketing", "type": "market_research"},
             {"step_id": "case", "title": "Портфолио", "purpose": "Показать продуктовую часть опыта.", "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.", "expected_result": "Один проверяемый продуктово-маркетинговый кейс.", "duration_minutes": 60, "related_route_id": "pm-marketing", "type": "portfolio"},
             {"step_id": "contact", "title": "Профессиональный контакт", "purpose": "Проверить кейс у специалиста.", "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.", "expected_result": "Одна предметная обратная связь.", "duration_minutes": 20, "related_route_id": "pm-marketing", "type": "networking"},
+            {"step_id": "consulting-test", "title": "Проверка консультирования", "purpose": "Проверить спрос без увольнения.", "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.", "expected_result": "Один подтверждающий или опровергающий сигнал спроса.", "duration_minutes": 30, "related_route_id": "consulting", "type": "clarification"},
         ],
     }
 
@@ -97,6 +108,20 @@ class CareerAssessmentTest(unittest.TestCase):
     def test_profile_10_is_valid(self) -> None:
         result = validate_career_assessment(self.assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(result.is_valid, result.errors)
+
+    def test_validation_returns_structured_codes_and_field_paths(self) -> None:
+        payload = profile_10_assessment_payload()
+        payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге и управлении командой."]
+        payload["identity"]["seniority_current"] = "средний уровень seniority в маркетинге"
+        payload["routes"]["primary_routes"][0]["title"] = "Смежные роли"
+        invalid = career_assessment_from_dict(payload)
+        result = validate_career_assessment(invalid, snapshot_country_code="LT", snapshot_currency="EUR")
+        issues = {issue.code: issue for issue in result.errors}
+        self.assertFalse(result.valid)
+        self.assertEqual(issues["RAW_USER_SUMMARY_AS_TITLE"].field_path, "identity.professional_core[0]")
+        self.assertEqual(issues["INVALID_SENIORITY"].field_path, "identity.seniority_current")
+        self.assertEqual(issues["GENERIC_ROUTE_TITLE"].actual_value, "Смежные роли")
+        self.assertEqual(invalid.metadata["resume_important_facts_count"], 12)
 
     def test_all_renderers_use_same_assessment(self) -> None:
         telegram = render_telegram_map(self.assessment)
@@ -112,7 +137,7 @@ class CareerAssessmentTest(unittest.TestCase):
         instruction = render_first_step_instruction(self.assessment, "market")
         self.assertIn("45 минут", instruction)
         self.assertEqual(self.assessment.selected_first_step_id, "market")
-        self.assertEqual(len(self.assessment.first_steps), 4)
+        self.assertEqual(len(self.assessment.first_steps), 5)
 
     def test_html_filename_and_content_use_same_assessment_id(self) -> None:
         with TemporaryDirectory() as output_dir:
@@ -125,9 +150,14 @@ class CareerAssessmentTest(unittest.TestCase):
         callback_values = [row[0].callback_data for row in keyboard.inline_keyboard]
         self.assertEqual(
             callback_values[0],
-            "select_first_step:assessment-profile-10:clarify",
+            "step_callback:assessment-profile-10:clarify:1",
         )
         self.assertTrue(all(value and len(value.encode("utf-8")) <= 64 for value in callback_values))
+        selected_keyboard = selected_step_actions_keyboard(self.assessment, "clarify")
+        self.assertEqual(
+            [row[0].text for row in selected_keyboard.inline_keyboard],
+            ["Показать другие варианты", "Отметить выполненным", "Сделать проще", "Вернуться к карте"],
+        )
 
     def test_legacy_report_is_disabled_by_default(self) -> None:
         self.assertFalse(settings.legacy_career_report_enabled)
@@ -226,6 +256,72 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assessment.assessment_id, "assessment-profile-10")
         client._run_json.assert_awaited_once()
 
+    async def test_invalid_assessment_is_repaired_and_diagnostics_are_preserved(self) -> None:
+        client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
+        invalid_payload = profile_10_assessment_payload()
+        invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
+        valid_payload = profile_10_assessment_payload()
+        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload])  # type: ignore[method-assign]
+        assessment = await client.build_career_assessment(
+            {"country_code": "LT", "currency": "EUR"},
+            assessment_id="assessment-profile-10",
+            session_id="session-profile-10",
+            profile_version="1",
+        )
+        self.assertEqual(client._run_json.await_count, 2)
+        self.assertEqual(assessment.metadata["recovered_by"], "repair")
+        self.assertEqual(assessment.metadata["successful_repair_attempt"], 1)
+        self.assertEqual(
+            assessment.metadata["validation_before_repair"]["errors"][0]["code"],
+            "RAW_USER_SUMMARY_AS_TITLE",
+        )
+        self.assertTrue(assessment.metadata["repair_attempts"][0]["validation"]["valid"])
+
+    async def test_two_failed_repairs_use_fact_only_deterministic_fallback(self) -> None:
+        client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
+        invalid_payload = profile_10_assessment_payload()
+        invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
+        invalid_payload["routes"]["primary_routes"][0]["title"] = "Смежные роли"
+        client._run_json = AsyncMock(side_effect=[invalid_payload, invalid_payload, invalid_payload])  # type: ignore[method-assign]
+        resume_analysis = {
+            "tasks": [
+                "8 лет в IT-маркетинге; руководитель отдела и управлял командой",
+                "маркетинговая стратегия и бюджет",
+                "исследования рынка, клиентов и конкурентов; интервью с клиентами",
+                "B2B-продукты и позиционирование",
+                "образовательный контент, онлайн-курсы и вебинары",
+            ],
+            "achievements": ["рост входящих заявок на 35 процентов"],
+            "education": ["Product Management Fundamentals", "Customer Development"],
+            "languages": ["английский B2"],
+        }
+        assessment = await client.build_career_assessment(
+            {
+                "country_code": "LT",
+                "country_name": "Литва",
+                "currency": "EUR",
+                "career_goal": "Остаться в текущей профессии",
+                "story_text": "Рассматриваю продукт, образование и консультирование без увольнения.",
+            },
+            assessment_id="assessment-profile-10",
+            session_id="session-profile-10",
+            profile_version="1",
+            resume_analysis=resume_analysis,
+        )
+        validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
+        self.assertTrue(validation.valid, validation.errors)
+        self.assertEqual(client._run_json.await_count, 3)
+        self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
+        self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
+        self.assertEqual(assessment.identity.seniority_current, "Senior/lead в маркетинге")
+        self.assertEqual(
+            set(assessment.metadata["seniority_reason_codes"]),
+            {"years_experience_8", "team_leadership", "strategy_ownership", "budget_responsibility", "measurable_result_35_percent"},
+        )
+        self.assertEqual(assessment.routes.by_id(assessment.routes.recommended_route_id).title, "Product Marketing Manager")
+        self.assertEqual(len(assessment.first_steps), 5)
+        self.assertIn("сохранить маркетинговый опыт", assessment.questions.unanswered_critical_questions[0])
+
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
         class State:
             def __init__(self, payload: dict) -> None:
@@ -253,6 +349,44 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         build.assert_not_awaited()
         self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REUSED")
         self.assertTrue(state.data["final_report_generated"])
+
+    async def test_successful_repair_renders_html_and_sets_report_ready(self) -> None:
+        class State:
+            def __init__(self) -> None:
+                self.data = {
+                    "public_user_id": "public-test-user",
+                    "session_id": "session-profile-10",
+                    "assessment_id": "assessment-profile-10",
+                    "profile_version": "1",
+                }
+                self.current_state = None
+
+            async def update_data(self, **kwargs) -> None:
+                self.data.update(kwargs)
+
+            async def set_state(self, value) -> None:
+                self.current_state = value
+
+        state = State()
+        message = type("MessageStub", (), {"answer": AsyncMock(), "answer_document": AsyncMock()})()
+        repaired = career_assessment_from_dict(profile_10_assessment_payload())
+        repaired.metadata["recovered_by"] = "repair"
+        with TemporaryDirectory() as output_dir:
+            html_path = Path(output_dir) / "career_assessment_assessment-profile-10.html"
+            html_path.write_text(render_assessment_html(repaired), encoding="utf-8")
+            with unittest.mock.patch("handlers.career._build_profile_snapshot", return_value={"country_code": "LT", "country_name": "Литва", "currency": "EUR", "ready_for_report": True}), \
+                 unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=True), \
+                 unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=repaired)), \
+                 unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path), \
+                 unittest.mock.patch("handlers.career._track_event", new=AsyncMock()), \
+                 unittest.mock.patch("handlers.career.save_profile_version"), \
+                 unittest.mock.patch("handlers.career.save_report_version"), \
+                 unittest.mock.patch("handlers.career.update_report_files"):
+                await _build_and_send_career_assessment(message, state, "ru", state.data)
+        self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
+        self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REPAIRED")
+        self.assertTrue(state.data["final_report_generated"])
+        message.answer_document.assert_awaited_once()
 
 
 class RuntimeIsolationTest(unittest.TestCase):
