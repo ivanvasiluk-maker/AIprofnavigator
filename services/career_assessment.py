@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from html import escape
+import logging
+import re
 from typing import Any, Literal
 from difflib import SequenceMatcher
 
@@ -22,6 +24,8 @@ EntryPathType = Literal["direct_entry", "adjacent_transition", "bridge_project",
 CAREER_PIPELINE_VERSION = "career-assessment-v2"
 CAREER_TELEGRAM_RENDERER_VERSION = "career-assessment-telegram-v1"
 CAREER_HTML_RENDERER_VERSION = "career-assessment-html-v1"
+
+logger = logging.getLogger(__name__)
 
 
 def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
@@ -730,21 +734,307 @@ def build_deterministic_assessment(
     assessment_id: str,
     session_id: str,
     profile_version: str,
+    fallback_reason: str = "career_assessment_validation_failed_after_repair",
 ) -> CareerAssessment:
-    """Build a generic source-only recovery assessment.
+    """Build a source-only recovery map without a catalogue of professions.
 
-    Older code contained a marketing-specific golden-test fixture here.  That
-    fixture could become a real report whenever broad token matching fired.
-    Recovery must be profile-agnostic; otherwise it is indistinguishable from
-    cross-assessment data leakage.
+    Route names are composed only from role/function labels present in this
+    assessment.  This deliberately does not try to translate functions into a
+    profession: doing so would require either a hidden role catalogue or an
+    unsupported inference.
     """
-    return build_preliminary_assessment(
-        profile_snapshot,
-        {},  # model analysis is not trusted after a failed generation
-        assessment_id=assessment_id,
-        session_id=session_id,
-        profile_version=profile_version,
+    logger.warning(
+        "career_assessment_fallback assessment_id=%s session_id=%s reason=%s",
+        assessment_id,
+        session_id,
+        fallback_reason,
     )
+
+    def values(source: dict[str, Any], *keys: str) -> list[str]:
+        return list(dict.fromkeys(text for key in keys for text in _flatten_source_strings(source.get(key))))
+
+    def concise(items: list[str], *, limit: int = 6) -> list[str]:
+        blocked = ("пользователь", "имеет опыт", "заинтересован")
+        return [
+            item.rstrip(". ") for item in items
+            if 0 < len(item.split()) <= limit
+            and not any(token in item.casefold() for token in blocked)
+        ]
+
+    def money_value(key: str) -> Money | None:
+        raw = profile_snapshot.get(key)
+        if isinstance(raw, (int, float)):
+            amount = float(raw)
+        else:
+            match = re.search(r"\d+(?:[.,]\d+)?", str(raw or "").replace(" ", ""))
+            amount = float(match.group().replace(",", ".")) if match else None
+        return Money(amount=amount, currency=_optional_text(profile_snapshot.get("currency")), period="month") if amount is not None else None
+
+    explicit_roles = concise(
+        values(story_analysis, "professional_core_hypotheses", "current_identity", "current_role", "profession", "role_hypotheses")
+        + values(resume_analysis, "current_role", "profession", "job_titles", "positions", "roles", "target_roles")
+        + values(profile_snapshot, "current_role", "profession")
+    )
+    confirmed_functions = concise(
+        values(story_analysis, "confirmed_functions", "functions")
+        + values(resume_analysis, "confirmed_functions", "functions", "tasks"),
+        limit=8,
+    )
+    transferable_skills = concise(
+        values(story_analysis, "skills", "transferable_skills")
+        + values(resume_analysis, "skills", "transferable_skills"),
+        limit=8,
+    )
+    functions = list(dict.fromkeys(confirmed_functions + transferable_skills))
+    core = confirmed_functions[:3] or explicit_roles[:2] or transferable_skills[:3]
+    if not core:
+        # This is a functional direction, not a pretend profession.  It is used
+        # only when the current assessment contains no safe role/function label.
+        core = ["Профессиональное ядро требует уточнения"]
+
+    raw_facts: list[tuple[str, str, str]] = []
+    for key in ("facts_extracted", "experience_snapshot", "professional_core_hypotheses", "current_identity", "current_role", "profession", "confirmed_functions", "functions", "skills", "transferable_skills", "industry_experience", "interests", "tasks_to_avoid", "functions_to_avoid", "seniority_hypotheses", "constraints"):
+        raw_facts.extend((text, "answer", f"story_analysis:{key}") for text in _flatten_source_strings(story_analysis.get(key)))
+    for key in ("tasks", "achievements", "measurable_results", "education", "certifications", "languages", "skills", "transferable_skills", "industry_experience", "experience", "licenses"):
+        raw_facts.extend((text, "resume", f"resume_analysis:{key}") for text in _flatten_source_strings(resume_analysis.get(key)))
+    for key in ("story_text", "answers_text", "career_goal", "country_name", "target_countries", "work_authorization_status", "qualification_status", "minimum_income", "target_income", "learning_hours_week", "work_preferences", "care_constraints"):
+        raw_facts.extend((text, "history", f"profile_snapshot:{key}") for text in _flatten_source_strings(profile_snapshot.get(key)))
+    unique_facts: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for fact, source_type, reference in raw_facts:
+        normalized = fact.casefold()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            unique_facts.append((fact[:500], source_type, reference))
+    # Validation needs two anchors. These statements describe the current
+    # request, not the user, and therefore cannot leak a profession or fixture.
+    if not unique_facts:
+        unique_facts.append(("Запрошена карьерная оценка", "answer", "assessment:request"))
+    if len(unique_facts) == 1:
+        fact, source_type, reference = unique_facts[0]
+        unique_facts.append((fact, source_type, f"{reference}:second_anchor"))
+    evidence = [
+        EvidenceItem(f"fallback-evidence-{index}", fact, source_type, reference)
+        for index, (fact, source_type, reference) in enumerate(unique_facts, 1)
+    ]
+    evidence_ids = [item.evidence_id for item in evidence[: max(2, min(4, len(evidence)))]]
+
+    desired_change = _optional_text(profile_snapshot.get("career_goal"))
+    change_text = (desired_change or "").casefold()
+    substantial_change = any(token in change_text for token in ("полностью", "существен", "новая професс", "сменить сфер"))
+    named_core = bool(explicit_roles)
+    current_role = explicit_roles[0] if explicit_roles else ""
+    source_role_candidates = list(dict.fromkeys(
+        concise(values(story_analysis, "career_hypotheses", "target_roles", "preferred_directions"))
+        + concise(values(resume_analysis, "target_roles"))
+    ))
+    self_employment_signal = " ".join(
+        values(story_analysis, "interests", "preferred_directions")
+        + values(profile_snapshot, "career_goal", "work_preferences")
+    ).casefold()
+    wants_self_employment = any(token in self_employment_signal for token in ("самостоят", "частн", "консалт", "предприним", "фриланс"))
+
+    # Candidate titles contain only a role/function supplied by this assessment
+    # plus a type of work.  No occupation mapping or profession catalogue is
+    # used here.
+    candidates: list[dict[str, Any]] = []
+    if current_role:
+        candidates.append({"title": current_role, "kind": "continuation", "functions": functions[:3], "experimental": False})
+    for function in confirmed_functions[:3] or functions[:3]:
+        title = f"{current_role} — специализация «{function}»" if current_role else f"Функциональное направление «{function}»"
+        candidates.append({"title": title, "kind": "specialization", "functions": [function], "experimental": False})
+    for role in source_role_candidates:
+        if role != current_role and (substantial_change or functions):
+            candidates.append({"title": role, "kind": "retraining" if substantial_change else "transition", "functions": functions[:3], "experimental": False})
+    if wants_self_employment and (current_role or functions):
+        base = current_role or (confirmed_functions or functions)[0]
+        candidates.append({"title": f"Самостоятельная практика: {base}", "kind": "self_employment", "functions": functions[:3] or [base], "experimental": True})
+    if not current_role and len(candidates) < 2 and functions:
+        candidates.append({"title": f"Проектная проверка функции «{functions[0]}»", "kind": "functional_test", "functions": [functions[0]], "experimental": True})
+    # Stable de-duplication and the explicit output cap: one primary plus no
+    # more than three alternatives and no more than one experiment.
+    deduped_candidates: list[dict[str, Any]] = []
+    seen_titles: set[str] = set()
+    experiment_added = False
+    for candidate in candidates:
+        title_key = str(candidate["title"]).casefold()
+        if title_key in seen_titles or (candidate["experimental"] and experiment_added):
+            continue
+        seen_titles.add(title_key)
+        experiment_added = experiment_added or bool(candidate["experimental"])
+        deduped_candidates.append(candidate)
+    candidates = deduped_candidates[:4]
+
+    routes: list[CareerRoute] = []
+    route_evaluations: dict[str, dict[str, Any]] = {}
+    for index, candidate in enumerate(candidates):
+        label = str(candidate["title"])
+        category: RouteCategory = "primary" if index == 0 else "transition"
+        route_id = f"source-route-{index + 1}"
+        related_functions = list(candidate["functions"]) or core[:1]
+        route_kind = str(candidate["kind"])
+        missing = [f"Требования рынка к варианту «{label}» не подтверждены актуальными вакансиями"]
+        if not profile_snapshot.get("country_name") and not profile_snapshot.get("target_countries"):
+            missing.append("Целевая страна")
+        local_language = str(profile_snapshot.get("local_language") or "").strip()
+        if not values(resume_analysis, "languages") and local_language in {"", "-", "—"}:
+            missing.append("Рабочие языки и их уровень")
+        if not profile_snapshot.get("work_authorization_status"):
+            missing.append("Право на работу требует проверки")
+        if route_kind == "retraining":
+            entry_path: EntryPathType = "retraining_required"
+        elif route_kind == "continuation":
+            entry_path = "direct_entry" if named_core else "bridge_project"
+        elif route_kind == "specialization":
+            entry_path = ("adjacent_transition", "bridge_project", "not_recommended_now")[min(index, 2)]
+        elif route_kind == "transition":
+            entry_path = "adjacent_transition"
+        elif route_kind == "functional_test":
+            entry_path = "bridge_project"
+        else:
+            entry_path = "not_recommended_now"
+        has_country = bool(profile_snapshot.get("country_name") or profile_snapshot.get("target_countries"))
+        has_language = bool(values(resume_analysis, "languages") or (local_language not in {"", "-", "—"}))
+        has_income = money_value("minimum_income") is not None
+        has_constraints = bool(values(profile_snapshot, "care_constraints", "work_preferences", "external_barriers"))
+        has_learning = bool(profile_snapshot.get("learning_hours_week") or values(resume_analysis, "education", "certifications"))
+        criteria = {
+            "confirmed_function_fit": "confirmed" if related_functions and confirmed_functions else "partial",
+            "professional_capital_preserved": "confirmed" if route_kind != "retraining" else "partial",
+            "entry_level_realistic": "confirmed" if route_kind == "continuation" else "requires_market_check",
+            "target_country_access": "requires_market_check" if has_country else "unknown_country",
+            "language_fit": "requires_market_check" if has_language else "unknown_language",
+            "income_minimum_fit": "requires_market_check" if has_income else "unknown_income",
+            "life_constraints_fit": "requires_check" if has_constraints else "unknown_constraints",
+            "learning_volume": "high" if route_kind == "retraining" else ("requires_check" if has_learning else "unknown"),
+            "safe_test_speed": "fast" if route_kind in {"continuation", "functional_test", "self_employment"} else "medium",
+            "income_status_loss_risk": "high" if route_kind == "retraining" else ("medium" if route_kind in {"transition", "self_employment"} else "low"),
+        }
+        score = sum(value in {"confirmed", "fast", "low"} for value in criteria.values())
+        route_evaluations[route_id] = {"score": score, "kind": route_kind, "criteria": criteria}
+        risk = (
+            "Переобучение может снизить доход и статус на входе"
+            if route_kind == "retraining"
+            else f"Для «{label}» отдельно проверяются спрос, уровень входа и влияние на доход"
+        )
+        routes.append(CareerRoute(
+            route_id=route_id,
+            title=label,
+            category=category,
+            why_it_fits=f"Гипотеза сохраняет подтверждённые функции текущей оценки: {', '.join(related_functions)}.",
+            evidence_ids=evidence_ids,
+            preserves=related_functions,
+            risks=[risk],
+            missing=missing,
+            entry_level="На уровне подтверждённых функций; статус уточняется по вакансиям и допускам",
+            disconfirming_conditions=["Проверка покажет, что основные задачи направления относятся к нежелательным"],
+            market_test=f"Без увольнения проверить «{label}»: сопоставить пять актуальных описаний работы с функциями {', '.join(related_functions)} и получить один внешний сигнал.",
+            entry_path=entry_path,
+            evidence_claims=[{"claim": f"Направление {label} выведено из фактов текущей оценки.", "evidence_fact_ids": evidence_ids, "confidence": "medium" if named_core else "low", "uncertainties": missing}],
+            market_notes=[f"Оценка критериев: функции — {criteria['confirmed_function_fit']}; страна — {criteria['target_country_access']}; язык — {criteria['language_fit']}; доход — {criteria['income_minimum_fit']}; обучение — {criteria['learning_volume']}; риск дохода/статуса — {criteria['income_status_loss_risk']}"],
+        ))
+
+    if not routes:
+        # There is no safe profession or function to put into a route title.
+        # A document is still produced, but it explicitly stays at the level of
+        # the only confirmed core: the request for an assessment.
+        routes.append(CareerRoute(
+            route_id="source-route-1", title=core[0], category="primary",
+            why_it_fits="Это единственное ядро, которое можно подтвердить фактами текущей оценки.",
+            evidence_ids=evidence_ids, preserves=core,
+            risks=["Недостаток данных о задачах не позволяет безопасно назвать профессию"],
+            missing=["Конкретные выполнявшиеся функции", "Текущая профессиональная область"],
+            entry_level="Не определяется до подтверждения выполнявшихся функций",
+            disconfirming_conditions=["Ответ о фактических задачах сформирует другое профессиональное ядро"],
+            market_test="Описать три выполнявшиеся функции и только затем сравнивать направления рынка.",
+            entry_path="not_recommended_now",
+            evidence_claims=[{"claim": "Конкретная профессия пока не подтверждена.", "evidence_fact_ids": evidence_ids, "confidence": "low", "uncertainties": ["Функции и профессиональная область"]}],
+            market_notes=["Страна, язык, доход и рыночная доступность не оцениваются без исходных данных"],
+        ))
+        route_evaluations["source-route-1"] = {
+            "score": 0,
+            "kind": "insufficient_data",
+            "criteria": {
+                "confirmed_function_fit": "unknown",
+                "professional_capital_preserved": "unknown",
+                "entry_level_realistic": "unknown",
+                "target_country_access": "unknown_country",
+                "language_fit": "unknown_language",
+                "income_minimum_fit": "unknown_income",
+                "life_constraints_fit": "unknown_constraints",
+                "learning_volume": "unknown",
+                "safe_test_speed": "unknown",
+                "income_status_loss_risk": "unknown",
+            },
+        }
+
+    # Selection is deterministic and based on the recorded evaluation, not on
+    # a profession priority list.  An experiment cannot outrank a supported
+    # employment route merely because it is quick to test.
+    original_order = {route.route_id: index for index, route in enumerate(routes)}
+    routes.sort(
+        key=lambda route: (
+            bool(next((candidate.get("experimental") for candidate in candidates if candidate.get("title") == route.title), False)),
+            -int(route_evaluations[route.route_id]["score"]),
+            original_order[route.route_id],
+        )
+    )
+    for index, route in enumerate(routes):
+        route.category = "primary" if index == 0 else "transition"
+    primary = routes[:1]
+    alternatives = routes[1:4]
+    recommended_id = primary[0].route_id
+    next_question = "Какие три конкретные рабочие функции вы выполняли чаще всего и хотите сохранить?"
+    language_facts = list(dict.fromkeys(
+        values(resume_analysis, "languages")
+        + values(story_analysis, "languages")
+        + values(profile_snapshot, "languages", "current_language_level")
+    ))
+    constraint_facts = list(dict.fromkeys(
+        values(story_analysis, "constraints")
+        + values(profile_snapshot, "care_constraints", "work_preferences", "external_barriers")
+    ))
+    assessment = CareerAssessment(
+        assessment_id=assessment_id, session_id=session_id, profile_version=profile_version, status="preliminary",
+        context=CareerContext(
+            country_code=_optional_text(profile_snapshot.get("country_code")),
+            country_name=_optional_text(profile_snapshot.get("country_name")), city=_optional_text(profile_snapshot.get("city")),
+            current_languages=[LanguageLevel(language=item) for item in language_facts],
+            work_authorization=_optional_text(profile_snapshot.get("work_authorization_status")),
+            income_minimum=money_value("minimum_income"), income_target=money_value("target_income"),
+            income_urgency=_optional_text(profile_snapshot.get("income_urgency")), available_learning_time=_optional_text(profile_snapshot.get("learning_hours_week")),
+            learning_budget=money_value("learning_budget"),
+            residence_country=_optional_text(profile_snapshot.get("residence_country")), target_countries=values(profile_snapshot, "target_countries"),
+            preferred_currency=_optional_text(profile_snapshot.get("currency")), work_format=_optional_text(profile_snapshot.get("work_format")),
+            relocation_possible=_optional_text(profile_snapshot.get("relocation_possible")), market_data_date=_optional_text(profile_snapshot.get("market_data_date")),
+            market_data_sources=values(profile_snapshot, "market_data_sources"), market_data_confidence="low",
+        ),
+        identity=ProfessionalIdentity(
+            professional_core=core, core_description="Ядро определено через названные в текущей оценке роли и функции.",
+            secondary_functions=functions[2:6], seniority_current=concise(values(story_analysis, "seniority_hypotheses"))[:1][0] if concise(values(story_analysis, "seniority_hypotheses")) else "Только подтверждённый функциональный уровень",
+            seniority_transition=None, seniority_notes="Неподтверждённый уровень ответственности не переносится автоматически.",
+            professional_capital=values(resume_analysis, "experience", "achievements", "education", "certifications")[:8] or core,
+            transferable_functions=functions,
+        ),
+        evidence=evidence,
+        user_choice=UserChoice(desired_change=desired_change, preferred_directions=values(story_analysis, "interests", "preferred_directions"), functions_to_preserve=values(story_analysis, "functions_to_preserve"), functions_to_avoid=values(story_analysis, "tasks_to_avoid", "functions_to_avoid"), priorities=values(profile_snapshot, "selected_career_priorities")),
+        constraints=[Constraint(title=fact, impact="Ограничение учитывается при проверке формата и доступности маршрута.", evidence_ids=evidence_ids[:1], confirmed=True) for fact in constraint_facts],
+        routes=CareerRoutes(primary_routes=primary, transition_routes=alternatives, recommended_route_id=recommended_id, alternative_route_ids=[route.route_id for route in alternatives]),
+        questions=QuestionAssessment(unanswered_critical_questions=[next_question]),
+        conclusions=ConclusionAssessment(
+            mandatory_conclusions=["Выводы ограничены фактами текущей оценки", "Неизвестные данные ограничивают только связанные с ними выводы"],
+            main_conclusion=f"Основной маршрут для безопасной проверки — {primary[0].title}; уверенность {'средняя' if named_core else 'низкая'}.",
+            what_may_change_conclusion=["Ответ на следующий вопрос и результаты проверки рынка"],
+        ),
+        first_steps=[
+            FirstStep("fallback-functions", "Карта функций", "Уточнить профессиональное ядро", "Запишите три регулярно выполнявшиеся функции, один результат каждой и задачи, которые больше не хотите выполнять.", "Список из трёх функций с фактами и ограничениями.", 20, recommended_id, "clarification"),
+            FirstStep("fallback-market", "Проверка описаний работы", "Проверить требования без необратимого перехода", f"Сравните пять актуальных описаний работы по направлению {primary[0].title}; отметьте совпадения, допуски, языки и пробелы.", "Таблица подтверждённых совпадений и пробелов.", 45, recommended_id, "market_research"),
+            FirstStep("fallback-contact", "Разговор со специалистом", "Проверить реальность ежедневных задач", f"Попросите одного специалиста направления {primary[0].title} описать три типичные задачи и критерий входа.", "Один внешний сигнал, подтверждающий или опровергающий маршрут.", 20, recommended_id, "networking"),
+        ],
+        metadata={"fallback_source_policy": "current_assessment_only", "fallback_confidence": "medium" if named_core and confirmed_functions else "low", "fallback_reason": fallback_reason, "route_evaluations": route_evaluations},
+    )
+    validate_career_assessment(assessment, snapshot_country_code=_optional_text(profile_snapshot.get("country_code")), snapshot_currency=_optional_text(profile_snapshot.get("currency"))).require_valid()
+    return assessment
 
 
 def validate_career_assessment(
