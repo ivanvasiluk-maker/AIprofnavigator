@@ -731,207 +731,20 @@ def build_deterministic_assessment(
     session_id: str,
     profile_version: str,
 ) -> CareerAssessment:
-    """Build a fact-only recovery assessment without relying on invalid model output."""
-    snapshot_text = " ".join(_flatten_source_strings(profile_snapshot)).casefold()
-    story_text = " ".join(_flatten_source_strings(story_analysis)).casefold()
-    resume_text = " ".join(_flatten_source_strings(resume_analysis)).casefold()
-    all_text = " ".join((snapshot_text, story_text, resume_text))
-    marketing_profile = "маркет" in all_text and any(token in all_text for token in ("it", "продукт", "рынк", "клиент"))
-    if not marketing_profile:
-        return build_preliminary_assessment(
-            profile_snapshot,
-            story_analysis,
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-        )
+    """Build a generic source-only recovery assessment.
 
-    fact_specs = [
-        ("Восемь лет опыта в IT-маркетинге", ("8 лет", "восемь лет")),
-        ("Руководство маркетинговой командой", ("руковод", "управл команд")),
-        ("Ответственность за маркетинговую стратегию", ("стратег",)),
-        ("Ответственность за маркетинговый бюджет", ("бюджет",)),
-        ("Исследования рынка и конкурентов", ("исследован", "рынк", "конкурент")),
-        ("Интервью с клиентами", ("интервью", "клиент")),
-        ("Работа с B2B-продуктами", ("b2b",)),
-        ("Позиционирование продуктов", ("позиционирован",)),
-        ("Создание образовательного контента и онлайн-курсов", ("образователь", "курс")),
-        ("Проведение вебинаров", ("вебинар",)),
-        ("Рост входящих заявок на 35 процентов", ("35", "заяв")),
-        ("Обучение Product Management Fundamentals", ("product management fundamentals",)),
-        ("Обучение Customer Development", ("customer development",)),
-        ("Английский язык B2", ("англий", "b2")),
-    ]
-    evidence: list[EvidenceItem] = []
-    for fact, tokens in fact_specs:
-        if fact.startswith("Восемь лет"):
-            supported = any(token in all_text for token in tokens)
-        elif fact.startswith("Руководство"):
-            supported = "команд" in all_text and any(token in all_text for token in ("руковод", "управл"))
-        else:
-            supported = all(token in all_text for token in tokens)
-        if not supported:
-            continue
-        if fact.startswith("Восемь лет"):
-            supported_by_resume = any(token in resume_text for token in tokens)
-        elif fact.startswith("Руководство"):
-            supported_by_resume = "команд" in resume_text and any(token in resume_text for token in ("руковод", "управл"))
-        else:
-            supported_by_resume = all(token in resume_text for token in tokens)
-        source_type: Literal["history", "resume", "answer"] = "resume" if supported_by_resume else "history"
-        evidence.append(
-            EvidenceItem(
-                evidence_id=f"fact-{len(evidence) + 1}",
-                fact=fact,
-                source_type=source_type,
-                source_reference="resume_analysis" if source_type == "resume" else "profile_snapshot",
-            )
-        )
-
-    if len(evidence) < 2:
-        return build_preliminary_assessment(
-            profile_snapshot,
-            story_analysis,
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-        )
-    while len(evidence) < 8:
-        source_fact = next(
-            (text for text in _flatten_source_strings(resume_analysis) if len(text.split()) >= 3 and text.casefold() not in {item.fact.casefold() for item in evidence}),
-            None,
-        )
-        if not source_fact:
-            break
-        evidence.append(EvidenceItem(f"fact-{len(evidence) + 1}", source_fact, "resume", "resume_analysis"))
-
-    evidence_ids = [item.evidence_id for item in evidence]
-
-    def route(route_id: str, title: str, category: RouteCategory, entry_level: str, evidence_slice: tuple[int, int]) -> CareerRoute:
-        selected_ids = evidence_ids[evidence_slice[0]:evidence_slice[1]]
-        if len(selected_ids) < 2:
-            selected_ids = evidence_ids[:2]
-        detail_by_route = {
-            "product-marketing": ("Соединяет подтверждённые B2B-позиционирование, стратегию и интервью с клиентами без обнуления маркетингового стажа.", "Нужен end-to-end кейс запуска", "Проверить спрос на PMM в Литве и международных remote-командах по 10 свежим вакансиям.", "direct_entry"),
-            "customer-insights": ("Опирается именно на интервью и Customer Development, но уменьшает долю владения маркетинговым бюджетом.", "Не подтверждена глубина исследовательской методологии", "Показать исследовательский план двум Product Discovery специалистам и сравнить обратную связь.", "bridge_project"),
-            "product-manager": ("Использует стратегию и обучение Product Management, но требует нового доказательства владения delivery и приоритизацией.", "Нет подтверждённого полного product delivery", "Провести небольшой discovery-to-backlog проект без увольнения и проверить готовность к delivery.", "adjacent_transition"),
-            "edtech-product": ("Связывает опыт онлайн-курсов и вебинаров с продуктовой координацией в образовательном контексте.", "Не подтверждена ответственность за образовательные метрики", "Разобрать пять EdTech-вакансий и упаковать отдельный кейс курса с метриками.", "bridge_project"),
-            "consulting": ("Монетизирует существующие B2B-позиционирование и стратегию быстрее найма, но требует проверки платёжного спроса.", "Нет подтверждённого спроса на самостоятельную услугу", "Предложить один диагностический пакет двум B2B-компаниям без ухода с работы.", "direct_entry"),
-        }
-        why, gap, test, entry_path = detail_by_route[route_id]
-        return CareerRoute(
-            route_id=route_id,
-            title=title,
-            category=category,
-            why_it_fits=why,
-            evidence_ids=selected_ids,
-            preserves=["исследования рынка и клиентов", "позиционирование", "стратегическое мышление"],
-            risks=[gap],
-            missing=[gap],
-            entry_level=entry_level,
-            disconfirming_conditions=["вакансии требуют неподтверждённого владения полным продуктовым циклом"],
-            market_test=test,
-            entry_path=entry_path,  # type: ignore[arg-type]
-            evidence_claims=[{"claim": why, "evidence_fact_ids": selected_ids, "confidence": "medium", "uncertainties": [gap]}],
-            market_notes=["Диапазон требует рыночной проверки"],
-        )
-
-    routes = [
-        route("product-marketing", "Product Marketing Manager", "primary", "Senior или middle-senior в зависимости от вакансии", (0, 4)),
-        route("customer-insights", "Product Discovery / Customer Insights", "primary", "Senior или middle-senior после проверки глубины исследований", (4, 7)),
-        route("product-manager", "Product Manager", "transition", "Вероятно middle или ниже senior до проверки полного продуктового цикла", (5, 9)),
-        route("edtech-product", "EdTech Product или Program Manager", "transition", "Определяется по подтверждённой продуктовой ответственности", (7, 11)),
-        route("consulting", "Маркетинговый или продуктовый консалтинг", "quick_income", "Зависит от подтверждённых кейсов и спроса", (0, 4)),
-    ]
-    desired_change = str(profile_snapshot.get("career_goal") or "").strip() or None
-    contradiction = bool(desired_change and "остаться" in desired_change.casefold() and any(term in all_text for term in ("образован", "психолог", "собственн", "продукт")))
-    clarification = "Правильно ли я понял: вы хотите сохранить маркетинговый опыт, но уйти от нынешнего формата работы?"
-    status: AssessmentStatus = "full" if sum(item.source_type == "resume" for item in evidence) >= 8 else "preliminary"
-    assessment = CareerAssessment(
+    Older code contained a marketing-specific golden-test fixture here.  That
+    fixture could become a real report whenever broad token matching fired.
+    Recovery must be profile-agnostic; otherwise it is indistinguishable from
+    cross-assessment data leakage.
+    """
+    return build_preliminary_assessment(
+        profile_snapshot,
+        {},  # model analysis is not trusted after a failed generation
         assessment_id=assessment_id,
         session_id=session_id,
         profile_version=profile_version,
-        status=status,
-        context=CareerContext(
-            country_code=_optional_text(profile_snapshot.get("country_code")),
-            country_name=_optional_text(profile_snapshot.get("country_name")),
-            city=_optional_text(profile_snapshot.get("city")),
-            work_authorization=_optional_text(profile_snapshot.get("work_authorization_status")),
-            income_urgency=_optional_text(profile_snapshot.get("income_urgency")),
-            available_learning_time=_optional_text(profile_snapshot.get("learning_hours_week")),
-            residence_country=_optional_text(profile_snapshot.get("residence_country")) or _optional_text(profile_snapshot.get("country_name")),
-            target_countries=_texts(profile_snapshot.get("target_countries")) or ([_optional_text(profile_snapshot.get("country_name"))] if _optional_text(profile_snapshot.get("country_name")) else []),
-            preferred_currency=_optional_text(profile_snapshot.get("currency")),
-            work_format=_optional_text(profile_snapshot.get("work_format")),
-            relocation_possible=_optional_text(profile_snapshot.get("relocation_possible")),
-            market_data_date=_optional_text(profile_snapshot.get("market_data_date")),
-            market_data_sources=_texts(profile_snapshot.get("market_data_sources")),
-            market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
-        ),
-        identity=ProfessionalIdentity(
-            professional_core=["Руководитель IT-маркетинга", "Product Marketing Specialist", "Специалист по исследованию рынка и клиентов"],
-            core_description="Превращает исследования рынка и клиентов в позиционирование, стратегию запуска и конкретные продуктовые решения.",
-            secondary_functions=["Product Discovery", "создание образовательного контента", "управление командой"],
-            seniority_current="Senior/lead в маркетинге",
-            seniority_transition="Product Marketing: senior/middle-senior; Product Management: вероятно middle или ниже senior до проверки полного продуктового цикла; EdTech: по продуктовой ответственности; консультирование: по подтверждённым кейсам",
-            seniority_notes="Текущий уровень подтверждается длительностью опыта, управлением, стратегией, бюджетом и измеримым результатом; переходный уровень оценивается отдельно.",
-            professional_capital=[item.fact for item in evidence[:8]],
-            transferable_functions=["исследования клиентов", "позиционирование", "стратегия запуска", "управление"],
-        ),
-        evidence=evidence,
-        user_choice=UserChoice(
-            desired_change=desired_change,
-            preferred_directions=[direction for direction in ("продукт", "образование", "консультирование") if direction in all_text],
-            functions_to_preserve=["маркетинговый опыт", "исследования", "стратегию"],
-            functions_to_avoid=["полное обнуление профессионального капитала"],
-            priorities=["проверить варианты без увольнения"],
-        ),
-        constraints=[],
-        routes=CareerRoutes(
-            primary_routes=routes[:2],
-            transition_routes=routes[2:4],
-            quick_income_routes=routes[4:],
-            recommended_route_id="product-marketing",
-            alternative_route_ids=["customer-insights", "edtech-product", "consulting"],
-        ),
-        questions=QuestionAssessment(unanswered_critical_questions=[clarification] if contradiction else []),
-        conclusions=ConclusionAssessment(
-            mandatory_conclusions=[
-                "Маркетинговый профессиональный капитал не нужно обнулять",
-                "Уровень в Product Management следует оценивать отдельно",
-                "Переход можно проверять без увольнения",
-            ],
-            main_conclusion="Основной предварительный маршрут — Product Marketing Manager; Product Discovery, EdTech Product и консалтинг следует проверить как альтернативы.",
-            what_may_change_conclusion=["ответ на уточнение о желаемом масштабе смены", "проверка продуктовой ответственности"],
-        ),
-        first_steps=[
-            FirstStep("clarify-functions", "Уточнить функции", "Отделить роль от формата работы", "Выпишите функции, которые хотите сохранить и изменить.", "Два списка функций", 15, "product-marketing", "clarification"),
-            FirstStep("market-check", "Проверить рынок", "Сравнить конкретные роли", "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.", "Таблица повторяющихся требований", 45, "product-marketing", "market_research"),
-            FirstStep("portfolio-case", "Собрать продуктовый кейс", "Показать продуктовую часть опыта", "Опишите один кейс: проблема, исследование, позиционирование, действия и измеримый результат.", "Один проверяемый кейс", 60, "product-marketing", "portfolio"),
-            FirstStep("professional-contact", "Поговорить со специалистом", "Проверить уровень входа", "Покажите кейс одному Product Marketing Manager и запросите предметную обратную связь.", "Один критерий готовности", 20, "product-marketing", "networking"),
-            FirstStep("consulting-test", "Проверить консультирование", "Проверить спрос без увольнения", "Сформулируйте одну консультационную услугу и предложите её одному потенциальному клиенту.", "Один сигнал спроса", 30, "consulting", "quick_action"),
-        ],
-        metadata={
-            "recovery_source": "profile_snapshot",
-            "seniority_reason_codes": [
-                code
-                for code, marker in (
-                    ("years_experience_8", "8 лет"),
-                    ("team_leadership", "команд"),
-                    ("strategy_ownership", "стратег"),
-                    ("budget_responsibility", "бюджет"),
-                    ("measurable_result_35_percent", "35"),
-                )
-                if marker in all_text
-            ],
-        },
     )
-    validate_career_assessment(
-        assessment,
-        snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
-        snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
-    ).require_valid()
-    return assessment
 
 
 def validate_career_assessment(
@@ -994,7 +807,7 @@ def validate_career_assessment(
     ]
     assessment.metadata["seniority_reason_codes"] = list(dict.fromkeys(reason_codes))
     current_seniority = assessment.identity.seniority_current.casefold()
-    if len(reason_codes) >= 3 and (
+    if assessment.status == "full" and len(reason_codes) >= 3 and (
         "средн" in current_seniority
         or "middle" in current_seniority
         or not any(level in current_seniority for level in ("senior", "lead", "руковод"))

@@ -358,13 +358,9 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         self.assertEqual(client._run_json.await_count, 2)
-        self.assertEqual(assessment.identity.professional_core[:3], [
-            "Руководитель IT-маркетинга",
-            "Product Marketing Specialist",
-            "Специалист по исследованию рынка и клиентов",
-        ])
-        self.assertEqual(assessment.routes.primary_routes[0].title, "Product Marketing Manager")
-        self.assertEqual(assessment.routes.primary_routes[1].title, "Product Discovery / Customer Insights")
+        self.assertEqual(assessment.identity.professional_core, ["Текущая профессиональная специализация"])
+        self.assertEqual(assessment.routes.primary_routes[0].route_id, "preliminary-core-route")
+        self.assertNotIn("raw_model_output", assessment.metadata)
         with TemporaryDirectory() as output_dir:
             html_path = generate_assessment_html_file(assessment, output_dir)
             self.assertTrue(html_path.is_file())
@@ -439,15 +435,10 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(client._run_json.await_count, 2)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
-        self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
-        self.assertEqual(assessment.identity.seniority_current, "Senior/lead в маркетинге")
-        self.assertEqual(
-            set(assessment.metadata["seniority_reason_codes"]),
-            {"years_experience_8", "team_leadership", "strategy_ownership", "budget_responsibility", "measurable_result_35_percent"},
-        )
-        self.assertEqual(assessment.routes.by_id(assessment.routes.recommended_route_id).title, "Product Marketing Manager")
-        self.assertEqual(len(assessment.first_steps), 5)
-        self.assertIn("сохранить маркетинговый опыт", assessment.questions.unanswered_critical_questions[0])
+        # Recovery must not activate a profile-specific golden fixture.
+        self.assertEqual(assessment.metadata["resume_important_facts_count"], 0)
+        self.assertEqual(assessment.routes.recommended_route_id, "preliminary-core-route")
+        self.assertNotIn("Product Marketing Manager", str(assessment.to_dict()))
 
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
         class State:

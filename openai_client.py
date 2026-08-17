@@ -1282,7 +1282,13 @@ class CareerOpenAIClient:
             session_id=session_id,
             profile_version=profile_version,
         )
-        fallback.metadata.update(diagnostics)
+        # Invalid model bodies may themselves contain facts from another
+        # assessment. Never persist them inside fallback diagnostics.
+        fallback.metadata.update({
+            "assessment_id": assessment_id,
+            "profile_version": profile_version,
+            "repair_attempt_count": len(diagnostics.get("repair_attempts") or []),
+        })
         fallback.metadata.update(
             {
                 "recovered_by": "deterministic_fallback",
