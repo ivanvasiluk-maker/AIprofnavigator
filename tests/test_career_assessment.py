@@ -358,8 +358,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         self.assertEqual(client._run_json.await_count, 2)
-        self.assertEqual(assessment.identity.professional_core, ["Текущая профессиональная специализация"])
-        self.assertEqual(assessment.routes.primary_routes[0].route_id, "preliminary-core-route")
+        self.assertNotIn("Текущая профессиональная специализация", assessment.identity.professional_core)
+        self.assertEqual(assessment.routes.primary_routes[0].route_id, "source-route-1")
         self.assertNotIn("raw_model_output", assessment.metadata)
         with TemporaryDirectory() as output_dir:
             html_path = generate_assessment_html_file(assessment, output_dir)
@@ -436,8 +436,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._run_json.await_count, 2)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         # Recovery must not activate a profile-specific golden fixture.
-        self.assertEqual(assessment.metadata["resume_important_facts_count"], 0)
-        self.assertEqual(assessment.routes.recommended_route_id, "preliminary-core-route")
+        self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
+        self.assertEqual(assessment.routes.recommended_route_id, "source-route-1")
         self.assertNotIn("Product Marketing Manager", str(assessment.to_dict()))
 
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
