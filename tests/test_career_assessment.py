@@ -138,7 +138,7 @@ class CareerAssessmentTest(unittest.TestCase):
         html = render_assessment_html(self.assessment)
         self.assertIn("Product Marketing Manager", telegram)
         self.assertIn("Product Marketing Manager", comparison)
-        self.assertIn("assessment-profile-10", html)
+        self.assertNotIn("assessment-profile-10", html)
         self.assertNotIn("SWOT", html)
         self.assertNotIn("Подробный анализ по 15 блокам", html)
 
@@ -152,7 +152,7 @@ class CareerAssessmentTest(unittest.TestCase):
         with TemporaryDirectory() as output_dir:
             path = generate_assessment_html_file(self.assessment, output_dir)
             self.assertIn(self.assessment.assessment_id, path.name)
-            self.assertIn(self.assessment.assessment_id, path.read_text(encoding="utf-8"))
+            self.assertNotIn(self.assessment.assessment_id, path.read_text(encoding="utf-8"))
 
     def test_callback_contract_contains_assessment_and_step_ids(self) -> None:
         keyboard = first_step_selection_keyboard(self.assessment)
@@ -329,10 +329,10 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
             html = html_path.read_text(encoding="utf-8")
             self.assertTrue(html_path.is_file())
             self.assertIn(assessment.assessment_id, html_path.name)
-            self.assertIn(assessment.assessment_id, html)
-            self.assertIn(CAREER_HTML_RENDERER_VERSION, html)
+            self.assertNotIn(assessment.assessment_id, html)
+            self.assertNotIn(CAREER_HTML_RENDERER_VERSION, html)
 
-    async def test_fixture_two_failed_repairs_fall_back_and_create_html(self) -> None:
+    async def test_fixture_one_failed_repair_falls_back_and_creates_html(self) -> None:
         fixture = profile_10_e2e_fixture()
         snapshot = _build_profile_snapshot(fixture["state_data"])
         invalid_payload = profile_10_assessment_payload()
@@ -357,7 +357,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
-        self.assertEqual(client._run_json.await_count, 3)
+        self.assertEqual(client._run_json.await_count, 2)
         self.assertEqual(assessment.identity.professional_core[:3], [
             "Руководитель IT-маркетинга",
             "Product Marketing Specialist",
@@ -368,7 +368,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as output_dir:
             html_path = generate_assessment_html_file(assessment, output_dir)
             self.assertTrue(html_path.is_file())
-            self.assertIn(assessment.assessment_id, html_path.read_text(encoding="utf-8"))
+            self.assertNotIn(assessment.assessment_id, html_path.read_text(encoding="utf-8"))
 
     async def test_build_uses_exactly_one_structured_call(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
@@ -404,7 +404,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(assessment.metadata["repair_attempts"][0]["validation"]["valid"])
 
-    async def test_two_failed_repairs_use_fact_only_deterministic_fallback(self) -> None:
+    async def test_one_failed_repair_uses_fact_only_deterministic_fallback(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
         invalid_payload = profile_10_assessment_payload()
         invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
@@ -437,7 +437,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         )
         validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(validation.valid, validation.errors)
-        self.assertEqual(client._run_json.await_count, 3)
+        self.assertEqual(client._run_json.await_count, 2)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
         self.assertEqual(assessment.identity.seniority_current, "Senior/lead в маркетинге")
