@@ -20,6 +20,7 @@ from handlers.career import (
     _income_options_for_currency,
     _is_route_context_stale_input,
     _language_options_for_country,
+    _missing_route_context_notice,
     _normalize_route_context,
     _report_draft_is_empty,
     _resolve_country_config,
@@ -262,6 +263,14 @@ class SnapshotReadinessGateTest(unittest.TestCase):
     def test_incomplete_snapshot_is_not_ready(self) -> None:
         snapshot = _build_profile_snapshot({"route_context": {"country": "Литва"}})
         self.assertFalse(_snapshot_is_ready_for_report(snapshot))
+
+    def test_missing_context_notice_does_not_block_preliminary_conclusion(self) -> None:
+        notice = _missing_route_context_notice(["city", "minimum_monthly_income"])
+
+        self.assertIn("город", notice)
+        self.assertIn("минимальный доход", notice)
+        self.assertIn("не буду блокировать результат", notice)
+        self.assertIn("предварительное заключение", notice)
 
     def test_readiness_levels_distinguish_preliminary_and_full(self) -> None:
         profile = CareerEvidenceProfile(

@@ -531,6 +531,58 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generated_meta["assessment_id"], "assessment-profile-10")
         self.assertEqual(generated_meta["profile_version"], "1")
 
+    async def test_incomplete_snapshot_warns_but_still_generates_assessment(self) -> None:
+        class State:
+            def __init__(self) -> None:
+                self.data = {
+                    "public_user_id": "public-test-user",
+                    "session_id": "session-incomplete",
+                    "assessment_id": "assessment-incomplete",
+                    "profile_version": "1",
+                    "route_context": {"country": "Литва"},
+                }
+                self.current_state = None
+
+            async def update_data(self, **kwargs) -> None:
+                self.data.update(kwargs)
+
+            async def set_state(self, value) -> None:
+                self.current_state = value
+
+        state = State()
+        message = type("MessageStub", (), {"answer": AsyncMock(), "answer_document": AsyncMock()})()
+        assessment = career_assessment_from_dict(profile_10_assessment_payload())
+        incomplete_snapshot = {
+            "country_code": "LT",
+            "country_name": "Литва",
+            "currency": "EUR",
+            "route_context": {"country": "Литва"},
+            "ready_for_report": False,
+        }
+        with TemporaryDirectory() as output_dir:
+            html_path = Path(output_dir) / "career_assessment_assessment-incomplete.html"
+            html_path.write_text(render_assessment_html(assessment), encoding="utf-8")
+            with (
+                unittest.mock.patch("handlers.career._build_profile_snapshot", return_value=incomplete_snapshot),
+                unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=False),
+                unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=assessment)) as build,
+                unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path),
+                unittest.mock.patch("handlers.career._track_event", new=AsyncMock()),
+                unittest.mock.patch("handlers.career.save_profile_version"),
+                unittest.mock.patch("handlers.career.save_report_version"),
+                unittest.mock.patch("handlers.career.update_report_files"),
+            ):
+                await _build_and_send_career_assessment(message, state, "ru", state.data)
+
+        build.assert_awaited_once()
+        generated_snapshot = build.await_args.args[0]
+        self.assertIn("city", generated_snapshot["missing_fields"])
+        self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
+        self.assertTrue(state.data["final_report_generated"])
+        self.assertFalse(state.data["awaiting_route_context"])
+        self.assertTrue(any("не буду блокировать результат" in call.args[0] for call in message.answer.await_args_list))
+        message.answer_document.assert_awaited_once()
+
     async def test_html_failure_keeps_assessment_and_offers_document_retry(self) -> None:
         class State:
             def __init__(self) -> None:

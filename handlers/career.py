@@ -1233,6 +1233,38 @@ def _route_context_missing(data: dict[str, object]) -> list[str]:
     return missing
 
 
+_ROUTE_CONTEXT_FIELD_LABELS: dict[str, str] = {
+    "country": "страна",
+    "city": "город",
+    "current_language_level": "текущий уровень языка",
+    "target_language": "целевой язык",
+    "income_urgency": "срочность дохода",
+    "minimum_monthly_income": "минимальный доход",
+    "desired_monthly_income": "желаемый доход",
+    "training_budget": "бюджет обучения",
+    "available_time_for_study": "время на обучение",
+    "career_goal_type": "карьерная цель",
+    "work_preferences": "предпочтения по работе",
+    "health_or_schedule_limits": "ограничения по нагрузке или графику",
+    "documents_and_work_rights": "документы и право на работу",
+    "diploma_status": "статус диплома",
+    "portfolio_or_references": "портфолио или рекомендации",
+}
+
+
+def _missing_route_context_notice(missing_fields: list[str]) -> str:
+    labels = [_ROUTE_CONTEXT_FIELD_LABELS.get(field, field) for field in missing_fields]
+    visible = ", ".join(labels[:5])
+    remainder = len(labels) - 5
+    if remainder > 0:
+        visible += f" и ещё {remainder}"
+    return (
+        f"Для более точного заключения пока не хватает данных: {visible}.\n\n"
+        "Я не буду блокировать результат и сейчас соберу предварительное заключение. "
+        "После него сможете написать недостающие данные? Я обновлю рекомендацию с учётом ответа."
+    )
+
+
 def _route_context_question(index: int, route_context: dict | None = None) -> dict[str, object]:
     if index < 0 or index >= len(_ROUTE_CONTEXT_FIELDS):
         return {}
@@ -6780,9 +6812,14 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
     snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
-        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
-        await _start_route_context_intake(message, state, lang)
-        return
+        missing_fields = _route_context_missing(data)
+        snapshot["missing_fields"] = missing_fields
+        snapshot["ready_for_report"] = False
+        await state.update_data(
+            route_context_missing_fields=missing_fields,
+            awaiting_route_context=False,
+        )
+        await message.answer(_missing_route_context_notice(missing_fields), reply_markup=ReplyKeyboardRemove())
     await state.update_data(profile_snapshot=snapshot)
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
@@ -7041,9 +7078,14 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
 
     snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
-        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
-        await _start_route_context_intake(message, state, lang)
-        return
+        missing_fields = _route_context_missing(data)
+        snapshot["missing_fields"] = missing_fields
+        snapshot["ready_for_report"] = False
+        await state.update_data(
+            route_context_missing_fields=missing_fields,
+            awaiting_route_context=False,
+        )
+        await message.answer(_missing_route_context_notice(missing_fields), reply_markup=ReplyKeyboardRemove())
 
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
