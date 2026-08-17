@@ -195,6 +195,7 @@ from services.career_assessment import (
     render_telegram_map,
     validate_career_assessment,
 )
+from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors
 from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
@@ -7083,6 +7084,21 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     session_id = str(data.get("session_id") or "").strip()
     assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     profile_version = str(data.get("profile_version") or assessment_id)
+    source_messages = list(data.get("source_messages") or [])
+    source_messages.extend(
+        {
+            "message_id": str(row.get("source_message_id") or ""),
+            "text": str(row.get("answer") or ""),
+            "created_at": str(row.get("created_at") or ""),
+        }
+        for row in (data.get("qa_answers") or [])
+        if isinstance(row, dict) and row.get("source_message_id")
+    )
+    fact_ledger = build_fact_ledger(assessment_id, public_user_id, source_messages)
+    snapshot["fact_ledger"] = fact_ledger
+    integrity_audit = audit_facts(assessment_id, public_user_id, fact_ledger, source_messages)
+    # Deliberately emitted immediately before generation for incident tracing.
+    print(f"[assessment-integrity] {integrity_audit}", flush=True)
     try:
         save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
     except Exception:
@@ -7152,6 +7168,24 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             reply_markup=assessment_recovery_keyboard(),
         )
         return
+
+    consistency_failures = consistency_errors(assessment.to_dict(), integrity_audit)
+    if consistency_failures:
+        # build_career_assessment already performs its model repair pass.  A
+        # remaining contradiction is therefore reduced to a source-only map;
+        # never reuse a stored or previous conclusion here.
+        assessment = build_preliminary_assessment(
+            snapshot,
+            {},
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+        assessment.metadata.update({
+            "integrity_repair": "source_only_fallback",
+            "consistency_errors": consistency_failures,
+            "debug_log": integrity_audit,
+        })
 
     validation = validate_career_assessment(
         assessment,
@@ -7509,6 +7543,12 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     profile["preferred_input"] = preferred_input
 
     await state.update_data(
+        assessment_id=uuid.uuid4().hex,
+        source_messages=[{
+            "message_id": str(message.message_id),
+            "text": clean,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }],
         story_text=clean,
         interaction_profile=profile,
         support_need=profile.get("support_need", "medium"),
@@ -7533,15 +7573,9 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         await message.answer(t(lang, "adaptive_transition_chaotic"))
 
     await message.answer(t(lang, "processing_story"))
-    memory_context = str(data.get("memory_context") or "").strip()
-    analysis_input = clean
-    if memory_context:
-        analysis_input = (
-            clean
-            + "\n\nКонтекст из предыдущих сессий (использовать как вспомогательные факты, без подмены новой истории):\n"
-            + memory_context
-        )
-    analysis = await ai_client.analyze_story(analysis_input, lang)
+    # Assessment input is a security boundary.  Persistent memory may contain
+    # another assessment and must never be submitted as user evidence.
+    analysis = await ai_client.analyze_story(clean, lang)
     user_segment = _detect_user_segment(clean, analysis)
     evidence_profile = build_evidence_profile_from_analysis(analysis)
     questions = _build_evidence_questions(evidence_profile, lang, selected_mode)
@@ -7861,7 +7895,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 )
                 return
 
-            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean})
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
             qa_index += 1
             evidence_payload, is_ready = _update_evidence_after_answer(data, current, clean)
             await state.update_data(
@@ -8220,7 +8254,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
             return
 
-        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean})
+        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
         signal_payload = _free_text_signal(current, clean)
         if signal_payload:
             qa_answers[-1]["signal"] = signal_payload["signal"]
@@ -8745,6 +8779,8 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                     "question": str(pending.get("question", f"Вопрос {qa_index + 1}")),
                     "question_id": int(pending.get("question_id", qa_index + 1)),
                     "answer": accepted_answer,
+                    "source_message_id": str(message.message_id),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             qa_index += 1
