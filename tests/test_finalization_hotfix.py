@@ -83,7 +83,7 @@ class FinalizationHotfixTest(unittest.TestCase):
 
             self.assertTrue(fake_state.data.get("report_already_generated"))
             self.assertIn("Собираю заключение", "\n".join(fake_message.sent))
-            self.assertIn("Product Marketing", "\n".join(fake_message.sent))
+            self.assertIn("Маршрут на основе подтверждённых функций", "\n".join(fake_message.sent))
             self.assertFalse(fake_state.data.get("report_generation_in_progress"))
 
         asyncio.run(run_test())

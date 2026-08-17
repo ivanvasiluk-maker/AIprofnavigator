@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Confidence = Literal["confirmed", "probable", "weak", "unknown"]
+DataImportance = Literal["blocking", "useful", "optional"]
+MAX_ADDITIONAL_QUESTIONS = 6
 EvidenceSource = Literal[
     "user_story",
     "user_clarification",
@@ -105,6 +107,7 @@ class CareerEvidenceProfile(BaseModel):
     location_and_language: list[EvidenceItem] = Field(default_factory=list)
 
     minimum_income: EvidenceItem | None = None
+    current_income: EvidenceItem | None = None
     income_deadline: EvidenceItem | None = None
     acceptable_transition_level: EvidenceItem | None = None
 
@@ -117,14 +120,40 @@ class CareerEvidenceProfile(BaseModel):
     local_legal_access_status: EvidenceItem | None = None
     market_entry_level: EvidenceItem | None = None
 
+    residence_country: EvidenceItem | None = None
+    target_countries: list[EvidenceItem] = Field(default_factory=list)
+    preferred_currency: EvidenceItem | None = None
+    relocation_possible: EvidenceItem | None = None
+    salary_target: EvidenceItem | None = None
+    transition_timeline: EvidenceItem | None = None
+    learning_capacity: EvidenceItem | None = None
+    acceptable_income_drop: EvidenceItem | None = None
+    desired_change_scale: EvidenceItem | None = None
+    functions_to_preserve: list[EvidenceItem] = Field(default_factory=list)
+    functions_to_avoid: list[EvidenceItem] = Field(default_factory=list)
+
     contradictions: list[str] = Field(default_factory=list)
     unresolved_gaps: list[str] = Field(default_factory=list)
 
 
 _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
+    "residence_country": {
+        "priority": 112, "critical": True, "importance": "blocking",
+        "goal": "Отделить страну проживания от целевого рынка.",
+        "question_ru": "В какой стране вы сейчас живёте?",
+        "question_be": "У якой краіне вы цяпер жывяце?",
+        "block": "market_context",
+    },
+    "target_country": {
+        "priority": 110, "critical": True, "importance": "blocking",
+        "goal": "Определить рынок, который materially меняет валюту, вакансии и право на работу.",
+        "question_ru": "В какой стране или странах вы планируете искать работу?",
+        "question_be": "У якой краіне або краінах вы плануеце шукаць працу?",
+        "block": "market_context",
+    },
     "professional_core": {
         "priority": 100,
-        "critical": True,
+        "critical": True, "importance": "blocking",
         "goal": "Уточнить профессиональное ядро и реальные рабочие функции.",
         "question_ru": "Какие 2-3 рабочие функции у вас получаются сильнее всего и чем это подтверждается в опыте?",
         "question_be": "Якія 2-3 працоўныя функцыі ў вас атрымліваюцца найлепш і чым гэта пацвярджаецца ў досведзе?",
@@ -132,7 +161,7 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     },
     "minimum_income": {
         "priority": 95,
-        "critical": True,
+        "critical": False, "importance": "useful",
         "goal": "Зафиксировать минимальный доход для безопасного выбора маршрута.",
         "question_ru": "Какой минимальный доход в месяц вам нужен, чтобы стабилизировать ситуацию?",
         "question_be": "Які мінімальны даход у месяц вам патрэбны, каб стабілізаваць сітуацыю?",
@@ -140,7 +169,7 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     },
     "income_deadline": {
         "priority": 92,
-        "critical": True,
+        "critical": False, "importance": "useful",
         "goal": "Понять допустимый срок до первого дохода.",
         "question_ru": "Как быстро нужен первый стабильный доход?",
         "question_be": "Наколькі хутка патрэбны першы стабільны даход?",
@@ -149,7 +178,7 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     },
     "legal_access": {
         "priority": 88,
-        "critical": True,
+        "critical": True, "importance": "blocking",
         "goal": "Проверить ограничения доступа к профессии и праву на работу.",
         "question_ru": "Что сейчас с документами, правом на работу и признанием квалификации?",
         "question_be": "Што цяпер з дакументамі, правам на працу і прызнаннем кваліфікацыі?",
@@ -157,7 +186,7 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     },
     "location_language": {
         "priority": 84,
-        "critical": True,
+        "critical": True, "importance": "blocking",
         "goal": "Оценить локальный контекст языка и интеграции для входа на рынок.",
         "question_ru": "Какие языки вы знаете и на каком уровне сейчас можете использовать их в работе?",
         "question_be": "Якія мовы вы ведаеце і на якім узроўні цяпер можаце выкарыстоўваць іх у працы?",
@@ -165,11 +194,53 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     },
     "work_constraints": {
         "priority": 80,
-        "critical": True,
+        "critical": False, "importance": "useful",
         "goal": "Зафиксировать ограничения, влияющие на безопасность рекомендаций.",
         "question_ru": "Какие ограничения важно учесть сейчас: здоровье, график, дети, переезды, нагрузка?",
         "question_be": "Якія абмежаванні важна ўлічыць цяпер: здароўе, графік, дзеці, пераезды, нагрузка?",
         "block": "constraints",
+    },
+    "work_format": {
+        "priority": 78, "critical": False, "importance": "useful",
+        "goal": "Отфильтровать роли по доступному формату.",
+        "question_ru": "Какой формат вам доступен: удалённо, офис или гибрид?",
+        "question_be": "Які фармат вам даступны: аддалена, офіс або гібрыд?",
+        "block": "market_context",
+    },
+    "relocation": {
+        "priority": 76, "critical": False, "importance": "useful",
+        "goal": "Понять географию доступного рынка.",
+        "question_ru": "Готовы ли вы к релокации, если подходящей роли нет рядом?",
+        "question_be": "Ці гатовы вы да рэлакацыі, калі падыходзячай ролі няма побач?",
+        "block": "market_context",
+    },
+    "salary_target": {
+        "priority": 70, "critical": False, "importance": "useful",
+        "goal": "Отделить желаемый доход от безопасного минимума.",
+        "question_ru": "Какой доход и в какой валюте вы считаете желаемым? Можно ответить «не знаю».",
+        "question_be": "Які даход і ў якой валюце вы лічыце жаданым? Можна адказаць «не ведаю».",
+        "block": "financial_pressure",
+    },
+    "learning_capacity": {
+        "priority": 68, "critical": False, "importance": "useful",
+        "goal": "Ограничить маршруты реальной возможностью учиться.",
+        "question_ru": "Сколько времени в неделю вы реально можете учиться?",
+        "question_be": "Колькі часу на тыдзень вы рэальна можаце вучыцца?",
+        "block": "career_transition",
+    },
+    "income_stepdown": {
+        "priority": 64, "critical": False, "importance": "useful",
+        "goal": "Оценить финансовую безопасность переходного уровня.",
+        "question_ru": "Допустимо ли временно снизить доход или должность, и если да — насколько?",
+        "question_be": "Ці дапушчальна часова знізіць даход або пасаду, і калі так — наколькі?",
+        "block": "career_transition",
+    },
+    "change_scale": {
+        "priority": 62, "critical": False, "importance": "useful",
+        "goal": "Различить смену роли, отрасли и полное переобучение.",
+        "question_ru": "Какой масштаб смены вы хотите: новая роль рядом с текущей, новая отрасль или полный разворот?",
+        "question_be": "Які маштаб змены вы хочаце: новая роля побач з цяперашняй, новая галіна або поўны паварот?",
+        "block": "career_transition",
     },
     "functional_readiness": {
         "priority": 72,
@@ -237,6 +308,8 @@ def build_evidence_profile_from_analysis(analysis: dict | None) -> CareerEvidenc
 
     if any(token in " ".join(missing) for token in ["доход", "income", "зарплат"]):
         gaps.append("minimum_income")
+    if any(token in " ".join(missing) for token in ["стран", "рынок", "country", "market"]):
+        gaps.extend(["residence_country", "target_country"])
     if any(token in " ".join(missing) for token in ["срок", "быстро", "urgency", "deadline"]):
         gaps.append("income_deadline")
     if any(token in " ".join(missing) for token in ["документ", "право", "license", "legal"]):
@@ -245,13 +318,25 @@ def build_evidence_profile_from_analysis(analysis: dict | None) -> CareerEvidenc
         gaps.append("location_language")
     if any(token in " ".join(missing) for token in ["огранич", "здоров", "дет", "график", "load"]):
         gaps.append("work_constraints")
+    if any(token in " ".join(missing) for token in ["формат", "remote", "офис", "гибрид"]):
+        gaps.append("work_format")
+    if any(token in " ".join(missing) for token in ["релокац", "переезд", "relocation"]):
+        gaps.append("relocation")
+    if any(token in " ".join(missing) for token in ["желаем", "salary target", "валют"]):
+        gaps.append("salary_target")
+    if any(token in " ".join(missing) for token in ["учиться", "обучен", "learning"]):
+        gaps.append("learning_capacity")
+    if any(token in " ".join(missing) for token in ["сниж", "stepdown"]):
+        gaps.append("income_stepdown")
+    if any(token in " ".join(missing) for token in ["масштаб смен", "change scale"]):
+        gaps.append("change_scale")
     if any(token in " ".join(missing) for token in ["поддерж", "support", "ресурс"]):
         gaps.append("support_and_load")
     if any(token in " ".join(missing) for token in ["уров", "level", "entry"]):
         gaps.append("transition_level")
 
     if not gaps:
-        gaps = ["minimum_income", "income_deadline", "legal_access", "location_language"]
+        gaps = ["residence_country", "target_country", "minimum_income", "income_deadline", "legal_access", "location_language"]
 
     # Preserve order by business priority and avoid duplicates.
     dedup = {key for key in gaps if key in _GAP_DEFINITIONS}
@@ -271,6 +356,8 @@ def next_question_from_profile(
     from services.interview_policy import select_next_gap
 
     asked = asked_gap_keys or set()
+    if len(asked) >= MAX_ADDITIONAL_QUESTIONS:
+        return None
 
     # Policy-driven selection: scored, behavioural, prohibition-aware
     result = select_next_gap(profile, asked_gaps=asked, user_mode=user_mode, language=language)
@@ -311,13 +398,32 @@ def apply_answer_to_profile(profile: CareerEvidenceProfile, gap_key: str, answer
     if not text:
         return profile
 
+    if text.casefold() in {"не знаю", "не хочу отвечать", "пропустить", "unknown", "skip"}:
+        text = "unknown"
+
     evidence = EvidenceItem(
         statement=text,
         source="user_clarification",
         confidence="probable",
     )
-    if gap_key == "minimum_income":
+    if gap_key == "residence_country":
+        profile.residence_country = evidence
+    elif gap_key == "target_country":
+        profile.target_countries.append(evidence)
+    elif gap_key == "minimum_income":
         profile.minimum_income = evidence
+    elif gap_key == "salary_target":
+        profile.salary_target = evidence
+    elif gap_key == "work_format":
+        profile.work_format_preferences.append(evidence)
+    elif gap_key == "relocation":
+        profile.relocation_possible = evidence
+    elif gap_key == "learning_capacity":
+        profile.learning_capacity = evidence
+    elif gap_key == "income_stepdown":
+        profile.acceptable_income_drop = evidence
+    elif gap_key == "change_scale":
+        profile.desired_change_scale = evidence
     elif gap_key == "income_deadline":
         profile.income_deadline = evidence
     elif gap_key == "work_constraints":
@@ -342,3 +448,19 @@ def apply_answer_to_profile(profile: CareerEvidenceProfile, gap_key: str, answer
 def profile_ready_for_safe_conclusion(profile: CareerEvidenceProfile) -> bool:
     critical = [key for key in profile.unresolved_gaps if bool(_GAP_DEFINITIONS.get(key, {}).get("critical", False))]
     return len(critical) == 0
+
+
+def classify_profile_gaps(profile: CareerEvidenceProfile) -> dict[DataImportance, list[str]]:
+    """Return one explicit completeness contract shared by interview and report code.
+
+    Unknown/refused answers count as answered: they remain uncertainties in the
+    report and must never start another questioning cycle.
+    """
+    result: dict[DataImportance, list[str]] = {"blocking": [], "useful": [], "optional": []}
+    for gap_key in profile.unresolved_gaps:
+        meta = _GAP_DEFINITIONS.get(gap_key, {})
+        importance = str(meta.get("importance") or ("blocking" if meta.get("critical") else "useful"))
+        if importance not in result:
+            importance = "optional"
+        result[importance].append(gap_key)  # type: ignore[index]
+    return result

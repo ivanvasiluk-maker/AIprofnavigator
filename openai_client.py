@@ -1139,6 +1139,12 @@ class CareerOpenAIClient:
 Правила:
 - используй только факты из входа, не превращай гипотезы в факты;
 - формируй самостоятельное заключение из фактов пользователя, не пытайся воспроизводить готовый образец;
+- сначала выдели функции, переносимые навыки и отраслевой опыт, затем создай широкий список ролей и отфильтруй его по рынку; не выбирай из фиксированного списка и не копируй профессии из примеров;
+- context.residence_country и context.target_countries не смешивай; preferred_currency определяй по целевому рынку (Литва=EUR, Польша=PLN);
+- если нет проверяемого источника и даты рыночных данных, не придумывай зарплату: market_data_sources=[], market_data_confidence="low", а в market_notes напиши «Диапазон требует рыночной проверки»;
+- для каждого маршрута выбери отдельный entry_path и сделай уникальными why_it_fits, missing, risks, market_test и disconfirming_conditions;
+- каждый существенный route claim помести в evidence_claims с непустыми evidence_fact_ids; claim без фактов запрещён;
+- психологические и социальные условия выводи только из явно сообщённых фактов, без диагнозов;
 - основной маршрут обязан ссылаться минимум на два evidence_id;
 - primary_routes обязательны;
 - transition_routes добавляй только для доказанного карьерного моста;
@@ -1213,7 +1219,7 @@ class CareerOpenAIClient:
         diagnostics["repair_started"] = True
         current_assessment = assessment
         current_validation = validation
-        for attempt in range(1, 3):
+        for attempt in range(1, 2):
             repair_prompt = """Исправь CareerAssessment по точным ошибкам валидации.
 
 Правила repair:
@@ -1280,7 +1286,7 @@ class CareerOpenAIClient:
         fallback.metadata.update(
             {
                 "recovered_by": "deterministic_fallback",
-                "fallback_reason": "Two repair attempts did not produce a valid CareerAssessment",
+                "fallback_reason": "One repair attempt did not produce a valid CareerAssessment",
                 "fallback_validation": validate_career_assessment(
                     fallback,
                     snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,

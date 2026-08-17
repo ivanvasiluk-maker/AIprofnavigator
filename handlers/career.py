@@ -283,7 +283,7 @@ async def _maybe_trigger_career_finalization(message: Message, state: FSMContext
 
     required_questions_completed = bool(data.get("required_questions_completed")) or bool((data.get("profile_snapshot") or {}).get("ready_for_report"))
     clarification_limit_reached = bool(data.get("clarification_limit_reached")) or (
-        int(data.get("readiness_clarification_count") or 0) >= (2 if str(data.get("user_mode") or "calm_steps") == "fast" else 4)
+        int(data.get("readiness_clarification_count") or 0) >= 6
     )
     report_already_generated = bool(data.get("report_already_generated"))
     report_generation_in_progress = bool(data.get("report_generation_in_progress"))
@@ -335,35 +335,25 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
             await _build_and_send_report(message, state, lang) if message else None
             report = (await state.get_data()).get("final_report") if isinstance((await state.get_data()).get("final_report"), dict) else {}
         if not report:
-            payload = {
-                "status": "preliminary",
-                "professional_core": "Вы превращаете исследования рынка и клиентов в продуктовые и маркетинговые решения, умеете формулировать позиционирование и руководить командой.",
-                "main_route": "Product Marketing / Product Discovery",
-                "alternative_route": "EdTech Product или образовательные проекты",
-                "missing_data": ["точный язык", "бюджет обучения", "портфолио", "документы"],
-                "first_step": "Найдите по пять вакансий Product Marketing и EdTech Product. Отметьте, какие требования уже закрывает ваш опыт и какие два пробела повторяются чаще всего.",
-            }
+            payload = _ensure_preliminary_report({}, data)
+            decision = payload.get("career_decision") or {}
+            route = str(decision.get("recommended_main_path") or "Маршрут на основе подтверждённых функций")
             fallback_text = (
-                "Профессиональное ядро:\n"
-                "«Вы превращаете исследования рынка и клиентов в продуктовые и маркетинговые решения, умеете формулировать позиционирование и руководить командой».\n\n"
-                "Основной предварительный маршрут:\n"
-                "«Product Marketing / Product Discovery».\n\n"
-                "Альтернативный маршрут:\n"
-                "«EdTech Product или образовательные проекты».\n\n"
-                "Первый шаг:\n"
-                "«Найдите по пять вакансий Product Marketing и EdTech Product. Отметьте, какие требования уже закрывает ваш опыт и какие два пробела повторяются чаще всего».\n\n"
-                "Отсутствующие данные: точный язык, бюджет обучения, портфолио, документы."
+                "Предварительное карьерное заключение\n\n"
+                f"Основной маршрут: {route}.\n"
+                "Уверенность: низкая — критичные неизвестные явно сохранены.\n\n"
+                "Первые шаги:\n"
+                f"1. Найти пять вакансий «{route}» на выбранном рынке.\n"
+                "2. Упаковать один подтверждённый кейс из прошлого опыта.\n"
+                "3. Обсудить требования входа с одним специалистом этой роли.\n\n"
+                "Диапазон требует рыночной проверки."
             )
             if message is not None:
                 await message.answer(fallback_text)
             await state.update_data(
-                final_report=payload,
-                final_report_generated=True,
-                short_report_sent=True,
-                report_already_generated=True,
-                report_generation_status="REPORT_READY",
-                html_report_generated=False,
-                report_generation_in_progress=False,
+                final_report=payload, final_report_generated=True, short_report_sent=True,
+                report_already_generated=True, report_generation_status="REPORT_READY",
+                html_report_generated=False, report_generation_in_progress=False,
                 final_report_validated_after_rebuild=True,
             )
             await state.set_state(CareerFlow.REPORT_READY)
@@ -411,33 +401,17 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
             await state.set_state(CareerFlow.REPORT_READY)
     except Exception as exc:
         print(f"[finalize] failed: {type(exc).__name__}: {exc}", flush=True)
-        fallback_text = (
-            "Профессиональное ядро:\n"
-            "«Вы превращаете исследования рынка и клиентов в продуктовые и маркетинговые решения, умеете формулировать позиционирование и руководить командой».\n\n"
-            "Основной предварительный маршрут:\n"
-            "«Product Marketing / Product Discovery».\n\n"
-            "Альтернативный маршрут:\n"
-            "«EdTech Product или образовательные проекты».\n\n"
-            "Первый шаг:\n"
-            "«Найдите по пять вакансий Product Marketing и EdTech Product. Отметьте, какие требования уже закрывает ваш опыт и какие два пробела повторяются чаще всего»."
-        )
+        payload = _ensure_preliminary_report({}, data)
+        route = str((payload.get("career_decision") or {}).get("recommended_main_path") or "Маршрут на основе подтверждённых функций")
+        fallback_text = (f"Предварительное карьерное заключение\n\nОсновной маршрут: {route}.\n"
+                         "Уверенность: низкая. Диапазон требует рыночной проверки.\n\n"
+                         "Первые шаги: 1) пять вакансий; 2) один кейс; 3) один разговор со специалистом.")
         if message is not None:
             await message.answer(fallback_text)
         await state.update_data(
-            final_report={
-                "status": "preliminary",
-                "professional_core": "Вы превращаете исследования рынка и клиентов в продуктовые и маркетинговые решения, умеете формулировать позиционирование и руководить командой.",
-                "main_route": "Product Marketing / Product Discovery",
-                "alternative_route": "EdTech Product или образовательные проекты",
-                "missing_data": ["точный язык", "бюджет обучения", "портфолио", "документы"],
-                "first_step": "Найдите по пять вакансий Product Marketing и EdTech Product. Отметьте, какие требования уже закрывает ваш опыт и какие два пробела повторяются чаще всего.",
-            },
-            short_report_sent=True,
-            final_report_generated=True,
-            report_already_generated=True,
-            report_generation_status="REPORT_READY",
-            report_generation_in_progress=False,
-            html_report_generated=False,
+            final_report=payload, short_report_sent=True, final_report_generated=True,
+            report_already_generated=True, report_generation_status="REPORT_READY",
+            report_generation_in_progress=False, html_report_generated=False,
         )
         await state.set_state(CareerFlow.REPORT_READY)
 
@@ -1136,13 +1110,25 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
     if not country_config and str(route_context.get("country") or data.get("country") or "").strip():
         country_config = _resolve_country_config(str(route_context.get("country") or data.get("country") or ""))
 
+    evidence_profile = data.get("evidence_profile") if isinstance(data.get("evidence_profile"), dict) else {}
+    residence_evidence = evidence_profile.get("residence_country") if isinstance(evidence_profile.get("residence_country"), dict) else {}
+    target_evidence = evidence_profile.get("target_countries") if isinstance(evidence_profile.get("target_countries"), list) else []
+    residence_country = str(residence_evidence.get("statement") or route_context.get("residence_country") or data.get("residence_country") or "").strip()
+    target_countries = [str(item.get("statement") or "").strip() for item in target_evidence if isinstance(item, dict) and str(item.get("statement") or "").strip()]
+    if not target_countries and str(route_context.get("country") or "").strip():
+        target_countries = [str(route_context.get("country") or "").strip()]
     snapshot: dict[str, object] = {
         "country_code": str((country_config or {}).get("country_code") or "UNKNOWN").upper(),
         "country_name": str((country_config or {}).get("country_name") or str(route_context.get("country") or "").strip() or "").strip(),
+        "residence_country": residence_country,
+        "target_countries": target_countries,
         "city": str(route_context.get("city") or "").strip(),
         "currency": str((country_config or {}).get("currency") or "EUR").upper(),
         "local_language": str((country_config or {}).get("local_language") or "-").strip(),
         "market_locale": str((country_config or {}).get("market_locale") or "unknown").strip(),
+        "market_data_date": None,
+        "market_data_sources": [],
+        "market_data_confidence": "low",
         "answers_text": str(data.get("answers_text") or "").strip(),
         "story_text": str(data.get("story_text") or "").strip(),
         "story_analysis": dict(data.get("story_analysis") or {}) if isinstance(data.get("story_analysis"), dict) else {},
@@ -5237,7 +5223,7 @@ def validate_final_report(profile_domain: str, selected_route: str, first_step: 
 
 def _construction_final_case_block() -> str:
     return (
-        "Ваш основной маршрут — не уход в любую офисную работу, а возвращение в строительную сферу через адаптационный мост.\n\n"
+        "Ваш основной маршрут — возвращение в строительную сферу через адаптационный мост.\n\n"
         "Ближайшая цель на 3–6 месяцев: выйти на одну из ролей:\n"
         "- Assistant Cost Estimator;\n"
         "- Junior Quantity Surveyor;\n"
@@ -5333,6 +5319,9 @@ def _apply_selected_route_regeneration(report: dict, route_payload: dict[str, ob
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
     if roles:
         decision["recommended_main_path"] = " / ".join(roles[:2])
+        # Keep the legacy and canonical representations synchronized.  Otherwise
+        # _ensure_canonical_career_decision prefers the stale main_route value.
+        decision["main_route"] = decision["recommended_main_path"]
         if len(roles) > 2:
             decision["backup_path"] = " / ".join(roles[2:4])
     decision["why_this_path"] = goal
@@ -6677,18 +6666,23 @@ def _ensure_preliminary_report(report: dict, data: dict) -> dict:
     if not isinstance(report, dict):
         report = {}
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
-    decision.setdefault("recommended_main_path", "Product Marketing / Product Discovery")
-    decision.setdefault("backup_path", "EdTech Product / образовательный проект")
+    analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    hypotheses = [str(item).strip() for item in analysis.get("professional_core_hypotheses") or [] if str(item).strip()]
+    current_identity = str(analysis.get("current_identity") or "").strip()
+    main_hypothesis = hypotheses[0] if hypotheses else current_identity or "Маршрут на основе подтверждённых функций"
+    backup_hypothesis = hypotheses[1] if len(hypotheses) > 1 else "Смежная роль с максимальным сохранением опыта"
+    decision.setdefault("recommended_main_path", main_hypothesis)
+    decision.setdefault("backup_path", backup_hypothesis)
     report["career_decision"] = decision
-    report.setdefault("market_analysis", [{"signal": "Переносимые навыки маркетинга и управления продуктом можно проверить без увольнения."}])
-    report.setdefault("career_recommendations", ["Проверить переход в product marketing или product discovery через короткий проект."])
+    report.setdefault("market_analysis", [{"signal": "Рыночная доступность и диапазон дохода требуют проверки по выбранной стране; цифры не оценивались без источника."}])
+    report.setdefault("career_recommendations", [f"Проверить гипотезу «{main_hypothesis}» на вакансиях целевого рынка без увольнения."])
     digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
     digital_human.setdefault("current_state", str(data.get("story_text") or "Опытный специалист с переносимыми навыками" )[:500])
-    digital_human.setdefault("main_asset", "анализ, интервью, позиционирование и управление командой")
+    digital_human.setdefault("main_asset", ", ".join(str(item) for item in (analysis.get("strengths") or [])[:4]) or "подтверждённые функции из истории")
     report["digital_human"] = digital_human
     action_plan = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
     today = action_plan.get("today") if isinstance(action_plan.get("today"), dict) else {}
-    today.setdefault("action", "Провести одно интервью с product marketing или product discovery специалистом и сравнить задачи с текущей ролью.")
+    today.setdefault("action", f"Найти пять вакансий «{main_hypothesis}» в выбранной стране и отметить требования, подтверждённые вашим опытом.")
     today.setdefault("timebox", "30 минут")
     action_plan["today"] = today
     report["action_plan"] = action_plan
@@ -6706,10 +6700,6 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     if await _maybe_switch_to_crisis_support(message, state, lang, combined_input, source="report_build"):
         return
 
-    if not settings.legacy_career_report_enabled:
-        await _build_and_send_career_assessment(message, state, lang, data)
-        return
-    
     report_generation_id = str(data.get("report_generation_id") or "").strip()
     if report_generation_id:
         stored = get_report_by_generation_id(report_generation_id)
@@ -6728,6 +6718,10 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             await _track_event(message, state, "report_reused_idempotent", meta={"report_generation_id": report_generation_id})
             await _present_route_selection(message, state, lang, stored_report)
             return
+
+    if not settings.legacy_career_report_enabled:
+        await _build_and_send_career_assessment(message, state, lang, data)
+        return
 
     story_text = (data.get("story_text") or "").strip()
     story_analysis = data.get("story_analysis") or {}
@@ -6992,7 +6986,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
     # Report Readiness Gate: if report is essentially empty, ask one clarifying question
     clarification_count = int(data.get("readiness_clarification_count") or 0)
-    max_clarifications = 2 if str(data.get("user_mode") or "calm_steps") == "fast" else 4
+    max_clarifications = 6
     if _report_draft_is_empty(report) and clarification_count < max_clarifications:
         await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
