@@ -510,7 +510,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(state.data.get("career_strategy"), {"fast_income", "upskill_for_profile", "long_transition"})
         self.assertTrue(save_profile.called)
 
-    async def test_route_context_is_required_before_report_generation(self) -> None:
+    async def test_missing_route_context_does_not_block_report_generation(self) -> None:
         state = FakeState(
             data={
                 "language": "ru",
@@ -527,8 +527,8 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
                 await complete_barriers(message, state)
 
         self.assertEqual(state.current_state, CareerFlow.waiting_for_barriers.state)
-        start_route_context.assert_awaited_once()
-        build_report.assert_not_awaited()
+        start_route_context.assert_not_awaited()
+        build_report.assert_awaited_once()
 
     async def test_route_context_last_answer_continues_to_report(self) -> None:
         state = FakeState(

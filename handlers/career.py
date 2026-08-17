@@ -6805,11 +6805,6 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         route_context_block = _route_context_section_text({str(key): str(value) for key, value in route_context.items()})
         if route_context_block:
             answers_text = (answers_text + "\n\nМинимальные данные для маршрута:\n" + route_context_block).strip()
-    if _route_context_missing({**data, "route_context": route_context}):
-        await state.update_data(route_context_index=int(data.get("route_context_index") or 0), awaiting_route_context=True)
-        await _start_route_context_intake(message, state, lang)
-        return
-
     snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
@@ -6823,7 +6818,10 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     await state.update_data(profile_snapshot=snapshot)
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
-    save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
+    try:
+        save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
+    except Exception:
+        pass
     user_mode = str(data.get("user_mode") or "calm_steps")
     decision_layers = _build_decision_layers(data, story_analysis, answers_text)
     report_generation_id = report_generation_id or str(uuid.uuid4())
@@ -7091,7 +7089,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     session_id = str(data.get("session_id") or "").strip()
     assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     profile_version = str(data.get("profile_version") or assessment_id)
-    save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
+    try:
+        save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
+    except Exception:
+        pass
     await state.update_data(
         profile_snapshot=snapshot,
         assessment_id=assessment_id,
@@ -7125,7 +7126,6 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             profile_version=profile_version,
         )
         preliminary_payload = preliminary.to_dict()
-        save_report_version(assessment_id, public_user_id, preliminary_payload, session_id=session_id)
         await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
         await state.update_data(
             career_assessment=preliminary_payload,
@@ -7148,6 +7148,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             render_telegram_map(preliminary),
             reply_markup=first_step_selection_keyboard(preliminary),
         )
+        try:
+            save_report_version(assessment_id, public_user_id, preliminary_payload, session_id=session_id)
+        except Exception:
+            pass
         await message.answer(
             "Я сохранил ваши ответы и подготовил предварительную карту, но подробный документ пока не прошёл "
             "техническую проверку. Вы можете пользоваться кратким выводом, а документ можно попробовать пересобрать.",
@@ -7160,7 +7164,19 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         snapshot_country_code=str(snapshot.get("country_code") or "") or None,
         snapshot_currency=str(snapshot.get("currency") or "") or None,
     )
-    validation.require_valid()
+    if not validation.valid:
+        assessment = build_preliminary_assessment(
+            snapshot,
+            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+            assessment_id=assessment_id,
+            session_id=session_id,
+            profile_version=profile_version,
+        )
+        validation = validate_career_assessment(
+            assessment,
+            snapshot_country_code=str(snapshot.get("country_code") or "") or None,
+            snapshot_currency=str(snapshot.get("currency") or "") or None,
+        )
     diagnostics = dict(assessment.metadata)
     diagnostics.update(runtime_meta)
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
@@ -7169,7 +7185,6 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
     }.get(recovered_by, "ASSESSMENT_READY")
     assessment_payload = assessment.to_dict()
-    save_report_version(assessment_id, public_user_id, assessment_payload, session_id=session_id)
     await state.update_data(
         career_assessment=assessment_payload,
         final_report=assessment_payload,
@@ -7197,6 +7212,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         render_telegram_map(assessment),
         reply_markup=first_step_selection_keyboard(assessment),
     )
+    try:
+        save_report_version(assessment_id, public_user_id, assessment_payload, session_id=session_id)
+    except Exception:
+        pass
 
     html_report_path = ""
     try:
@@ -8427,11 +8446,6 @@ async def complete_barriers(message: Message, state: FSMContext) -> None:
     if not selected:
         selected = ["Не указано"]
     await state.update_data(selected_psych_markers=selected, selected_fears=selected[:6])
-    if _route_context_missing(data):
-        await state.update_data(awaiting_route_context=True, route_context_index=int(data.get("route_context_index") or 0))
-        await _start_route_context_intake(message, state, lang)
-        return
-    await _maybe_trigger_career_finalization(message, state, trigger="last_required_answer")
     await _build_and_send_report(message, state, lang)
 
 

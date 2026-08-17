@@ -513,8 +513,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
                 unittest.mock.patch("handlers.career.ai_client.build_career_assessment", new=AsyncMock(return_value=repaired)),
                 unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path),
                 unittest.mock.patch("handlers.career._track_event", new=AsyncMock()) as track_event,
-                unittest.mock.patch("handlers.career.save_profile_version"),
-                unittest.mock.patch("handlers.career.save_report_version"),
+                unittest.mock.patch("handlers.career.save_profile_version", side_effect=OSError("database unavailable")),
+                unittest.mock.patch("handlers.career.save_report_version", side_effect=OSError("database unavailable")),
                 unittest.mock.patch("handlers.career.update_report_files"),
                 unittest.mock.patch.dict("os.environ", {"RAILWAY_GIT_COMMIT_SHA": "5775a3abcd9f23ee2f2617fa0dd4390ce9c694c6"}),
             ):
@@ -581,6 +581,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state.data["final_report_generated"])
         self.assertFalse(state.data["awaiting_route_context"])
         self.assertTrue(any("не буду блокировать результат" in call.args[0] for call in message.answer.await_args_list))
+        self.assertTrue(any("Основной маршрут:" in call.args[0] for call in message.answer.await_args_list))
         message.answer_document.assert_awaited_once()
 
     async def test_html_failure_keeps_assessment_and_offers_document_retry(self) -> None:
