@@ -1,0 +1,30 @@
+{
+  "change_id": "UNIVERSAL_CANONICAL_STRATEGY_P0_2026_08_18",
+  "source_error_codes": [
+    "KNOWN_FACT_LOST",
+    "DUPLICATE_SCENARIO",
+    "MISSING_MARKET_SOURCE",
+    "CROSS_ASSESSMENT_LEAK"
+  ],
+  "affected_profiles_expected_to_improve": [
+    "All profiles with facts distributed across messages and documents",
+    "Profiles using country, income, constraints, private practice or regulated work"
+  ],
+  "profiles_at_regression_risk": [
+    "Legacy snapshots without canonical fact groups",
+    "Assessments generated without a configured market provider"
+  ],
+  "universal_rule_changed": "Architecture rule: every report section consumes the assessment-scoped canonical profile, scenarios differ on decision dimensions, and market numbers require auditable provider evidence.",
+  "files_to_change": [
+    "services/canonical_profile.py",
+    "services/career_assessment.py",
+    "services/market_research.py",
+    "openai_client.py",
+    "handlers/career.py",
+    "tests/test_p0_canonical_profile.py",
+    "tests/test_market_research_provider.py"
+  ],
+  "feature_flag": "career_assessment_v2 (LEGACY_CAREER_REPORT_ENABLED=false)",
+  "rollback_condition": "Rollback if canonical scoping loses current-assessment evidence, permits cross-assessment facts, or numeric market claims appear without source records.",
+  "acceptance_condition": "Tests reproducibly prove complete canonical groups, document scoping, income propagation, distinct scenario validation, honest provider fallback, and no profession fixture hardcoding."
+}

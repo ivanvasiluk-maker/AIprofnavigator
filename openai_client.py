@@ -1130,9 +1130,19 @@ class CareerOpenAIClient:
             "session_id": session_id,
             "profile_version": profile_version,
         }
+        # The generator receives one evidence source. Derived country/currency values
+        # are transport guards only and may not compete with canonical facts.
         model_profile = {
-            key: value for key, value in profile_snapshot.items()
-            if key not in {"story_text", "answers_text", "story_analysis", "resume_analysis", "route_context", "fact_ledger"}
+            "canonical_profile": copy.deepcopy(profile_snapshot.get("canonical_profile") or {}),
+            "transport_guards": {
+                "country_code": profile_snapshot.get("country_code"),
+                "currency": profile_snapshot.get("currency"),
+            },
+            "market_research": {
+                "date": profile_snapshot.get("market_data_date"),
+                "sources": copy.deepcopy(profile_snapshot.get("market_data_sources") or []),
+                "confidence": profile_snapshot.get("market_data_confidence") or "low",
+            },
         }
         prompt = """Собери единый CareerAssessment только по canonical_profile из входного ProfileSnapshot.
 

@@ -12,7 +12,9 @@ FactType = Literal[
     "profession", "professional_function", "skill", "responsibility", "achievement",
     "education", "certification", "work_condition", "constraint", "undesirable_task",
     "interest", "income_requirement", "market_context", "language",
-    "work_authorization", "preferred_format",
+    "work_authorization", "preferred_format", "experience", "industry",
+    "health_related_limit", "family_constraint", "relocation", "business_trip",
+    "learning_resource", "transition_urgency", "desired_change_scale",
 ]
 
 CITY_COUNTRIES = {
@@ -32,8 +34,15 @@ class CanonicalFact(BaseModel):
     source_message_id: str
     source_quote: str
     confidence: float = Field(ge=0, le=1)
-    created_at: str
+    updated_at: str
     supersedes_fact_id: str | None = None
+    status: Literal["active", "superseded"] = "active"
+    needs_clarification: bool = False
+
+    @property
+    def created_at(self) -> str:
+        """Compatibility alias for profiles persisted before the P0 contract."""
+        return self.updated_at
 
 
 class QuestionState(BaseModel):
@@ -60,8 +69,35 @@ class CanonicalProfile(BaseModel):
     contradictions: list[list[str]] = Field(default_factory=list)
     question_state: QuestionState = Field(default_factory=QuestionState)
 
+    def grouped(self) -> dict[str, list[CanonicalFact]]:
+        """Return the complete, stable contract consumed by every report section."""
+        mapping = {
+            "identity": ("profession",), "experience": ("experience",),
+            "professional_functions": ("professional_function",), "skills": ("skill",),
+            "responsibilities": ("responsibility",), "achievements": ("achievement",),
+            "education": ("education",), "certifications": ("certification",),
+            "industries": ("industry",), "languages": ("language",),
+            "location": ("market_context",), "target_markets": ("market_context",),
+            "work_authorization": ("work_authorization",),
+            "current_income": ("income_requirement",), "minimum_income": ("income_requirement",),
+            "target_income": ("income_requirement",), "preferred_formats": ("preferred_format",),
+            "interests": ("interest",), "undesirable_tasks": ("undesirable_task",),
+            "constraints": ("constraint",), "health_related_limits": ("health_related_limit",),
+            "family_constraints": ("family_constraint",), "relocation": ("relocation",),
+            "business_trips": ("business_trip",), "learning_resources": ("learning_resource",),
+            "transition_urgency": ("transition_urgency",), "desired_change_scale": ("desired_change_scale",),
+        }
+        result: dict[str, list[CanonicalFact]] = {}
+        for group, types in mapping.items():
+            facts = [fact for fact in self.facts if fact.status == "active" and fact.fact_type in types]
+            if group.endswith("income"):
+                kind = group.removesuffix("_income")
+                facts = [fact for fact in facts if isinstance(fact.normalized_value, dict) and fact.normalized_value.get("kind") == kind]
+            result[group] = facts
+        return result
+
     def facts_of_type(self, fact_type: str) -> list[CanonicalFact]:
-        return [fact for fact in self.facts if fact.fact_type == fact_type]
+        return [fact for fact in self.facts if fact.fact_type == fact_type and fact.status == "active"]
 
     def latest_value(self, fact_type: str, key: str | None = None) -> Any:
         matches = self.facts_of_type(fact_type)
@@ -85,7 +121,7 @@ def _fact(assessment_id: str, fact_type: FactType, value: Any, message_id: str, 
         fact_id=f"fact_{uuid4().hex}", assessment_id=assessment_id, fact_type=fact_type,
         normalized_value=value, source_message_id=message_id or "assessment_input",
         source_quote=quote, confidence=confidence,
-        created_at=created_at or datetime.now(timezone.utc).isoformat(),
+        updated_at=created_at or datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -95,17 +131,29 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     Structured answers are appended after the original story/resume and therefore win when
     ``latest_value`` is used. Conflicting evidence remains in ``facts`` for auditability.
     """
-    profile = CanonicalProfile(assessment_id=assessment_id)
+    persisted = data.get("canonical_profile")
+    if isinstance(persisted, dict) and str(persisted.get("assessment_id") or "") == assessment_id:
+        profile = CanonicalProfile.model_validate(persisted)
+        # Defensive isolation even if corrupted state contains a foreign fact.
+        profile.facts = [fact for fact in profile.facts if fact.assessment_id == assessment_id]
+    else:
+        profile = CanonicalProfile(assessment_id=assessment_id)
     sources: list[tuple[str, str, str]] = []
     for key in ("story_text", "answers_text"):
         text = str(data.get(key) or "")
         if text.strip():
             sources.append((key, text, ""))
-    for row in data.get("source_messages") or []:
-        if isinstance(row, dict) and str(row.get("text") or "").strip():
-            sources.append((str(row.get("message_id") or "message"), str(row["text"]), str(row.get("created_at") or "")))
+    for collection in ("source_messages", "uploaded_documents"):
+        for row in data.get(collection) or []:
+            if (isinstance(row, dict)
+                    and str(row.get("assessment_id") or assessment_id) == assessment_id
+                    and str(row.get("text") or row.get("content") or "").strip()):
+                body = str(row.get("text") or row.get("content") or "")
+                sources.append((str(row.get("message_id") or row.get("document_id") or "message"), body, str(row.get("created_at") or "")))
     for row in data.get("qa_answers") or []:
-        if isinstance(row, dict) and str(row.get("answer") or "").strip():
+        if (isinstance(row, dict)
+                and str(row.get("assessment_id") or assessment_id) == assessment_id
+                and str(row.get("answer") or "").strip()):
             sources.append((str(row.get("source_message_id") or row.get("question_id") or "clarification"), str(row["answer"]), str(row.get("created_at") or "")))
 
     route = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
@@ -113,6 +161,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         "country": route.get("country") or data.get("country"), "city": route.get("city") or data.get("city"),
         "work_authorization": route.get("documents_and_work_rights") or data.get("work_authorization_status"),
         "minimum_income": route.get("minimum_monthly_income") or data.get("minimum_income"),
+        "current_income": route.get("current_monthly_income") or data.get("current_income"),
         "target_income": route.get("desired_monthly_income") or data.get("target_income"),
         "income_urgency": route.get("income_urgency") or data.get("income_urgency"),
         "language": route.get("current_language_level") or data.get("current_language_level"),
@@ -153,8 +202,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     mapped = CITY_COUNTRIES.get(city.casefold().replace("ё", "е"))
     add_structured("market_context", {"city": city or None, "country": country or (mapped[0] if mapped else None), "country_code": mapped[1] if mapped else None}, f"{city}, {country}".strip(", "))
     add_structured("work_authorization", structured["work_authorization"], str(structured["work_authorization"] or ""))
-    for kind in ("minimum_income", "target_income"):
-        add_structured("income_requirement", {"kind": "minimum" if kind == "minimum_income" else "target", "display": structured[kind]}, str(structured[kind] or ""))
+    for kind in ("current_income", "minimum_income", "target_income"):
+        add_structured("income_requirement", {"kind": kind.removesuffix("_income"), "display": structured[kind]}, str(structured[kind] or ""))
     add_structured("income_requirement", {"kind": "urgency", "display": structured["income_urgency"]}, str(structured["income_urgency"] or ""))
     add_structured("language", {"display": structured["language"]}, str(structured["language"] or ""))
     add_structured("preferred_format", structured["format"], str(structured["format"] or ""))
@@ -197,10 +246,21 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                         f"{analysis_name}:{key}", text, .8,
                     ))
 
-    authorization_facts = profile.facts_of_type("work_authorization")
-    normalized_auth = {str(item.normalized_value).casefold() for item in authorization_facts}
-    if len(normalized_auth) > 1:
-        profile.contradictions.append([item.fact_id for item in authorization_facts])
+    # Never resolve conflicting confirmed facts silently. Explicitly linked
+    # corrections supersede their predecessor; all other conflicts remain open.
+    for fact_type in ("work_authorization", "market_context", "income_requirement", "language"):
+        facts = profile.facts_of_type(fact_type)
+        def conflict_key(item: CanonicalFact) -> str:
+            value = str(item.normalized_value).casefold().strip()
+            if fact_type == "work_authorization":
+                if value in {"true", "есть", "да", "authorized"}:
+                    return "yes"
+                if value in {"false", "нет", "не имею", "without"}:
+                    return "no"
+            return value
+        by_value = {conflict_key(item) for item in facts if item.confidence >= .8}
+        if len(by_value) > 1 and fact_type == "work_authorization":
+            profile.contradictions.append([item.fact_id for item in facts])
 
     state_raw = data.get("question_state") if isinstance(data.get("question_state"), dict) else {}
     profile.question_state = QuestionState.model_validate(state_raw)
@@ -245,6 +305,17 @@ def select_clarifying_question(profile: CanonicalProfile) -> ClarifyingQuestion 
     if state.question_count >= 5:
         return None
     excluded = set(state.answered_gap_ids) | set(state.skipped_gap_ids)
+    if profile.contradictions:
+        facts = [fact for fact in profile.facts if fact.fact_id in profile.contradictions[0]]
+        question_id = "clarify_contradiction"
+        if question_id not in state.asked_question_ids and "contradiction" not in excluded:
+            values = " и ".join(f"«{fact.source_quote}»" for fact in facts[:2])
+            return ClarifyingQuestion(
+                question_id=question_id, target_fact_type=facts[0].fact_type,
+                reason="Подтверждённые ответы противоречат друг другу.",
+                expected_impact="Уточнение предотвращает неверную оценку доступности маршрутов.",
+                text=f"В ваших ответах встречаются разные сведения: {values}. Какой вариант актуален сейчас?",
+            )
     for fact_type, gap_id, text, impact in QUESTION_PRIORITY:
         question_id = f"clarify_{gap_id}"
         if _gap_is_resolved(profile, fact_type, gap_id) or gap_id in excluded or question_id in state.asked_question_ids:
@@ -268,7 +339,9 @@ def record_question_answer(profile: CanonicalProfile, question: ClarifyingQuesti
         return profile
     if gap_id not in state.answered_gap_ids:
         state.answered_gap_ids.append(gap_id)
-    profile.facts.append(_fact(profile.assessment_id, question.target_fact_type, answer.strip(), source_message_id, answer.strip(), .95))
+    uncertain = bool(re.search(r"\b(?:наверное|может быть|не уверен|скорее всего|вроде)\b", answer, re.I))
+    profile.facts.append(_fact(profile.assessment_id, question.target_fact_type, answer.strip(), source_message_id, answer.strip(), .6 if uncertain else .95))
+    profile.facts[-1].needs_clarification = uncertain
     if question.target_fact_type not in state.resolved_fact_types:
         state.resolved_fact_types.append(question.target_fact_type)
     return profile
