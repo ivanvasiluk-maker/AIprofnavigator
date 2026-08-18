@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["confirmed", "probable", "weak", "unknown"]
 DataImportance = Literal["blocking", "useful", "optional"]
-MAX_ADDITIONAL_QUESTIONS = 5
+MAX_ADDITIONAL_QUESTIONS = 7
 EvidenceSource = Literal[
     "user_story",
     "user_clarification",

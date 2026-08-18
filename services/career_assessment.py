@@ -1638,9 +1638,9 @@ def build_deterministic_assessment(
                 f"Основной маршрут для безопасной проверки — {primary[0].title}; "
                 f"уверенность {'низкая' if insufficient_data else 'средняя'}."
             ),
-            what_may_change_conclusion=(
-                [next_question] if next_question else ["Результаты проверки требований рынка"]
-            ),
+            # A question belongs in "what is unknown".  Repeating it verbatim
+            # under "what may change" makes the report look like it asked twice.
+            what_may_change_conclusion=["Результаты проверки требований рынка"],
         ),
         first_steps=[
             FirstStep(
