@@ -2448,7 +2448,7 @@ def _update_evidence_after_answer(data: dict, question_row: dict | object, answe
         profile = apply_answer_to_profile(profile, gap_key, answer_text)
     from services.interview_policy import is_ready_for_conclusion
     mode = str(data.get("user_mode") or "calm_steps")
-    ready = profile_ready_for_safe_conclusion(profile) or is_ready_for_conclusion(profile, user_mode=mode)
+    ready = profile_ready_for_safe_conclusion(profile) and is_ready_for_conclusion(profile, user_mode=mode)
     return profile.model_dump(), ready
 
 
@@ -2523,7 +2523,7 @@ def _apply_hypothesis_action(
         profile = apply_answer_to_profile(profile, gap_key, answer_text)
     from services.interview_policy import is_ready_for_conclusion
     mode = str(data.get("user_mode") or "calm_steps")
-    ready = profile_ready_for_safe_conclusion(profile) or is_ready_for_conclusion(profile, user_mode=mode)
+    ready = profile_ready_for_safe_conclusion(profile) and is_ready_for_conclusion(profile, user_mode=mode)
     return profile.model_dump(), ready
 
 
@@ -7545,7 +7545,7 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     await state.update_data(
         assessment_id=uuid.uuid4().hex,
         source_messages=[{
-            "message_id": str(message.message_id),
+            "message_id": str(getattr(message, "message_id", "")),
             "text": clean,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }],
@@ -7895,7 +7895,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 )
                 return
 
-            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean, "source_message_id": str(getattr(message, "message_id", "")), "created_at": datetime.now(timezone.utc).isoformat()})
             qa_index += 1
             evidence_payload, is_ready = _update_evidence_after_answer(data, current, clean)
             await state.update_data(
@@ -8254,7 +8254,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
             return
 
-        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
+        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean, "source_message_id": str(getattr(message, "message_id", "")), "created_at": datetime.now(timezone.utc).isoformat()})
         signal_payload = _free_text_signal(current, clean)
         if signal_payload:
             qa_answers[-1]["signal"] = signal_payload["signal"]
@@ -8779,7 +8779,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                     "question": str(pending.get("question", f"Вопрос {qa_index + 1}")),
                     "question_id": int(pending.get("question_id", qa_index + 1)),
                     "answer": accepted_answer,
-                    "source_message_id": str(message.message_id),
+                    "source_message_id": str(getattr(message, "message_id", "")),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )

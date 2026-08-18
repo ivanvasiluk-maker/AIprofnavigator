@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any, Literal
 from difflib import SequenceMatcher
+from services.market_strategy import CareerStrategy, validate_market_strategy
 
 
 AssessmentStatus = Literal["preliminary", "full"]
@@ -91,6 +92,9 @@ CAREER_ASSESSMENT_SCHEMA = _object_schema(
                 "learning_budget": _nullable(_MONEY_SCHEMA),
                 "residence_country": _nullable(_STRING),
                 "target_countries": _STRINGS,
+                "employer_countries": _STRINGS,
+                "service_markets": _STRINGS,
+                "remote_market": _nullable(_STRING),
                 "preferred_currency": _nullable(_STRING),
                 "work_format": _nullable(_STRING),
                 "relocation_possible": _nullable(_STRING),
@@ -217,6 +221,9 @@ class CareerContext:
     learning_budget: Money | None = None
     residence_country: str | None = None
     target_countries: list[str] = field(default_factory=list)
+    employer_countries: list[str] = field(default_factory=list)
+    service_markets: list[str] = field(default_factory=list)
+    remote_market: str | None = None
     preferred_currency: str | None = None
     work_format: str | None = None
     relocation_possible: str | None = None
@@ -347,6 +354,7 @@ class CareerAssessment:
     first_steps: list[FirstStep]
     selected_first_step_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    strategy: CareerStrategy = field(default_factory=CareerStrategy)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -485,6 +493,9 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
             learning_budget=_money(context.get("learning_budget")),
             residence_country=_optional_text(context.get("residence_country")) or _optional_text(context.get("country_name")),
             target_countries=_texts(context.get("target_countries")),
+            employer_countries=_texts(context.get("employer_countries")),
+            service_markets=_texts(context.get("service_markets")),
+            remote_market=_optional_text(context.get("remote_market")),
             preferred_currency=_optional_text(context.get("preferred_currency")),
             work_format=_optional_text(context.get("work_format")),
             relocation_possible=_optional_text(context.get("relocation_possible")),
@@ -566,6 +577,7 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
         ],
         selected_first_step_id=_optional_text(payload.get("selected_first_step_id")),
         metadata=dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), dict) else {},
+        strategy=CareerStrategy.from_dict(payload.get("strategy") if isinstance(payload.get("strategy"), dict) else payload),
     )
 
 
@@ -1525,6 +1537,12 @@ def validate_career_assessment(
     if any(char.isdigit() for char in market_blob) and (not assessment.context.market_data_date or not assessment.context.market_data_sources):
         add_error("UNSOURCED_MARKET_FIGURES", "context.market_data_sources", "market figures require a source and date", market_blob)
     report_text = " ".join(_all_strings(assessment.to_dict())).casefold()
+    if assessment.metadata.get("market_strategy_required"):
+        strategy_payload = assessment.strategy.to_dict()
+        strategy_payload["market_strategy_required"] = True
+        strategy_payload.setdefault("evidence_fact_ids", [item.evidence_id for item in assessment.evidence])
+        for market_error in validate_market_strategy(strategy_payload, strict=True):
+            add_error("INVALID_MARKET_STRATEGY", "strategy", market_error, strategy_payload)
     for diagnosis in ("у вас синдром самозванца", "вам не хватает уверенности", "вы боитесь перемен"):
         if diagnosis in report_text:
             add_error("PSYCHOLOGICAL_DIAGNOSIS", "$", "unsupported psychological assertion is forbidden", diagnosis)

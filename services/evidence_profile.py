@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["confirmed", "probable", "weak", "unknown"]
 DataImportance = Literal["blocking", "useful", "optional"]
-MAX_ADDITIONAL_QUESTIONS = 6
+MAX_ADDITIONAL_QUESTIONS = 5
 EvidenceSource = Literal[
     "user_story",
     "user_clarification",
@@ -122,6 +122,9 @@ class CareerEvidenceProfile(BaseModel):
 
     residence_country: EvidenceItem | None = None
     target_countries: list[EvidenceItem] = Field(default_factory=list)
+    work_authorization: EvidenceItem | None = None
+    work_languages: list[EvidenceItem] = Field(default_factory=list)
+    target_market_format: EvidenceItem | None = None
     preferred_currency: EvidenceItem | None = None
     relocation_possible: EvidenceItem | None = None
     salary_target: EvidenceItem | None = None
@@ -147,9 +150,23 @@ _GAP_DEFINITIONS: dict[str, dict[str, object]] = {
     "target_country": {
         "priority": 110, "critical": True, "importance": "blocking",
         "goal": "Определить рынок, который materially меняет валюту, вакансии и право на работу.",
-        "question_ru": "В какой стране или странах вы планируете искать работу?",
+        "question_ru": "Вы хотите искать работу или клиентов преимущественно в стране проживания, на международном удалённом рынке или рассматриваете оба варианта?",
         "question_be": "У якой краіне або краінах вы плануеце шукаць працу?",
         "block": "market_context",
+    },
+    "work_authorization": {
+        "priority": 108, "critical": True, "importance": "blocking",
+        "goal": "Проверить юридическую доступность целевого рынка.",
+        "question_ru": "Есть ли у вас право на работу на выбранном рынке или ограничения, которые важно учесть?",
+        "question_be": "Ці ёсць у вас права на працу на абраным рынку або абмежаванні, якія важна ўлічыць?",
+        "block": "legal_access",
+    },
+    "work_languages": {
+        "priority": 106, "critical": True, "importance": "blocking",
+        "goal": "Определить языки, на которых доступна профессиональная работа.",
+        "question_ru": "На каких языках и примерно на каком уровне вы можете работать с работодателями или клиентами?",
+        "question_be": "На якіх мовах і прыкладна на якім узроўні вы можаце працаваць з працадаўцамі або кліентамі?",
+        "block": "language_local_context",
     },
     "professional_core": {
         "priority": 100,
@@ -274,6 +291,19 @@ def build_evidence_profile_from_analysis(analysis: dict | None) -> CareerEvidenc
     data = analysis if isinstance(analysis, dict) else {}
     profile = CareerEvidenceProfile()
 
+    route_context = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    explicit_country = str(route_context.get("country") or data.get("country") or data.get("residence_country") or "").strip()
+    explicit_city = str(route_context.get("city") or data.get("city") or "").strip()
+    if not explicit_country and explicit_city:
+        from services.market_strategy import resolve_city_country
+        resolved = resolve_city_country(explicit_city)
+        explicit_country = str(resolved.get("country_code") or "")
+    if explicit_country:
+        profile.residence_country = EvidenceItem(statement=explicit_country, source="user_story", confidence="confirmed")
+    target_market = str(route_context.get("target_country") or data.get("target_country") or "").strip()
+    if target_market:
+        profile.target_countries.append(EvidenceItem(statement=target_market, source="user_story", confidence="confirmed"))
+
     for goal in data.get("goals", []) if isinstance(data.get("goals"), list) else []:
         text = str(goal).strip()
         if not text:
@@ -336,7 +366,12 @@ def build_evidence_profile_from_analysis(analysis: dict | None) -> CareerEvidenc
         gaps.append("transition_level")
 
     if not gaps:
-        gaps = ["residence_country", "target_country", "minimum_income", "income_deadline", "legal_access", "location_language"]
+        gaps = ["residence_country", "target_country", "work_authorization", "work_languages", "minimum_income", "income_deadline"]
+
+    if profile.residence_country:
+        gaps = [key for key in gaps if key != "residence_country"]
+    if profile.target_countries:
+        gaps = [key for key in gaps if key != "target_country"]
 
     # Preserve order by business priority and avoid duplicates.
     dedup = {key for key in gaps if key in _GAP_DEFINITIONS}
@@ -358,6 +393,33 @@ def next_question_from_profile(
     asked = asked_gap_keys or set()
     if len(asked) >= MAX_ADDITIONAL_QUESTIONS:
         return None
+
+    # Market questions have a fixed decision-impact order. They run after the
+    # professional core is known and before generic route refinements.
+    market_order = (
+        "residence_country", "target_country", "work_authorization",
+        "work_languages", "minimum_income", "income_deadline", "work_format", "change_scale",
+    )
+    for gap_key in market_order:
+        if gap_key not in profile.unresolved_gaps or gap_key in asked:
+            continue
+        meta = _GAP_DEFINITIONS[gap_key]
+        use_be = (language or "ru") == "be"
+        options = meta.get("options") if isinstance(meta.get("options"), list) else []
+        return {
+            "id": 1,
+            "question": str(meta["question_be"] if use_be else meta["question_ru"]).strip(),
+            "block": str(meta.get("block") or "market_context"),
+            "type": "single_choice" if options else "short_text",
+            "options": options,
+            "question_id": f"gap_{gap_key}",
+            "gap_key": gap_key,
+            "internal_goal": str(meta.get("goal") or ""),
+            "critical_gap": bool(meta.get("critical", False)),
+            "question_value": int(meta.get("priority", 0)),
+            "source": "critical_market_gap",
+            "validity_status": "needs_confirmation",
+        }
 
     # Policy-driven selection: scored, behavioural, prohibition-aware
     result = select_next_gap(profile, asked_gaps=asked, user_mode=user_mode, language=language)
@@ -398,7 +460,7 @@ def apply_answer_to_profile(profile: CareerEvidenceProfile, gap_key: str, answer
     if not text:
         return profile
 
-    if text.casefold() in {"не знаю", "не хочу отвечать", "пропустить", "unknown", "skip"}:
+    if text.casefold() in {"не знаю", "не хочу отвечать", "не уточнено", "пропустить", "unknown", "skip"}:
         text = "unknown"
 
     evidence = EvidenceItem(
@@ -410,6 +472,11 @@ def apply_answer_to_profile(profile: CareerEvidenceProfile, gap_key: str, answer
         profile.residence_country = evidence
     elif gap_key == "target_country":
         profile.target_countries.append(evidence)
+        profile.target_market_format = evidence
+    elif gap_key == "work_authorization":
+        profile.work_authorization = evidence
+    elif gap_key == "work_languages":
+        profile.work_languages.append(evidence)
     elif gap_key == "minimum_income":
         profile.minimum_income = evidence
     elif gap_key == "salary_target":
