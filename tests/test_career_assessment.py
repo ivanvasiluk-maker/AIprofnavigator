@@ -571,7 +571,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
         self.assertTrue(state.data["final_report_generated"])
         self.assertFalse(state.data["awaiting_route_context"])
-        self.assertTrue(any("не буду блокировать результат" in call.args[0] for call in message.answer.await_args_list))
+        self.assertFalse(any("не буду блокировать результат" in call.args[0] for call in message.answer.await_args_list))
         self.assertTrue(any("Основной маршрут:" in call.args[0] for call in message.answer.await_args_list))
         message.answer_document.assert_awaited_once()
 

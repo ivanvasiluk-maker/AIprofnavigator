@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["confirmed", "probable", "weak", "unknown"]
 DataImportance = Literal["blocking", "useful", "optional"]
-MAX_ADDITIONAL_QUESTIONS = 6
+MAX_ADDITIONAL_QUESTIONS = 5
 EvidenceSource = Literal[
     "user_story",
     "user_clarification",
@@ -335,8 +335,8 @@ def build_evidence_profile_from_analysis(analysis: dict | None) -> CareerEvidenc
     if any(token in " ".join(missing) for token in ["уров", "level", "entry"]):
         gaps.append("transition_level")
 
-    if not gaps:
-        gaps = ["residence_country", "target_country", "minimum_income", "income_deadline", "legal_access", "location_language"]
+    # An absent model-generated ``missing_data`` list is not evidence that six
+    # unrelated facts are missing. Canonical source checks add only real gaps.
 
     # Preserve order by business priority and avoid duplicates.
     dedup = {key for key in gaps if key in _GAP_DEFINITIONS}

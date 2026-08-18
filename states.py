@@ -10,6 +10,9 @@ class InterviewContext(BaseModel):
     current_question_goal: str | None = None
 
     asked_question_signatures: list[str] = Field(default_factory=list)
+    answered_gap_ids: list[str] = Field(default_factory=list)
+    skipped_gap_ids: list[str] = Field(default_factory=list)
+    resolved_fact_types: list[str] = Field(default_factory=list)
     unresolved_critical_gaps: list[str] = Field(default_factory=list)
     unresolved_noncritical_gaps: list[str] = Field(default_factory=list)
 
