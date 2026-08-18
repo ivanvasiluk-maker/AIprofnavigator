@@ -454,6 +454,7 @@ _STORY_RESET_FIELDS: dict[str, object] = {
     "preliminary_route_selected": False,
     "selected_preliminary_route": "",
     "pending_answer_review": {},
+    "answer_review_snapshot": {},
     "pending_question_append": {},
     "pending_choice_reason": {},
     "awaiting_extended_diagnostics_choice": False,
@@ -1156,13 +1157,26 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
                 for name, facts in canonical_profile.grouped().items()
             },
         },
+        "normalized_profile": canonical_profile.normalized_profile.model_dump(mode="json"),
+        "consistency_issues": list(canonical_profile.consistency_issues),
     }
+
+    # Promote normalized scalars/lists for existing assessment consumers. Empty
+    # extraction results never overwrite a stronger structured answer.
+    for key, value in canonical_profile.normalized_profile.model_dump(mode="json").items():
+        if value not in (None, "", [], {}):
+            snapshot[key] = value
 
     normalized_answers = {
         "income_urgency": _clean_profile_value(route_context.get("income_urgency") or data.get("income_urgency")),
         "minimum_income": _clean_profile_value(route_context.get("minimum_monthly_income") or data.get("minimum_income") or route_context.get("minimum_income")),
         "target_income": _clean_profile_value(route_context.get("desired_monthly_income") or data.get("target_income") or route_context.get("target_income")),
-        "currency": str((country_config or {}).get("currency") or str(data.get("currency") or "EUR")).upper(),
+        "currency": str(
+            canonical_profile.normalized_profile.currency
+            or (country_config or {}).get("currency")
+            or data.get("currency")
+            or "EUR"
+        ).upper(),
         "learning_budget": _clean_profile_value(route_context.get("training_budget") or data.get("learning_budget")),
         "learning_hours_week": _clean_profile_value(route_context.get("available_time_for_study") or data.get("learning_hours_week")),
         "career_goal": _clean_profile_value(route_context.get("career_goal_type") or data.get("career_goal")),
@@ -8076,15 +8090,20 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     "reason": "context_mismatch",
                 },
             )
+            review_payload = {
+                "index": qa_index,
+                "question": question_text,
+                "question_id": current_q_id,
+                "answer": clean,
+                "review_type": "context_mismatch",
+                "normalized_answer": inferred_meaning,
+            }
+            # Keep a recovery copy until the choice is consumed. Telegram can
+            # deliver rapid reply-keyboard taps while another update is saving
+            # FSM data; losing the transient pending value used to trap the chat.
             await state.update_data(
-                pending_answer_review={
-                    "index": qa_index,
-                    "question": question_text,
-                    "question_id": current_q_id,
-                    "answer": clean,
-                    "review_type": "context_mismatch",
-                    "normalized_answer": inferred_meaning,
-                }
+                pending_answer_review=review_payload,
+                answer_review_snapshot=review_payload,
             )
             await message.answer(t(lang, "answer_context_mismatch_intro"), reply_markup=answer_review_keyboard(context_mismatch=True))
             await message.answer(
@@ -8818,7 +8837,27 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     lang = _user_language(data)
     action = (message.text or "").strip()
     pending = data.get("pending_answer_review") or {}
+    if not pending and action in {ANSWER_CONTEXT_YES, ANSWER_CONTEXT_NO}:
+        snapshot = data.get("answer_review_snapshot") or {}
+        if (
+            isinstance(snapshot, dict)
+            and snapshot.get("review_type") == "context_mismatch"
+            and int(snapshot.get("index", -1)) == int(data.get("qa_index", 0))
+        ):
+            pending = snapshot
     if not pending:
+        # A duplicate/stale confirmation must remove the obsolete yes/no
+        # keyboard and restore the actual active question, never show a hint
+        # that leaves the person on the same unusable keyboard.
+        analysis = data.get("story_analysis") or {}
+        qa_index = int(data.get("qa_index", 0))
+        questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+        if action in {ANSWER_CONTEXT_YES, ANSWER_CONTEXT_NO} and qa_index < len(questions):
+            await message.answer(
+                _question_prompt(analysis, qa_index, lang),
+                reply_markup=_question_reply_markup(analysis, qa_index),
+            )
+            return
         await message.answer(t(lang, "question_answer_hint"))
         return
 
@@ -8832,7 +8871,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         quick_report_after_questions = bool(data.get("quick_report_after_questions"))
 
         if action == ANSWER_CONTEXT_NO:
-            await state.update_data(pending_answer_review={})
+            await state.update_data(pending_answer_review={}, answer_review_snapshot={})
             await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
             next_q = questions[qa_index] if qa_index < len(questions) and isinstance(questions[qa_index], dict) else {}
             await _track_event(
@@ -8864,6 +8903,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                 qa_answers=qa_answers,
                 qa_index=qa_index,
                 pending_answer_review={},
+                answer_review_snapshot={},
                 evidence_profile=evidence_payload,
             )
             await _sync_interview_context_after_answer(state, data, evidence_payload, accepted_answer)
