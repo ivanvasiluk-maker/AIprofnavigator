@@ -123,7 +123,8 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             {"target_roles": ["Специалист по качеству"]},
             assessment_id="role-separation", session_id="role-separation-session", profile_version="1",
         )
-        self.assertEqual(assessment.routes.primary_routes[0].title, "Координатор лаборатории")
+        self.assertEqual(assessment.routes.primary_routes[0].title, "Специалист по качеству")
+        self.assertIn("Координатор лаборатории", [route.title for route in assessment.routes.all_routes()])
         target = next(route for route in assessment.routes.all_routes() if route.title == "Специалист по качеству")
         self.assertEqual(assessment.metadata["route_evaluations"][target.route_id]["kind"], "transition")
         self.assertNotIn("Специалист по качеству", assessment.identity.professional_core)

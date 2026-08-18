@@ -183,7 +183,13 @@ from services.evidence_profile import (
     next_question_from_profile,
     profile_ready_for_safe_conclusion,
 )
-from services.canonical_profile import build_canonical_profile
+from services.canonical_profile import (
+    CanonicalProfile,
+    ClarifyingQuestion,
+    build_canonical_profile,
+    record_question_answer,
+    select_clarifying_question,
+)
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -1139,7 +1145,13 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         "resume_analysis": dict(data.get("resume_analysis") or {}) if isinstance(data.get("resume_analysis"), dict) else {},
         "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip() and key != "country_config"},
         "ready_for_report": False,
-        "canonical_profile": canonical_profile.model_dump(mode="json"),
+        "canonical_profile": {
+            **canonical_profile.model_dump(mode="json"),
+            "groups": {
+                name: [fact.model_dump(mode="json") for fact in facts]
+                for name, facts in canonical_profile.grouped().items()
+            },
+        },
     }
 
     normalized_answers = {
@@ -7012,18 +7024,22 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         },
     )
 
-    # Report Readiness Gate: if report is essentially empty, ask one clarifying question
-    clarification_count = int(data.get("readiness_clarification_count") or 0)
-    max_clarifications = 5
-    if _report_draft_is_empty(report) and clarification_count < max_clarifications:
+    # Report Readiness Gate: ask exactly one highest-impact unresolved question.
+    # The canonical state prevents resolved or skipped facts from being asked again.
+    canonical = build_canonical_profile(data, assessment_id=assessment_id)
+    clarification_count = canonical.question_state.question_count
+    question = select_clarifying_question(canonical) if _report_draft_is_empty(report) else None
+    if question is not None and clarification_count < 5:
         await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
-        await message.answer("Проверяю один последний выбор маршрута.", reply_markup=ReplyKeyboardRemove())
+        await state.update_data(
+            canonical_profile=canonical.model_dump(mode="json"),
+            active_canonical_question=question.model_dump(mode="json"),
+            question_state=canonical.question_state.model_dump(mode="json"),
+        )
         await message.answer(
-            "Для точного маршрута нужно ещё несколько деталей.\n\n"
-            "Скажите: какой из вариантов вы готовы проверить первым — "
-            "продуктовый менеджмент, образовательный проект или консультирование?",
-            reply_markup=report_readiness_keyboard(),
+            question.text,
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
 
@@ -9538,6 +9554,28 @@ async def handle_report_readiness_clarification(message: Message, state: FSMCont
         await message.answer("Выберите вариант, чтобы я завершил карту.", reply_markup=report_readiness_keyboard())
         return
 
+    stored_profile = data.get("canonical_profile")
+    stored_question = data.get("active_canonical_question")
+    if isinstance(stored_profile, dict) and isinstance(stored_question, dict):
+        canonical = CanonicalProfile.model_validate(stored_profile)
+        question = ClarifyingQuestion.model_validate(stored_question)
+        canonical = record_question_answer(
+            canonical, question, answer, source_message_id=str(message.message_id)
+        )
+        qa_answers = list(data.get("qa_answers") or [])
+        qa_answers.append({
+            "question_id": question.question_id,
+            "source_message_id": str(message.message_id),
+            "answer": answer,
+            "assessment_id": canonical.assessment_id,
+        })
+        await state.update_data(
+            canonical_profile=canonical.model_dump(mode="json"),
+            question_state=canonical.question_state.model_dump(mode="json"),
+            qa_answers=qa_answers,
+            active_canonical_question=None,
+        )
+
     route_priority = "income_stability" if answer == ROUTE_CHOICE_STABLE else "route_experiment"
     system_may_select_route = answer in {
         ROUTE_CHOICE_STABLE,
@@ -9545,7 +9583,7 @@ async def handle_report_readiness_clarification(message: Message, state: FSMCont
         "🧪 Сравнить несколько вариантов",
     }
     clarification = {
-        "question": "Какой вариант вы готовы проверить первым?",
+        "question": str(stored_question.get("text") if isinstance(stored_question, dict) else "Уточняющий вопрос"),
         "answer": answer,
         "route_priority": route_priority,
         "preferred_first_experiment": None if system_may_select_route else answer,

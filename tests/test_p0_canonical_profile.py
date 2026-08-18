@@ -5,6 +5,28 @@ from services.canonical_profile import (
     record_question_answer,
     select_clarifying_question,
 )
+
+
+def test_canonical_groups_are_complete_and_cross_assessment_documents_are_rejected():
+    profile = build_canonical_profile({
+        "current_income": "1800 EUR net/month",
+        "uploaded_documents": [
+            {"assessment_id": "current", "document_id": "cv", "content": "English — B2"},
+            {"assessment_id": "other", "document_id": "old", "content": "Portuguese — C1"},
+        ],
+    }, assessment_id="current")
+    groups = profile.grouped()
+    assert set(groups) == {
+        "identity", "experience", "professional_functions", "skills", "responsibilities",
+        "achievements", "education", "certifications", "industries", "languages", "location",
+        "target_markets", "work_authorization", "current_income", "minimum_income", "target_income",
+        "preferred_formats", "interests", "undesirable_tasks", "constraints",
+        "health_related_limits", "family_constraints", "relocation", "business_trips",
+        "learning_resources", "transition_urgency", "desired_change_scale",
+    }
+    assert groups["current_income"]
+    assert all(fact.assessment_id == "current" and fact.updated_at for fact in profile.facts)
+    assert "portuguese" not in " ".join(fact.source_quote.casefold() for fact in profile.facts)
 from services.career_assessment import is_market_role_title
 from services.career_assessment import build_deterministic_assessment, render_assessment_html, validate_career_assessment
 from handlers.career import _build_profile_snapshot
