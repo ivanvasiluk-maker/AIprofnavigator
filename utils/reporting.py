@@ -465,6 +465,8 @@ def _first_step_buttons(report: dict) -> list[str]:
 
 
 def build_telegram_summary(report: dict) -> str:
+    from services.market_strategy import humanize_internal_values
+    report = humanize_internal_values(report)
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     action_plan = report.get("action_plan", {}) if isinstance(report.get("action_plan"), dict) else {}
@@ -639,6 +641,8 @@ def _decision_country_label(report: dict, decision: dict) -> tuple[str, str]:
 
 
 def render_report_html(report: dict, meta: ReportMeta) -> str:
+    from services.market_strategy import humanize_internal_values
+    report = humanize_internal_values(report)
     digital_human = report.get("digital_human", {}) if isinstance(report.get("digital_human"), dict) else {}
     decision = report.get("career_decision", {}) if isinstance(report.get("career_decision"), dict) else {}
     country_name, city = _decision_country_label(report, decision)
@@ -716,7 +720,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     main_request = _main_request(report)
     primary_constraint = next((item for item in weaknesses_items if item != "-"), "данных недостаточно")
     self_help_points, specialist_points = _psych_social_recommendation(report)
-    scenario_labels = ["Пессимистичный", "Базовый", "Оптимистичный"]
+    scenario_labels = ["Безопасный", "Основной", "Амбициозный"]
     route_evidence = _route_evidence_blocks(report)
 
     function_lines = "".join(f"<li>{escape(item)}</li>" for item in _list_items(competency_signals)[:6]) or "<li>Данных недостаточно.</li>"
@@ -885,6 +889,41 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
     resume_questions = _list_items(resume_analysis.get("clarifying_questions"))[:6]
     has_resume_module = bool(resume_analysis)
     story_echo = _build_story_echo(report)
+    personal_insights = report.get("personal_insights") if isinstance(report.get("personal_insights"), list) else []
+    strategy_scenarios = report.get("development_scenarios") if isinstance(report.get("development_scenarios"), list) else []
+    income_forecasts = report.get("income_forecasts") if isinstance(report.get("income_forecasts"), list) else []
+    horizon_plan = report.get("career_action_plan") if isinstance(report.get("career_action_plan"), dict) else {}
+    insights_html = "".join(
+        f"<div class='card'><p>{escape(_safe_text(item.get('insight')))}</p><p><b>Практическое следствие:</b> {escape(_safe_text(item.get('practical_consequence')))}</p></div>"
+        for item in personal_insights[:5] if isinstance(item, dict)
+    ) or "<p class='muted'>Инсайты требуют минимум двух подтверждённых фактов каждый.</p>"
+    strategy_scenarios_html = "".join(
+        f"<div class='card'><h3>{escape({'safe':'Безопасный','main':'Основной','ambitious':'Амбициозный'}.get(str(item.get('kind')), 'Сценарий'))}: {escape(_safe_text(item.get('goal')))}</h3>"
+        f"<p><b>Горизонт:</b> {escape(_safe_text(item.get('horizon')))}; <b>модель:</b> {escape(_safe_text(item.get('employment_model')))}</p>"
+        f"<p><b>Доход:</b> {escape(_safe_text(item.get('income_forecast')))}</p><p><b>Контрольные точки:</b> {escape(', '.join(_list_items(item.get('checkpoints'))))}</p>"
+        f"<p><b>Успех:</b> {escape(_safe_text(item.get('success_criterion')))}; <b>остановка:</b> {escape(_safe_text(item.get('stop_criterion')))}</p>"
+        f"<p><b>Запасной вариант:</b> {escape(_safe_text(item.get('fallback')))}</p></div>"
+        for item in strategy_scenarios[:3] if isinstance(item, dict)
+    )
+    income_html = "".join(
+        f"<tr><td>{escape(_safe_text(item.get('route_id')))}</td><td>{escape(_safe_text(item.get('country')))}</td><td>{escape(_safe_text(item.get('currency')))}</td>"
+        f"<td>{escape(_safe_text(item.get('amount_type')))} / {escape(_safe_text(item.get('period')))}</td><td>{escape(_safe_text(item.get('contract_type')))}</td>"
+        f"<td>{escape(_safe_text((item.get('estimates') or {}).get('conservative') if isinstance(item.get('estimates'), dict) else None))} / {escape(_safe_text((item.get('estimates') or {}).get('base') if isinstance(item.get('estimates'), dict) else None))} / {escape(_safe_text((item.get('estimates') or {}).get('optimistic') if isinstance(item.get('estimates'), dict) else None))}</td>"
+        f"<td>{escape(_safe_text(item.get('data_date')))}, {escape(_safe_text(item.get('confidence')))}<br/>{escape(', '.join(_safe_text(source.get('source_name')) for source in (item.get('sources') or []) if isinstance(source, dict)))}</td></tr>"
+        for item in income_forecasts if isinstance(item, dict)
+    )
+    def _horizon_action_html(key: str, label: str) -> str:
+        action = horizon_plan.get(key)
+        if not isinstance(action, dict):
+            return f'<div class="card"><h3>{escape(label)}</h3><p>{escape(_safe_text(action))}</p></div>'
+        return (
+            f'<div class="card"><h3>{escape(label)}</h3>'
+            f'<p><b>Что:</b> {escape(_safe_text(action.get("what")))}</p>'
+            f'<p><b>Где и кому:</b> {escape(_safe_text(action.get("where")))} — {escape(_safe_text(action.get("audience")))}</p>'
+            f'<p><b>Объём и время:</b> {escape(_safe_text(action.get("volume")))}; {escape(_safe_text(action.get("duration")))}</p>'
+            f'<p><b>Успех:</b> {escape(_safe_text(action.get("success_criterion")))}</p>'
+            f'<p><b>Когда менять маршрут:</b> {escape(_safe_text(action.get("change_criterion")))}</p></div>'
+        )
 
     unicode_font = _resolve_unicode_font_path()
     font_face_css = ""
@@ -944,6 +983,10 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         .action-box {{ border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 10px; padding: 14px 16px; margin-top: 12px; }}
         .action-box-title {{ font-size: 13px; font-weight: bold; color: #166534; margin-bottom: 6px; }}
         .honest-note {{ border-left: 4px solid #f59e0b; padding: 10px 14px; background: #fffbeb; border-radius: 8px; margin-top: 12px; font-size: 12px; color: #78350f; }}
+        .table-scroll {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+        table {{ width: 100%; border-collapse: collapse; min-width: 720px; }}
+        th, td {{ border: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }}
+        @media (max-width: 640px) {{ .grid2, .meta, .swot-grid, .closing-grid {{ grid-template-columns: 1fr; }} body {{ font-size: 14px; }} .page {{ page-break-after: auto; }} }}
   </style>
 </head>
 <body>
@@ -1028,12 +1071,21 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
   </section>
 
     <section class='page'>
+        <h2>Что здесь легко не заметить</h2>{insights_html}
+        <h2>Рынок выбранной страны и прогноз дохода</h2>
+        <div class='table-scroll'><table><thead><tr><th>Маршрут</th><th>Страна</th><th>Валюта</th><th>Тип / период</th><th>Договор</th><th>Осторожно / база / оптимистично</th><th>Дата / уверенность</th></tr></thead><tbody>{income_html or '<tr><td colspan="7">Нет актуальных источников — локальные суммы не оценивались.</td></tr>'}</tbody></table></div>
+        <h2>Три сценария развития</h2>{strategy_scenarios_html or '<p class="muted">Сценарии пока не сформированы.</p>'}
+        <h2>План на 48 часов, 14 дней и 90 дней</h2>
+        <div class='grid2'>{''.join(_horizon_action_html(key, label) for key, label in [('48_hours','Первые 48 часов'),('14_days','Первые 14 дней'),('90_days','Первые 90 дней')])}</div>
+    </section>
+
+    <section class='page'>
         <h2>7. Сравнение маршрутов</h2>
           <div class='muted'>Анализ возможностей</div>
     {''.join(possibilities) if possibilities else '<p class="muted">Данных недостаточно.</p>'}
         <div class='card'><h3>Что рынок будет проверять</h3><ul>{''.join(f'<li>{escape(x)}</li>' for x in market_questions[:10]) or '<li>Данных недостаточно.</li>'}</ul></div>
                 <div class='card'><h3>Рекомендованные роли</h3>{''.join(recommendations_html) if recommendations_html else '<p class="muted">Данных недостаточно.</p>'}</div>
-                <div class='card'><h3>Три сценария: пессимистичный, базовый, оптимистичный</h3>{''.join(solutions_html) if solutions_html else '<p class="muted">Данных недостаточно.</p>'}</div>
+                <div class='card'><h3>Три сценария: безопасный, основной, амбициозный</h3>{''.join(solutions_html) if solutions_html else '<p class="muted">Данных недостаточно.</p>'}</div>
         <div class='card'><h3>Перевод опыта на язык рынка</h3>{''.join(translation_html) if translation_html else '<p class="muted">Данных недостаточно.</p>'}</div>
         <div class='card'><h3>Карьерные мосты и шаги входа</h3>{''.join(bridges_html) if bridges_html else '<p class="muted">Данных недостаточно.</p>'}</div>
         <div class='card'><h3>Риски маршрутов и барьеры</h3>{''.join(barriers_html) if barriers_html else '<p class="muted">Данных недостаточно.</p>'}</div>

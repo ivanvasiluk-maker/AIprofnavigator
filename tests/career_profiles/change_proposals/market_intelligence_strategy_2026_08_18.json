@@ -1,0 +1,11 @@
+{
+  "change_id": "MARKET_INTELLIGENCE_STRATEGY_2026_08_18",
+  "source_error_codes": ["MISSING_MARKET_CONTEXT", "UNSOURCED_SALARY", "DUPLICATE_CAREER_MODEL", "INCOMPLETE_SCENARIOS", "MISSING_PERSONAL_INSIGHTS", "INTERNAL_ENUM_LEAK"],
+  "affected_profiles_expected_to_improve": ["Profiles requiring country-aware career strategy", "Self-employed and hybrid-income profiles", "Regulated-profession and multi-country profiles"],
+  "profiles_at_regression_risk": ["Profiles with no target market", "Legacy reports without structured strategy fields"],
+  "universal_rule_changed": "A conclusion requires bounded critical-market clarification, source-aware market and income claims, distinct earning models, three development scenarios, evidence-linked insights, and user-safe rendering.",
+  "files_to_change": ["services/evidence_profile.py", "services/market_strategy.py", "services/career_guardrails.py", "handlers/career.py", "prompts.py", "utils/reporting.py"],
+  "feature_flag": "career_assessment_v2",
+  "rollback_condition": "Rollback if unknown market data blocks the conclusion after five questions, market claims bypass sources, or user-facing reports expose internal values.",
+  "acceptance_condition": "Tests prove question ordering and limit, unknown fallback, country/currency validation, licensing checks, income calculators, complete scenarios, evidence-linked insights, enum sanitization, and responsive HTML."
+}

@@ -117,22 +117,16 @@
       "tests/test_country_aware_assessment.py",
       "tests/test_critical_data_policy.py"
     ],
-    "CANONICAL_PROFILE_P0_2026_08_18": [
-      "services/canonical_profile.py",
+    "MARKET_INTELLIGENCE_STRATEGY_2026_08_18": [
+      "services/career_assessment.py",
       "services/evidence_profile.py",
-      "services/career_assessment.py",
-      "openai_client.py",
+      "services/market_strategy.py",
+      "services/career_guardrails.py",
       "handlers/career.py",
-      "states.py",
-      "tests/test_p0_canonical_profile.py"
-    ],
-    "CAREER_STRATEGY_REPORT_P0_2026_08_18": [
-      "services/canonical_profile.py",
-      "services/career_assessment.py",
-      "openai_client.py",
-      "handlers/career.py",
-      "tests/test_country_aware_assessment.py",
-      "tests/test_p0_canonical_profile.py"
+      "prompts.py",
+      "utils/reporting.py",
+      "tests/test_market_strategy_patch.py",
+      "tests/test_market_strategy_acceptance.py"
     ]
   },
   "production_logic_changes_allowed": false,
@@ -144,8 +138,8 @@
     "services/evidence_profile.py": "932A5776DA7A1705368EAC80665CC400A744925F0BC725B663B29E14B000FD60",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",
     "services/hypothesis_engine.py": "95B016B60E9D6D06B20F769EA3B6EB29EF998BBDD4328C8AF58CE48788515351",
-    "services/career_guardrails.py": "CA33AE68232A9728DB5F6668A2BD82766E41E6369E98ECBEAB7BCBCC30C2ACC6",
-    "utils/reporting.py": "4E29FA70EA8CE47AA1717D193EC622ECD10B38A3127EC2A0615A5FF61702EFAF",
+    "services/career_guardrails.py": "D3DFEDDB32BD698A94B724CD8AA51D4D89F64F69B7623C25B5503990A66819C4",
+    "utils/reporting.py": "D1399E7FACB37575751117C711DA79323C3049815F717A559FF006F2356C00A7",
     "utils/analytics.py": "7A600CFCAEFA26D98F21ADE5495525AC7BC7BB7FB261B615FF0F48CE91EA7040"
   },
   "created_at": "2026-08-06T13:26:15.2569504Z"
