@@ -6645,9 +6645,16 @@ def _ensure_canonical_career_decision(report: dict, route_id: str | None = None)
     missing_data = decision.get("missing_data") if isinstance(decision.get("missing_data"), list) else []
     missing_data = [str(item).strip() for item in missing_data if str(item).strip()]
     if not missing_data:
-        for key in ["minimum_monthly_income", "income_urgency", "country_duration_primary", "documents_and_work_rights"]:
-            if str(route_context.get(key) or "").strip():
-                missing_data.append(str(key))
+        # Only absent decision-changing facts are missing. Use human labels: this
+        # collection can be rendered in HTML/PDF and must never expose schema keys.
+        required_facts = [
+            ("minimum_monthly_income", "обязательный минимум дохода"),
+            ("income_urgency", "срок выхода на необходимый доход"),
+            ("documents_and_work_rights", "право на работу на выбранном рынке"),
+        ]
+        for key, label in required_facts:
+            if not str(route_context.get(key) or "").strip():
+                missing_data.append(label)
 
     country_name = (
         str(decision.get("country_name") or profile_snapshot.get("country_name") or route_context.get("country") or report.get("country_name") or "").strip()
@@ -6678,6 +6685,9 @@ def _ensure_canonical_career_decision(report: dict, route_id: str | None = None)
         "country_name": country_name,
         "city": city,
         "current_role": str(decision.get("current_role") or "").strip(),
+        "target_change": list(decision.get("target_change", []) if isinstance(decision.get("target_change"), list) else []),
+        "candidate_routes": [main_route, *alternative_routes],
+        "recommended_route": main_route,
         "constraints": list(decision.get("constraints", []) if isinstance(decision.get("constraints"), list) else []),
         "resources": list(decision.get("resources", []) if isinstance(decision.get("resources"), list) else []),
         "main_route": main_route,

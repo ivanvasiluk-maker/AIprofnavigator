@@ -15,6 +15,7 @@ FactType = Literal[
     "work_authorization", "preferred_format", "experience", "industry",
     "health_related_limit", "family_constraint", "relocation", "business_trip",
     "learning_resource", "transition_urgency", "desired_change_scale",
+    "target_change", "candidate_route", "recommended_route",
 ]
 
 CITY_COUNTRIES = {
@@ -23,6 +24,8 @@ CITY_COUNTRIES = {
     "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"),
     "riga": ("Latvia", "LV"), "рига": ("Latvia", "LV"),
     "tallinn": ("Estonia", "EE"), "таллин": ("Estonia", "EE"),
+    "valencia": ("Spain", "ES"), "валенсия": ("Spain", "ES"),
+    "валенсии": ("Spain", "ES"),
 }
 
 
@@ -68,6 +71,12 @@ class CanonicalProfile(BaseModel):
     facts: list[CanonicalFact] = Field(default_factory=list)
     contradictions: list[list[str]] = Field(default_factory=list)
     question_state: QuestionState = Field(default_factory=QuestionState)
+    # Career identity and career decision are intentionally different entities.
+    current_role: str | None = None
+    professional_core: list[str] = Field(default_factory=list)
+    target_change: list[str] = Field(default_factory=list)
+    candidate_routes: list[str] = Field(default_factory=list)
+    recommended_route: str | None = None
 
     def grouped(self) -> dict[str, list[CanonicalFact]]:
         """Return the complete, stable contract consumed by every report section."""
@@ -138,6 +147,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         profile.facts = [fact for fact in profile.facts if fact.assessment_id == assessment_id]
     else:
         profile = CanonicalProfile(assessment_id=assessment_id)
+    # Rebuilding the profile is idempotent. Facts are re-extracted from the full
+    # history below, rather than appended to an old extraction on every turn.
+    profile.facts = []
+    profile.contradictions = []
     sources: list[tuple[str, str, str]] = []
     for key in ("story_text", "answers_text"):
         text = str(data.get(key) or "")
@@ -180,12 +193,20 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         low = text.casefold().replace("ё", "е")
         for city, (country, code) in CITY_COUNTRIES.items():
             if re.search(rf"\b{re.escape(city)}\b", low):
-                profile.facts.append(_fact(assessment_id, "market_context", {"city": city.title(), "country": country, "country_code": code}, message_id, text, .98, created_at or None))
+                display_city = "Валенсия" if city in {"валенсия", "валенсии"} else city.title()
+                profile.facts.append(_fact(assessment_id, "market_context", {"city": display_city, "country": country, "country_code": code}, message_id, text, .98, created_at or None))
                 break
-        for match in re.finditer(r"(?:€|eur\s*)\s?(\d[\d\s]*(?:[–-]\d[\d\s]*)?)\s*(net|gross)?", text, re.I):
+        for match in re.finditer(r"(?:(€|eur|pln|zł)\s*)?(\d[\d\s]*(?:[–-]\d[\d\s]*)?)\s*(€|eur|pln|zł)?\s*(net|gross)?", text, re.I):
+            currency_token = (match.group(1) or match.group(3) or "").casefold()
+            if not currency_token:
+                continue
             context = text[max(0, match.start() - 35):match.end() + 35]
-            kind = "minimum" if re.search(r"миним|minimum", context, re.I) else "target" if re.search(r"цел|жела|target", context, re.I) else "current"
-            profile.facts.append(_fact(assessment_id, "income_requirement", {"kind": kind, "amount": match.group(1).replace(" ", ""), "currency": "EUR", "tax_basis": (match.group(2) or "unknown").lower(), "period": "month"}, message_id, context, .9, created_at or None))
+            classifier = text[max(0, match.start() - 24):match.start()] + " " + message_id
+            minimum_at = max((m.start() for m in re.finditer(r"миним|minimum", classifier, re.I)), default=-1)
+            target_at = max((m.start() for m in re.finditer(r"цел|жела|target", classifier, re.I)), default=-1)
+            kind = "target" if target_at > minimum_at else "minimum" if minimum_at >= 0 else "current"
+            currency = "EUR" if currency_token in {"€", "eur"} else "PLN"
+            profile.facts.append(_fact(assessment_id, "income_requirement", {"kind": kind, "amount": match.group(2).replace(" ", ""), "currency": currency, "tax_basis": (match.group(4) or "unknown").lower(), "period": "month"}, message_id, context, .9, created_at or None))
         if re.search(r"прав[оа]\s+на\s+работ|work authori[sz]", low):
             authorized = not bool(re.search(r"нет|не име|without", low))
             profile.facts.append(_fact(assessment_id, "work_authorization", authorized, message_id, text, .9, created_at or None))
@@ -234,6 +255,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         "work_condition": ("work_conditions",), "constraint": ("constraints",),
         "undesirable_task": ("tasks_to_avoid", "functions_to_avoid", "rejected_tasks"),
         "interest": ("interests", "preferred_directions", "goals"),
+        "target_change": ("target_change", "desired_changes", "what_to_change"),
     }
     for analysis_name in ("resume_analysis", "story_analysis"):
         analysis = data.get(analysis_name) if isinstance(data.get(analysis_name), dict) else {}
@@ -252,6 +274,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 text = str(value or "").strip()
                 if text:
                     profile.facts.append(_fact(
+                        assessment_id, "candidate_route", text,
+                        f"{analysis_name}:{key}", text, .8,
+                    ))
+                    profile.facts.append(_fact(
                         assessment_id, "interest", {"kind": "target_role", "title": text},
                         f"{analysis_name}:{key}", text, .8,
                     ))
@@ -268,9 +294,43 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 if value in {"false", "нет", "не имею", "without"}:
                     return "no"
             return value
-        by_value = {conflict_key(item) for item in facts if item.confidence >= .8}
-        if len(by_value) > 1 and fact_type == "work_authorization":
-            profile.contradictions.append([item.fact_id for item in facts])
+        conflict_groups: list[list[CanonicalFact]] = []
+        if fact_type == "income_requirement":
+            for kind in ("current", "minimum", "target"):
+                group = [f for f in facts if isinstance(f.normalized_value, dict) and f.normalized_value.get("kind") == kind and f.confidence >= .8]
+                def income_key(fact: CanonicalFact) -> tuple[str, str]:
+                    value = fact.normalized_value
+                    raw = str(value.get("amount") or value.get("display") or "")
+                    amount = "-".join(re.findall(r"\d+", raw.replace(" ", "")))
+                    currency = str(value.get("currency") or "").upper()
+                    if not currency:
+                        currency = "EUR" if "€" in raw or "EUR" in raw.upper() else "PLN" if "PLN" in raw.upper() or "ZŁ" in raw.upper() else ""
+                    return amount, currency
+                values = {income_key(f) for f in group}
+                if len(values) > 1:
+                    conflict_groups.append(group)
+        elif fact_type == "market_context":
+            # Relocation preferences may coexist with a location object.
+            location = [f for f in facts if isinstance(f.normalized_value, dict) and (f.normalized_value.get("city") or f.normalized_value.get("country"))]
+            values = {(str(f.normalized_value.get("city") or "").casefold(), str(f.normalized_value.get("country") or "").casefold()) for f in location}
+            if len(values) > 1:
+                conflict_groups.append(location)
+        elif len({conflict_key(item) for item in facts if item.confidence >= .8}) > 1 and fact_type == "work_authorization":
+            conflict_groups.append(facts)
+        for group in conflict_groups:
+            for item in group:
+                item.needs_clarification = True
+            profile.contradictions.append([item.fact_id for item in group])
+
+    def strings(fact_type: str) -> list[str]:
+        return list(dict.fromkeys(str(f.normalized_value).strip() for f in profile.facts_of_type(fact_type) if str(f.normalized_value).strip()))
+    roles = strings("profession")
+    profile.current_role = roles[-1] if roles else None
+    profile.professional_core = strings("professional_function") + strings("skill")
+    profile.target_change = strings("target_change") + strings("undesirable_task")
+    profile.candidate_routes = strings("candidate_route")
+    recommended = strings("recommended_route")
+    profile.recommended_route = recommended[-1] if recommended else None
 
     state_raw = data.get("question_state") if isinstance(data.get("question_state"), dict) else {}
     profile.question_state = QuestionState.model_validate(state_raw)
