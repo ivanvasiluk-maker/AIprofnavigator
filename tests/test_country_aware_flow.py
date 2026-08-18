@@ -11,6 +11,7 @@ Verifies:
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from services.evidence_profile import CareerEvidenceProfile, EvidenceItem, FunctionEvidence
 from services.interview_policy import evaluate_report_readiness
@@ -20,7 +21,6 @@ from handlers.career import (
     _income_options_for_currency,
     _is_route_context_stale_input,
     _language_options_for_country,
-    _missing_route_context_notice,
     _normalize_route_context,
     _report_draft_is_empty,
     _resolve_country_config,
@@ -264,13 +264,10 @@ class SnapshotReadinessGateTest(unittest.TestCase):
         snapshot = _build_profile_snapshot({"route_context": {"country": "Литва"}})
         self.assertFalse(_snapshot_is_ready_for_report(snapshot))
 
-    def test_missing_context_notice_does_not_block_preliminary_conclusion(self) -> None:
-        notice = _missing_route_context_notice(["city", "minimum_monthly_income"])
-
-        self.assertIn("город", notice)
-        self.assertIn("минимальный доход", notice)
-        self.assertIn("не буду блокировать результат", notice)
-        self.assertIn("предварительное заключение", notice)
+    def test_internal_gap_ledger_is_not_rendered(self) -> None:
+        source = Path("handlers/career.py").read_text(encoding="utf-8")
+        self.assertNotIn("Для более точного заключения пока не хватает данных:", source)
+        self.assertNotIn("Я не буду блокировать результат", source)
 
     def test_readiness_levels_distinguish_preliminary_and_full(self) -> None:
         profile = CareerEvidenceProfile(

@@ -27,7 +27,9 @@
     "CAREER_ASSESSMENT_P0_E2E_2026_08_16",
     "CAREER_ASSESSMENT_CALLBACK_LIMIT_HOTFIX_2026_08_16",
     "COUNTRY_AWARE_PERSONALIZED_ASSESSMENT_2026_08_17",
-    "COUNTRY_AWARE_ASSESSMENT_COMPLETION_2026_08_17"
+    "COUNTRY_AWARE_ASSESSMENT_COMPLETION_2026_08_17",
+    "CANONICAL_PROFILE_P0_2026_08_18",
+    "CAREER_STRATEGY_REPORT_P0_2026_08_18"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -113,15 +115,32 @@
       "services/evidence_profile.py",
       "tests/test_country_aware_assessment.py",
       "tests/test_critical_data_policy.py"
+    ],
+    "CANONICAL_PROFILE_P0_2026_08_18": [
+      "services/canonical_profile.py",
+      "services/evidence_profile.py",
+      "services/career_assessment.py",
+      "openai_client.py",
+      "handlers/career.py",
+      "states.py",
+      "tests/test_p0_canonical_profile.py"
+    ],
+    "CAREER_STRATEGY_REPORT_P0_2026_08_18": [
+      "services/canonical_profile.py",
+      "services/career_assessment.py",
+      "openai_client.py",
+      "handlers/career.py",
+      "tests/test_country_aware_assessment.py",
+      "tests/test_p0_canonical_profile.py"
     ]
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
     "prompts.py": "DCC0291275FB94189269C76E35D16C5733CC48C23B37FBBF393E1625DE0DAC33",
-    "openai_client.py": "4FAA5A70F660D40EE5401F29C2089EF386EBDA243B309A442C8CAC9D911C5940",
-    "handlers/career.py": "C6C6E8AC3C1806EC6B57D58968363547DCF9DB0B35A86894799FEAF94320F68F",
-    "states.py": "5A8209C10CE1073AFDCB898324D009367790F4BF048A0C9FB125984DD1B42A1C",
-    "services/evidence_profile.py": "9BEFEA1BE31C1C752C7DB537EB5070488A9414F109E6E6E5D850EB0B60395F3F",
+    "openai_client.py": "4B603312F7F0A4300F3829402C9C5134D57FAFCDB8CFEB56EC1DAD7417FEDC07",
+    "handlers/career.py": "A85F368C666092C655B88F257219F0402110E109CD68013F6A99EA6F7029C4C2",
+    "states.py": "F1B46E7A83CFB3443841F3F6A3D2B8887EF564D63FCA983BE8542419CC50401D",
+    "services/evidence_profile.py": "932A5776DA7A1705368EAC80665CC400A744925F0BC725B663B29E14B000FD60",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",
     "services/hypothesis_engine.py": "95B016B60E9D6D06B20F769EA3B6EB29EF998BBDD4328C8AF58CE48788515351",
     "services/career_guardrails.py": "CA33AE68232A9728DB5F6668A2BD82766E41E6369E98ECBEAB7BCBCC30C2ACC6",

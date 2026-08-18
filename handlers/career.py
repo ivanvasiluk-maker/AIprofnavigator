@@ -183,6 +183,7 @@ from services.evidence_profile import (
     next_question_from_profile,
     profile_ready_for_safe_conclusion,
 )
+from services.canonical_profile import build_canonical_profile
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -1103,7 +1104,9 @@ def _clean_profile_value(value: object) -> object:
 
 
 def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
-    """Create an immutable snapshot of the route answers and country config before report generation."""
+    """Create the immutable report view from the assessment's canonical profile."""
+    assessment_id = str(data.get("assessment_id") or data.get("report_generation_id") or "pending-assessment")
+    canonical_profile = build_canonical_profile(data, assessment_id=assessment_id)
     route_context = _normalize_route_context(data.get("route_context") if isinstance(data.get("route_context"), dict) else {})
     country_config = _resolve_country_config_for_context(route_context)
     if not country_config and isinstance(route_context.get("country_config"), dict):
@@ -1136,6 +1139,7 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         "resume_analysis": dict(data.get("resume_analysis") or {}) if isinstance(data.get("resume_analysis"), dict) else {},
         "route_context": {str(key): str(value) for key, value in route_context.items() if str(key).strip() and key != "country_config"},
         "ready_for_report": False,
+        "canonical_profile": canonical_profile.model_dump(mode="json"),
     }
 
     normalized_answers = {
@@ -1160,6 +1164,37 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         if value == "" or value == [] or value == () or value is None:
             continue
         snapshot[key] = value
+
+    market: dict[str, object] = {}
+    for fact in canonical_profile.facts_of_type("market_context"):
+        if isinstance(fact.normalized_value, dict):
+            market.update({key: value for key, value in fact.normalized_value.items() if value not in (None, "")})
+    if market:
+        snapshot["city"] = market.get("city") or snapshot["city"]
+        snapshot["country_name"] = market.get("country") or snapshot["country_name"]
+        snapshot["country_code"] = market.get("country_code") or snapshot["country_code"]
+        if not snapshot["residence_country"]:
+            snapshot["residence_country"] = snapshot["country_name"]
+        if not snapshot["target_countries"] and snapshot["country_name"]:
+            snapshot["target_countries"] = [snapshot["country_name"]]
+    authorization = canonical_profile.latest_value("work_authorization")
+    if authorization not in (None, ""):
+        snapshot["work_authorization_status"] = authorization
+    languages = [fact.normalized_value for fact in canonical_profile.facts_of_type("language")]
+    if languages:
+        snapshot["languages"] = languages
+    incomes = [fact.normalized_value for fact in canonical_profile.facts_of_type("income_requirement")]
+    for income in incomes:
+        if not isinstance(income, dict):
+            continue
+        kind = income.get("kind")
+        value = income.get("display") or income.get("amount")
+        if kind == "minimum" and value not in (None, ""):
+            snapshot["minimum_income"] = value
+        elif kind == "target" and value not in (None, ""):
+            snapshot["target_income"] = value
+        elif kind == "urgency" and value not in (None, ""):
+            snapshot["income_urgency"] = value
     snapshot["ready_for_report"] = _snapshot_is_ready_for_report(snapshot)
     return snapshot
 
@@ -1237,19 +1272,6 @@ _ROUTE_CONTEXT_FIELD_LABELS: dict[str, str] = {
     "diploma_status": "статус диплома",
     "portfolio_or_references": "портфолио или рекомендации",
 }
-
-
-def _missing_route_context_notice(missing_fields: list[str]) -> str:
-    labels = [_ROUTE_CONTEXT_FIELD_LABELS.get(field, field) for field in missing_fields]
-    visible = ", ".join(labels[:5])
-    remainder = len(labels) - 5
-    if remainder > 0:
-        visible += f" и ещё {remainder}"
-    return (
-        f"Для более точного заключения пока не хватает данных: {visible}.\n\n"
-        "Я не буду блокировать результат и сейчас соберу предварительное заключение. "
-        "После него сможете написать недостающие данные? Я обновлю рекомендацию с учётом ответа."
-    )
 
 
 def _route_context_question(index: int, route_context: dict | None = None) -> dict[str, object]:
@@ -2246,6 +2268,9 @@ def _build_interview_context(data: dict, analysis: dict | None = None) -> Interv
         current_question_id=str(existing.get("current_question_id") or "") or None,
         current_question_goal=str(existing.get("current_question_goal") or "") or None,
         asked_question_signatures=asked_signatures,
+        answered_gap_ids=[str(item) for item in existing.get("answered_gap_ids", [])],
+        skipped_gap_ids=[str(item) for item in existing.get("skipped_gap_ids", [])],
+        resolved_fact_types=[str(item) for item in existing.get("resolved_fact_types", [])],
         unresolved_critical_gaps=critical_gaps,
         unresolved_noncritical_gaps=noncritical_gaps,
         report_readiness=readiness_status,
@@ -2327,6 +2352,10 @@ async def _ask_next_interview_question(
     lang: str,
     user_mode: str,
 ) -> bool:
+    if context.questions_asked_count >= 5:
+        context.current_action = "show_preliminary_map"
+        await _save_interview_context(state, context)
+        return False
     asked = {str(item).strip() for item in context.asked_question_signatures if str(item).strip()}
     search_index = qa_index
     next_index, row, signature = _find_next_unasked_question(analysis, data, search_index, asked)
@@ -2414,12 +2443,7 @@ async def _ask_next_interview_question(
 
 def _build_evidence_questions(profile: CareerEvidenceProfile, lang: str, user_mode: str) -> list[dict[str, object]]:
     mode_key = str(user_mode or "calm_steps")
-    soft_cap = {
-        "fast": 3,
-        "calm_steps": 6,
-        "deep_route": 8,
-        "support": 8,
-    }.get(mode_key, 6)
+    soft_cap = {"fast": 3, "calm_steps": 5, "deep_route": 5, "support": 5}.get(mode_key, 5)
 
     questions: list[dict[str, object]] = []
     asked_gap_keys: set[str] = set()
@@ -6800,6 +6824,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         route_context_block = _route_context_section_text({str(key): str(value) for key, value in route_context.items()})
         if route_context_block:
             answers_text = (answers_text + "\n\nМинимальные данные для маршрута:\n" + route_context_block).strip()
+    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    data = {**data, "assessment_id": assessment_id}
     snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
@@ -6809,7 +6835,8 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
             route_context_missing_fields=missing_fields,
             awaiting_route_context=False,
         )
-        await message.answer(_missing_route_context_notice(missing_fields), reply_markup=ReplyKeyboardRemove())
+        # Missing optional facts narrow only their related conclusion. Never expose
+        # the internal gap ledger and never block the assessment at this stage.
     await state.update_data(profile_snapshot=snapshot)
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
@@ -6987,7 +7014,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
     # Report Readiness Gate: if report is essentially empty, ask one clarifying question
     clarification_count = int(data.get("readiness_clarification_count") or 0)
-    max_clarifications = 6
+    max_clarifications = 5
     if _report_draft_is_empty(report) and clarification_count < max_clarifications:
         await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
@@ -7069,6 +7096,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             )
             return
 
+    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    data = {**data, "assessment_id": assessment_id}
     snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
@@ -7078,11 +7107,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             route_context_missing_fields=missing_fields,
             awaiting_route_context=False,
         )
-        await message.answer(_missing_route_context_notice(missing_fields), reply_markup=ReplyKeyboardRemove())
+        # Clarifications are selected one at a time during the interview. Report
+        # generation must continue after the five-question cap.
 
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
-    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     profile_version = str(data.get("profile_version") or assessment_id)
     source_messages = list(data.get("source_messages") or [])
     source_messages.extend(
@@ -7545,7 +7574,7 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
     await state.update_data(
         assessment_id=uuid.uuid4().hex,
         source_messages=[{
-            "message_id": str(message.message_id),
+            "message_id": str(getattr(message, "message_id", "story_input")),
             "text": clean,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }],
@@ -7895,7 +7924,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 )
                 return
 
-            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": clean, "source_message_id": str(getattr(message, "message_id", "interview_answer")), "created_at": datetime.now(timezone.utc).isoformat()})
             qa_index += 1
             evidence_payload, is_ready = _update_evidence_after_answer(data, current, clean)
             await state.update_data(
@@ -8254,7 +8283,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             await message.answer(t(lang, "answer_review_prompt"), reply_markup=answer_review_keyboard())
             return
 
-        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean, "source_message_id": str(message.message_id), "created_at": datetime.now(timezone.utc).isoformat()})
+        qa_answers.append({"question": question_text, "question_id": _question_id(current, qa_index), "answer": clean, "source_message_id": str(getattr(message, "message_id", "interview_answer")), "created_at": datetime.now(timezone.utc).isoformat()})
         signal_payload = _free_text_signal(current, clean)
         if signal_payload:
             qa_answers[-1]["signal"] = signal_payload["signal"]
@@ -8779,7 +8808,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                     "question": str(pending.get("question", f"Вопрос {qa_index + 1}")),
                     "question_id": int(pending.get("question_id", qa_index + 1)),
                     "answer": accepted_answer,
-                    "source_message_id": str(message.message_id),
+                    "source_message_id": str(getattr(message, "message_id", "route_answer")),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
