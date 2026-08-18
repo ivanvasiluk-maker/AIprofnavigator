@@ -558,6 +558,8 @@ def validate_career_report(
     errors += validate_admin_roles_require_evidence(profile, report)
     errors += validate_country_market_consistency(profile, report)
     errors += validate_no_invented_psychological_facts(profile, report)
+    from services.market_strategy import validate_market_strategy
+    errors += validate_market_strategy(report)
     return errors
 
 
