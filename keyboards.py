@@ -173,6 +173,9 @@ RESULT_UPLOAD_OR_EDIT_RESUME = "📄 Загрузить / доработать �
 RESULT_ANALYZE_MARKET = "🔎 Разобрать рынок и вакансии"
 RESULT_SPECIALIST_EXPLICIT = "👤 Разобрать со специалистом"
 RESULT_GROUP_EXPLICIT = "👥 Найти группу / сообщество"
+CTA_CAREER_CHAT = "💬 Продолжить в карьерном чате"
+CTA_CAREER_CONSULTANT = "👤 Разобрать решение с карьерным консультантом"
+CTA_JOB_SEARCH_SUPPORT = "🎯 Перейти к сопровождению поиска работы"
 PDF_FALLBACK_STEPS = "🧭 Продолжить по шагам"
 PDF_FALLBACK_CLARIFY = "✍️ Уточнить карту"
 PDF_FALLBACK_SPECIALIST = "👤 Разобрать со специалистом"
@@ -334,6 +337,9 @@ ALL_RESULT_ACTIONS = {
     RESULT_ANALYZE_MARKET,
     RESULT_SPECIALIST_EXPLICIT,
     RESULT_GROUP_EXPLICIT,
+    CTA_CAREER_CHAT,
+    CTA_CAREER_CONSULTANT,
+    CTA_JOB_SEARCH_SUPPORT,
     MAP_CHECK_TRUE,
     MAP_CHECK_FIX_FACT,
     MAP_CHECK_CHANGE_PRIORITY,
@@ -648,6 +654,29 @@ def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_
             download_row.append(KeyboardButton(text=RESULT_DOWNLOAD_DOCX))
         rows.append(download_row)
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def next_step_cta_keyboard(report: dict) -> ReplyKeyboardMarkup:
+    """Put the report-selected outcome first while keeping one useful alternative."""
+    guidance = report.get("next_step_guidance") if isinstance(report.get("next_step_guidance"), dict) else {}
+    primary = guidance.get("primary_cta") if isinstance(guidance.get("primary_cta"), dict) else {}
+    cta_type = str(primary.get("type") or "career_chat").strip()
+    labels = {
+        "career_chat": CTA_CAREER_CHAT,
+        "career_consultant": CTA_CAREER_CONSULTANT,
+        "job_search_support": CTA_JOB_SEARCH_SUPPORT,
+    }
+    primary_label = labels.get(cta_type, CTA_CAREER_CHAT)
+    alternative_label = CTA_CAREER_CONSULTANT if cta_type != "career_consultant" else CTA_CAREER_CHAT
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=primary_label)],
+            [KeyboardButton(text=alternative_label)],
+            [KeyboardButton(text=RESULT_OPEN_FULL_REPORT)],
+            [KeyboardButton(text=RESULT_BACK_TO_MENU)],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def pdf_fallback_keyboard() -> ReplyKeyboardMarkup:
