@@ -3,7 +3,12 @@ from __future__ import annotations
 import copy
 import re
 
-from services.career_assessment import career_assessment_from_dict, render_assessment_html, validate_career_assessment
+from services.career_assessment import (
+    CAREER_ASSESSMENT_SCHEMA,
+    career_assessment_from_dict,
+    render_assessment_html,
+    validate_career_assessment,
+)
 from tests.test_career_assessment import profile_10_assessment_payload
 
 
@@ -53,17 +58,37 @@ def test_missing_salary_is_uncertainty_without_invented_numbers() -> None:
     assessment.context.income_minimum = None
     assessment.context.income_target = None
     html = render_assessment_html(assessment)
-    assert "Диапазон требует рыночной проверки" in html
+    assert "Актуальный датированный источник не получен" in html
+    assert "не заявлен без сопоставимого источника" in html
     assert not re.search(r"\b\d{3,6}\s*(?:EUR|PLN)", html)
 
 
-def test_html_has_exactly_eleven_sequential_sections_and_no_technical_ids() -> None:
+def test_html_has_sequential_strategy_sections_and_no_technical_ids() -> None:
     assessment = _assessment(residence="Литва", target="Литва", currency="EUR")
     html = render_assessment_html(assessment)
-    assert re.findall(r"<h2>(\d+)\.", html) == [str(number) for number in range(1, 12)]
+    assert re.findall(r"<h2>(\d+)\.", html) == [str(number) for number in range(1, 15)]
     assert assessment.assessment_id not in html
     assert "renderer" not in html.casefold()
     assert "career-assessment-html" not in html
+    assert "Безопасный сценарий" in html
+    assert "Основной сценарий" in html
+    assert "Амбициозный сценарий" in html
+    assert "Что здесь легко не заметить" in html
+    assert "overflow-x:auto" in html
+    assert "direct_entry" not in html
+
+
+def test_strategy_contract_requires_market_income_scenarios_and_insights() -> None:
+    required = set(CAREER_ASSESSMENT_SCHEMA["required"])
+    assert {"market_analysis", "income_forecasts", "scenarios", "personal_insights", "psychology_factors"} <= required
+    assessment = _assessment(residence="Литва", target="Литва", currency="EUR")
+    validation = validate_career_assessment(assessment)
+    assert validation.valid, validation.errors
+    assert {item.scenario_type for item in assessment.scenarios} == {"safe", "main", "ambitious"}
+    assert len(assessment.personal_insights) >= 3
+    assert all(len(set(item.evidence_fact_ids)) >= 2 for item in assessment.personal_insights)
+    assert {item.route_id for item in assessment.market_analysis} == {route.route_id for route in assessment.routes.all_routes()}
+    assert {item.route_id for item in assessment.income_forecasts} == {route.route_id for route in assessment.routes.all_routes()}
 
 
 def test_duplicate_route_analysis_and_unlinked_claim_are_rejected() -> None:

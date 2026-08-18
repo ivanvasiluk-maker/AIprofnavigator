@@ -32,7 +32,9 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             self.assertEqual(assessment.identity.professional_core, functions)
             self.assertEqual(assessment.routes.primary_routes[0].title, role)
             self.assertGreaterEqual(len(assessment.first_steps), 3)
-            self.assertGreaterEqual(len(assessment.routes.all_routes()), 2)
+            # The deterministic fallback must not manufacture a second profession
+            # from a task when no researched target role was supplied.
+            self.assertGreaterEqual(len(assessment.routes.all_routes()), 1)
             self.assertLessEqual(len(assessment.routes.all_routes()), 4)
             self.assertEqual(len({route.title for route in assessment.routes.all_routes()}), len(assessment.routes.all_routes()))
             self.assertEqual(len({step.type for step in assessment.first_steps}), len(assessment.first_steps))
@@ -133,7 +135,7 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             {"target_roles": ["Методист экспозиций", "Исследователь фонда"]},
             assessment_id="full-pool", session_id="full-pool-session", profile_version="1",
         )
-        self.assertGreater(assessment.metadata["candidate_count_before_selection"], 4)
+        self.assertGreaterEqual(assessment.metadata["candidate_count_before_selection"], 4)
         self.assertEqual(len(assessment.routes.all_routes()), 4)
         self.assertEqual(sum(route.title.startswith("Самостоятельная практика:") for route in assessment.routes.all_routes()), 1)
         self.assertFalse(assessment.routes.primary_routes[0].title.startswith("Самостоятельная практика:"))
@@ -147,8 +149,9 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             },
             {}, assessment_id="criteria", session_id="criteria-session", profile_version="1",
         )
-        night_route = next(route for route in assessment.routes.all_routes() if "ночные дежурства" in route.title)
-        criteria = assessment.metadata["route_evaluations"][night_route.route_id]["criteria"]
+        self.assertTrue(all("ночные дежурства" not in route.title for route in assessment.routes.all_routes()))
+        route = assessment.routes.primary_routes[0]
+        criteria = assessment.metadata["route_evaluations"][route.route_id]["criteria"]
         self.assertEqual(criteria["confirmed_function_fit"], "conflict")
         self.assertEqual(criteria["life_constraints_fit"], "conflict")
         self.assertEqual(criteria["target_country_access"], "unknown_country")
@@ -186,8 +189,8 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             assessment_id="insufficient", session_id="insufficient-session", profile_version="1",
         )
         self.assertEqual(assessment.metadata["fallback_mode"], "insufficient_data")
-        self.assertEqual(len(assessment.routes.all_routes()), 2)
-        self.assertTrue(all("систематизирует обращения" in route.title for route in assessment.routes.all_routes()))
+        self.assertEqual(len(assessment.routes.all_routes()), 1)
+        self.assertTrue(all("систематизирует обращения" not in route.title for route in assessment.routes.all_routes()))
         self.assertEqual(len(assessment.first_steps), 3)
         self.assertEqual(len(assessment.questions.unanswered_critical_questions), 1)
 
@@ -196,7 +199,7 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             {}, {"confirmed_functions": ["анализирует заявки", "готовит заключения"]}, {},
             assessment_id="unknowns", session_id="unknowns-session", profile_version="1",
         )
-        self.assertEqual(len(assessment.routes.all_routes()), 2)
+        self.assertEqual(len(assessment.routes.all_routes()), 1)
         for route in assessment.routes.all_routes():
             criteria = assessment.metadata["route_evaluations"][route.route_id]["criteria"]
             self.assertEqual(criteria["target_country_access"], "unknown_country")
