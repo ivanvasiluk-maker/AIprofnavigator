@@ -183,6 +183,10 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
         )
         self.assertEqual(assessment.questions.answered_critical_questions, ["Какие функции и задачи вы выполняли?"])
         self.assertEqual(assessment.questions.unanswered_critical_questions, ["В какой стране вы планируете искать работу?"])
+        self.assertNotIn(
+            assessment.questions.unanswered_critical_questions[0],
+            assessment.conclusions.what_may_change_conclusion,
+        )
 
     def test_insufficient_data_uses_functional_directions_and_still_has_steps(self) -> None:
         assessment = build_deterministic_assessment(

@@ -164,7 +164,9 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         "current_income": route.get("current_monthly_income") or data.get("current_income"),
         "target_income": route.get("desired_monthly_income") or data.get("target_income"),
         "income_urgency": route.get("income_urgency") or data.get("income_urgency"),
-        "language": route.get("current_language_level") or data.get("current_language_level"),
+        # Keep the complete language collection.  ``current_language_level`` is
+        # retained as a compatibility fallback for older persisted profiles.
+        "language": route.get("languages") or data.get("languages") or route.get("current_language_level") or data.get("current_language_level"),
         "format": route.get("work_preferences") or data.get("work_preferences"),
         "constraints": route.get("health_or_schedule_limits") or data.get("care_constraints"),
         "relocation": route.get("relocation_and_travel") or route.get("relocation_possible") or data.get("relocation_possible"),
@@ -187,7 +189,13 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         if re.search(r"прав[оа]\s+на\s+работ|work authori[sz]", low):
             authorized = not bool(re.search(r"нет|не име|without", low))
             profile.facts.append(_fact(assessment_id, "work_authorization", authorized, message_id, text, .9, created_at or None))
-        for match in re.finditer(r"(русск\w*|португальск\w*|английск\w*|russian|portuguese|english)\s*[—:=-]?\s*(родн\w*|[abc][12]|native)", low, re.I):
+        for match in re.finditer(
+            r"(украинск\w*|українськ\w*|русск\w*|испанск\w*|іспанськ\w*|"
+            r"португальск\w*|английск\w*|украинский|ukrainian|russian|spanish|"
+            r"portuguese|english)\s*[—:=-]?\s*(свободн\w*|родн\w*|[abc][12]|native|fluent)",
+            low,
+            re.I,
+        ):
             profile.facts.append(_fact(assessment_id, "language", {"language": match.group(1), "level": match.group(2).upper()}, message_id, match.group(0), .95, created_at or None))
 
     def add_structured(fact_type: FactType, value: Any, quote: str) -> None:
@@ -205,7 +213,9 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     for kind in ("current_income", "minimum_income", "target_income"):
         add_structured("income_requirement", {"kind": kind.removesuffix("_income"), "display": structured[kind]}, str(structured[kind] or ""))
     add_structured("income_requirement", {"kind": "urgency", "display": structured["income_urgency"]}, str(structured["income_urgency"] or ""))
-    add_structured("language", {"display": structured["language"]}, str(structured["language"] or ""))
+    language_values = structured["language"] if isinstance(structured["language"], list) else [structured["language"]]
+    for language_value in language_values:
+        add_structured("language", {"display": language_value}, str(language_value or ""))
     add_structured("preferred_format", structured["format"], str(structured["format"] or ""))
     add_structured("constraint", structured["constraints"], str(structured["constraints"] or ""))
     add_structured("market_context", {"relocation": structured["relocation"]}, str(structured["relocation"] or ""))
