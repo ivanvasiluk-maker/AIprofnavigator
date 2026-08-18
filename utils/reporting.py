@@ -464,6 +464,133 @@ def _first_step_buttons(report: dict) -> list[str]:
     return ["Сделал", "Слишком сложно", "Сделать проще", "Другой шаг"]
 
 
+def _guidance_items(value: object, text_key: str, detail_key: str = "") -> list[str]:
+    """Render structured continuation items without leaking internal enum values."""
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            text = str(item.get(text_key) or "").strip()
+            detail = str(item.get(detail_key) or "").strip() if detail_key else ""
+            if text:
+                result.append(f"{text} — {detail}" if detail else text)
+        elif str(item).strip():
+            result.append(str(item).strip())
+    return result
+
+
+def _next_step_guidance(report: dict) -> dict[str, object]:
+    """Return model guidance with safe, useful fallbacks for legacy reports."""
+    raw = report.get("next_step_guidance")
+    guidance = dict(raw) if isinstance(raw, dict) else {}
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    facts = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    action = report.get("action_plan") if isinstance(report.get("action_plan"), dict) else {}
+    today = action.get("today") if isinstance(action.get("today"), dict) else {}
+    route = _decision_route_title(decision)
+    unknowns = [str(x).strip() for x in facts.get("unknowns", []) if str(x).strip()]
+
+    if not guidance.get("main_risks"):
+        guidance["main_risks"] = [{
+        "risk": _safe_text((report.get("digital_human") or {}).get("main_risk"), f"Проверять маршрут «{route}» только по названию роли."),
+        "evidence": _safe_text(decision.get("why_this_path"), "Маршрут пока является рабочей гипотезой."),
+        "consequence": "До вложений в обучение нужно сверить гипотезу с реальными требованиями вакансий.",
+        }]
+    if not guidance.get("checks_before_decision"):
+        guidance["checks_before_decision"] = [
+        {"check": item, "why_it_matters": "Ответ может изменить маршрут, срок входа или допустимый уровень дохода."}
+        for item in unknowns[:4]
+        ] or [{"check": f"Требования 10 вакансий по маршруту «{route}»", "why_it_matters": "Это покажет доступность входа до затрат на обучение."}]
+    if not guidance.get("self_service_actions"):
+        guidance["self_service_actions"] = [
+            {
+                "action": _safe_text(today.get("action"), f"Собрать 10 вакансий по маршруту «{route}»."),
+                "result": _safe_text(today.get("result"), "Список повторяющихся требований."),
+            },
+            {"action": "Выписать требования, которые повторяются минимум в трёх вакансиях", "result": "Приоритетный список пробелов без покупки обучения вслепую"},
+        ]
+    elif isinstance(guidance.get("self_service_actions"), list) and len(guidance["self_service_actions"]) < 2:
+        guidance["self_service_actions"] = list(guidance["self_service_actions"]) + [{
+            "action": "Сверить выбранный маршрут минимум с пятью реальными вакансиями",
+            "result": "Список подтверждённых требований и вопросов, которые ещё нужно проверить",
+        }]
+    if not guidance.get("support_accelerators"):
+        guidance["support_accelerators"] = [
+        {"task": "Сопоставить реальные вакансии на одной системе критериев", "result": "Подтверждённый основной и запасной маршрут", "format": "both"},
+        {"task": "Адаптировать CV и отклики под повторяющиеся требования", "result": "Готовый комплект для рыночного теста", "format": "ai"},
+        ]
+    if not guidance.get("decision_level"):
+        guidance["decision_level"] = {
+        "known": f"Рабочий основной маршрут — {route}.",
+        "next_confirmation": "рынок → доступность входа → деньги",
+        "decision_after": "После проверки можно решать вопрос об обучении и переходе.",
+        }
+    route_count = len(report.get("selected_routes", [])) if isinstance(report.get("selected_routes"), list) else 0
+    route_count = route_count or len(report.get("route_evidence_blocks", [])) if isinstance(report.get("route_evidence_blocks"), list) else route_count
+    high_stakes = any(token in " ".join(_guidance_items(guidance.get("main_risks"), "risk")).lower() for token in ("доход", "деньг", "обуч", "уволь", "финанс"))
+    if unknowns:
+        cta_type, cta_title, why_now = "career_chat", "Продолжить разбор в карьерном чате", "Сначала нужно собрать недостающие факты."
+    elif 2 <= route_count <= 4 and high_stakes:
+        cta_type, cta_title, why_now = "career_consultant", "Разобрать решение с карьерным консультантом", "Есть несколько реалистичных маршрутов с существенными компромиссами."
+    else:
+        cta_type, cta_title, why_now = "job_search_support", "Перейти к сопровождению поиска работы", "Маршрут уже можно проверять откликами."
+    if not guidance.get("primary_cta"):
+        guidance["primary_cta"] = {
+        "type": cta_type,
+        "title": cta_title,
+        "why_now": why_now,
+        "outcomes": ["Разобрать вакансии", "Уточнить обязательные требования", "Обновить стратегию по результатам"],
+        }
+    if not guidance.get("first_chat_task"):
+        guidance["first_chat_task"] = {
+        "action": _safe_text(today.get("action"), f"Найдите 5 вакансий по маршруту «{route}»."),
+        "volume": "5 вакансий",
+        "result_to_send": "Ссылки или тексты вакансий",
+        "assistant_response": "Я сравню требования, отмечу повторяющиеся навыки и предложу следующий шаг.",
+        }
+    if not guidance.get("human_escalation_triggers"):
+        guidance["human_escalation_triggers"] = [
+            "два близких маршрута дают разные финансовые последствия",
+            "рыночные данные противоречат друг другу или тестовые отклики долго не дают результата",
+            "нужна персональная обратная связь по интервью, портфолио или переговорам о зарплате",
+        ]
+    report["next_step_guidance"] = guidance
+    return guidance
+
+
+def ensure_next_step_guidance(report: dict) -> dict[str, object]:
+    """Persist a complete continuation contract before report delivery/state storage."""
+    return _next_step_guidance(report)
+
+
+def _guidance_text(report: dict) -> str:
+    guidance = _next_step_guidance(report)
+    risks = _guidance_items(guidance.get("main_risks"), "risk", "consequence")[:3]
+    checks = _guidance_items(guidance.get("checks_before_decision"), "check", "why_it_matters")[:5]
+    own = _guidance_items(guidance.get("self_service_actions"), "action", "result")[:5]
+    support = _guidance_items(guidance.get("support_accelerators"), "task", "result")[:6]
+    level = guidance.get("decision_level") if isinstance(guidance.get("decision_level"), dict) else {}
+    cta = guidance.get("primary_cta") if isinstance(guidance.get("primary_cta"), dict) else {}
+    task = guidance.get("first_chat_task") if isinstance(guidance.get("first_chat_task"), dict) else {}
+    alternative = guidance.get("alternative_cta") if isinstance(guidance.get("alternative_cta"), dict) else {}
+    outcomes = [str(x).strip() for x in cta.get("outcomes", []) if str(x).strip()]
+    block = lambda items: "\n".join(f"- {x}" for x in items) or "- Критичных пунктов не выявлено."
+    sections = [
+        f"Где сейчас главный риск ошибиться\n{block(risks)}",
+        f"Что ещё нужно проверить\n{block(checks)}",
+        f"Что вы можете сделать самостоятельно\n{block(own)}",
+        f"Где сопровождение может ускорить переход\n{block(support)}",
+        "Ваш следующий уровень решения\n" + " ".join(str(level.get(k) or "").strip() for k in ("known", "next_confirmation", "decision_after")).strip(),
+        f"Следующий шаг — {_safe_text(cta.get('title'))}\n{_safe_text(cta.get('why_now'))}\n{block(outcomes)}",
+        f"Первое действие в чате\n{_safe_text(task.get('action'))} ({_safe_text(task.get('volume'))}). "
+        f"Пришлите: {_safe_text(task.get('result_to_send'))}. {_safe_text(task.get('assistant_response'))}",
+        "Когда особенно полезен живой консультант\n" + block([str(x).strip() for x in guidance.get("human_escalation_triggers", []) if str(x).strip()]),
+        (f"Альтернативный формат — {_safe_text(alternative.get('title'))}\n{_safe_text(alternative.get('why_now'))}" if alternative else ""),
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
 def build_telegram_summary(report: dict) -> str:
     from services.market_strategy import humanize_internal_values
     report = humanize_internal_values(report)
@@ -575,6 +702,7 @@ def build_telegram_summary(report: dict) -> str:
         f"Маршрутные доказательства:\n{evidence_block}",
         f"14. Первый шаг до 15 минут:\n{_safe_text(today.get('action'))}",
         f"15. План на неделю и месяц:\n{weekly_block}\n{month_block}",
+        _guidance_text(report),
         f"Стратегия выбора:\n{strategy_title or 'данных недостаточно'}\n{strategy_block}",
         f"Кто вы сейчас:\n{_safe_text(digital_human.get('current_state'))}",
         f"Что не обнулилось:\n{not_reset_block}",
@@ -1020,6 +1148,7 @@ def render_report_html(report: dict, meta: ReportMeta) -> str:
         <div class='card'><h3>13. Неопределённости</h3><ul>{unknowns_html}</ul></div>
         <div class='card'><h3>14. Первый шаг до 15 минут</h3><p>{escape(_safe_text(today.get('action')))}</p></div>
         <div class='card'><h3>15. План на неделю и месяц</h3><ul>{''.join(f"<li>День {escape(str(item.get('day', '-')))}: {escape(_safe_text(item.get('task')))}</li>" for item in weekly[:7] if isinstance(item, dict)) or '<li>Данных недостаточно.</li>'}</ul></div>
+        <div class='final-conclusion'><div class='final-conclusion-title'>Персональный следующий шаг</div><div class='final-conclusion-text'>{escape(_guidance_text(report))}</div></div>
     </section>
 
     <section class='page'>

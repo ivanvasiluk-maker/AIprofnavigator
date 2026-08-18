@@ -55,6 +55,9 @@ from keyboards import (
     RESULT_ANALYZE_MARKET,
     RESULT_SPECIALIST_EXPLICIT,
     RESULT_GROUP_EXPLICIT,
+    CTA_CAREER_CHAT,
+    CTA_CAREER_CONSULTANT,
+    CTA_JOB_SEARCH_SUPPORT,
     RESULT_CLARIFY,
     RESULT_DETAILS,
     RESULT_DO_STEPS,
@@ -150,6 +153,7 @@ from keyboards import (
     extended_diagnostics_keyboard,
     question_options_keyboard,
     result_actions_keyboard,
+    next_step_cta_keyboard,
     self_exploration_keyboard,
     short_story_keyboard,
     practical_barrier_keyboard,
@@ -206,7 +210,7 @@ from services.assessment_integrity import audit_facts, build_fact_ledger, consis
 from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
-from utils.reporting import build_telegram_summary, generate_docx_report_file, generate_pdf_report
+from utils.reporting import build_telegram_summary, ensure_next_step_guidance, generate_docx_report_file, generate_pdf_report
 from utils.reporting import generate_assessment_html_file, generate_html_report_file, generate_pdf_from_html_file_with_error
 
 router = Router()
@@ -4954,6 +4958,21 @@ def _optional_support_step_from_report(report: dict) -> str:
 
 def _build_execution_steps(report: dict) -> list[dict[str, str]]:
     steps: list[dict[str, str]] = []
+    guidance = report.get("next_step_guidance") if isinstance(report.get("next_step_guidance"), dict) else {}
+    chat_task = guidance.get("first_chat_task") if isinstance(guidance.get("first_chat_task"), dict) else {}
+    chat_action = str(chat_task.get("action") or "").strip()
+    if chat_action:
+        volume = str(chat_task.get("volume") or "").strip()
+        result_to_send = str(chat_task.get("result_to_send") or "").strip()
+        assistant_response = str(chat_task.get("assistant_response") or "").strip()
+        steps.append({
+            "day": "1",
+            "focus": "Первый рыночный шаг",
+            "task": f"{chat_action}{f' Объём: {volume}.' if volume else ''}",
+            "time": "15-30 минут",
+            "result": f"Пришлите в чат: {result_to_send}." if result_to_send else "Пришлите результат в чат.",
+            "why": assistant_response or "Я разберу результат и дам следующий шаг без повторной диагностики.",
+        })
     weekly_plan = report.get("weekly_plan", []) if isinstance(report.get("weekly_plan"), list) else []
     for item in weekly_plan[:7]:
         if not isinstance(item, dict):
@@ -6016,6 +6035,7 @@ def _written_conclusion_from_report(report: dict) -> str:
 
 
 async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str, report: dict) -> None:
+    ensure_next_step_guidance(report)
     data = await state.get_data()
     report_generation_id = str(data.get("report_generation_id") or "").strip()
 
@@ -6133,7 +6153,7 @@ async def _send_final_map_bundle(message: Message, state: FSMContext, lang: str,
 
     # After route selection and report delivery, move user to action stage:
     # continue in bot steps, specialist route, or support group.
-    await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
+    await message.answer(t(lang, "post_result_hint"), reply_markup=next_step_cta_keyboard(report))
 
 
 def _shorten_first_step_for_overload(report: dict) -> None:
@@ -9442,7 +9462,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
         return
 
-    if action in {RESULT_DO_STEPS, PDF_FALLBACK_STEPS}:
+    if action in {RESULT_DO_STEPS, PDF_FALLBACK_STEPS, CTA_CAREER_CHAT, CTA_JOB_SEARCH_SUPPORT}:
         steps = data.get("execution_steps") or _build_execution_steps(data.get("final_report") or {})
         progress = data.get("execution_progress") or {}
         current_day = int(data.get("current_execution_day", 0))
@@ -9473,7 +9493,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(chunks.get("translation", "-"), reply_markup=self_exploration_keyboard())
         return
 
-    if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT}:
+    if action in {RESULT_SPECIALIST, PDF_FALLBACK_SPECIALIST, RESULT_SPECIALIST_EXPLICIT, CTA_CAREER_CONSULTANT}:
         await _track_event(message, state, "specialist_clicked", action=action)
         report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
         guidance_text, mode, today_step, career_hits, psych_hits = _specialist_guidance_text(report, data)
@@ -10079,7 +10099,6 @@ async def resume_decision_fallback(message: Message, state: FSMContext) -> None:
 @router.message(CareerFlow.waiting_for_barriers, F.voice)
 @router.message(CareerFlow.waiting_for_post_result_action, F.voice)
 @router.message(CareerFlow.SHOWING_DETAILS, F.voice)
-@router.message(CareerFlow.STEP_TRACKING, F.voice)
 @router.message(CareerFlow.STEP_BARRIER_INPUT, F.voice)
 @router.message(CareerFlow.SUPPORT_OFFER, F.voice)
 @router.message(CareerFlow.CV_REVIEW_WAITING_FILE, F.voice)
@@ -10092,10 +10111,26 @@ async def non_voice_step_fallback(message: Message, state: FSMContext) -> None:
     if await state.get_state() == CareerFlow.SUPPORT_OFFER.state:
         await message.answer(t(lang, "support_mode_fallback"), reply_markup=support_mode_keyboard())
         return
-    if await state.get_state() == CareerFlow.STEP_TRACKING.state:
+    await message.answer(t(lang, "input_media_fallback"))
+
+
+@router.message(CareerFlow.STEP_TRACKING, F.voice)
+async def handle_step_tracking_voice(message: Message, state: FSMContext) -> None:
+    lang = _user_language(await state.get_data())
+    if not message.voice:
         await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
         return
-    await message.answer(t(lang, "input_media_fallback"))
+    await message.answer("Расшифровываю результат шага…", reply_markup=ReplyKeyboardRemove())
+    temp_path = await _download_bot_file(message, message.voice.file_id, suffix=".ogg")
+    try:
+        transcript = (await ai_client.transcribe_voice(temp_path)).strip()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    if not transcript:
+        await message.answer("Не удалось разобрать запись. Пришлите результат текстом.", reply_markup=step_tracking_keyboard())
+        return
+    await _process_step_submission(message, state, transcript)
 
 
 @router.message(CareerFlow.SUPPORT_OFFER, F.text)
@@ -10112,15 +10147,81 @@ async def self_exploration_fallback(message: Message, state: FSMContext) -> None
 
 @router.message(CareerFlow.STEP_TRACKING, F.text)
 async def step_tracking_fallback(message: Message, state: FSMContext) -> None:
+    await _process_step_submission(message, state, str(message.text or "").strip())
+
+
+async def _process_step_submission(message: Message, state: FSMContext, user_result: str) -> None:
     data = await state.get_data()
     lang = _user_language(data)
     steps = data.get("execution_steps") or []
     current_day = int(data.get("current_execution_day", 0))
-    if steps:
-        current_day = max(0, min(current_day, len(steps) - 1))
-        await message.answer(_execution_step_text(steps[current_day], data.get("execution_progress") or {}), reply_markup=step_tracking_keyboard())
+    if not steps:
+        await message.answer(t(lang, "step_tracking_finished"), reply_markup=result_actions_keyboard())
         return
-    await message.answer(t(lang, "step_tracking_finished"), reply_markup=result_actions_keyboard())
+
+    current_day = max(0, min(current_day, len(steps) - 1))
+    current_step = steps[current_day]
+    report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+    decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
+    layers = report.get("decision_layers") if isinstance(report.get("decision_layers"), dict) else {}
+    constraints = [str(item) for item in layers.get("constraints", []) if str(item).strip()]
+    previous_results = data.get("execution_result_history") if isinstance(data.get("execution_result_history"), list) else []
+    await message.answer("Разбираю результат шага и сверяю его с выбранным маршрутом…", reply_markup=ReplyKeyboardRemove())
+    review = await ai_client.analyze_execution_result(
+        selected_route=str(decision.get("recommended_main_path") or "не уточнён"),
+        constraints=constraints,
+        current_step=current_step,
+        user_result=user_result,
+        previous_results=previous_results,
+        language=lang,
+    )
+
+    confirmed = [str(item).strip() for item in review.get("confirmed_facts", []) if str(item).strip()]
+    facts = report.get("facts_only") if isinstance(report.get("facts_only"), dict) else {}
+    explicit = [str(item).strip() for item in facts.get("explicit_facts", []) if str(item).strip()]
+    facts["explicit_facts"] = list(dict.fromkeys(explicit + confirmed))
+    report["facts_only"] = facts
+    history_item = {
+        "step": str(current_step.get("task") or ""),
+        "user_result": user_result,
+        "result_summary": str(review.get("result_summary") or ""),
+        "confirmed_facts": confirmed,
+        "hypothesis_update": str(review.get("hypothesis_update") or ""),
+    }
+    previous_results.append(history_item)
+
+    next_step = str(review.get("next_step") or "").strip()
+    if next_step:
+        generated_step = {
+            "day": str(current_day + 2),
+            "focus": "Следующий шаг по новым данным",
+            "task": next_step,
+            "time": "15-30 минут",
+            "result": str(review.get("next_step_result") or "Пришлите результат в чат."),
+            "why": str(review.get("hypothesis_update") or "Проверяем маршрут на новых фактах."),
+        }
+        steps = steps[: current_day + 1] + [generated_step] + steps[current_day + 1 :]
+
+    progress = data.get("execution_progress") if isinstance(data.get("execution_progress"), dict) else {}
+    progress[str(current_step.get("day") or current_day + 1)] = {"status": "результат разобран", "result": user_result[:1000]}
+    next_day = min(current_day + 1, len(steps) - 1)
+    escalation = bool(review.get("human_escalation_recommended"))
+    response = str(review.get("response") or review.get("result_summary") or "Результат сохранён.").strip()
+    if escalation:
+        reason = str(review.get("human_escalation_reason") or "Здесь полезна персональная рабочая сессия.").strip()
+        response += f"\n\nМягкая эскалация: {reason}\nЭто не блокирует самостоятельное продолжение плана в чате."
+    await state.update_data(
+        final_report=report,
+        execution_steps=steps,
+        execution_progress=progress,
+        execution_result_history=previous_results[-20:],
+        current_execution_day=next_day,
+        execution_hypothesis_update=str(review.get("hypothesis_update") or ""),
+    )
+    await _track_event(message, state, "execution_result_analyzed", meta={"escalation": escalation, "confirmed_facts_count": len(confirmed)})
+    await message.answer(response, reply_markup=step_tracking_keyboard())
+    if next_step:
+        await message.answer(_execution_step_text(steps[next_day], progress), reply_markup=step_tracking_keyboard())
 
 
 @router.message(CareerFlow.REPORT_CLARIFICATION, F.text | F.document)

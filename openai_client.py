@@ -919,6 +919,35 @@ MANDATORY_QUESTIONS_RU = [
 
 FINAL_REPORT_FALLBACK_BE = copy.deepcopy(FINAL_REPORT_FALLBACK)
 
+EXECUTION_RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result_summary": {"type": "string"},
+        "confirmed_facts": {"type": "array", "items": {"type": "string"}},
+        "hypothesis_update": {"type": "string"},
+        "route_changed": {"type": "boolean"},
+        "next_step": {"type": "string"},
+        "next_step_result": {"type": "string"},
+        "human_escalation_recommended": {"type": "boolean"},
+        "human_escalation_reason": {"type": "string"},
+        "response": {"type": "string"},
+    },
+    "required": ["result_summary", "confirmed_facts", "hypothesis_update", "route_changed", "next_step", "next_step_result", "human_escalation_recommended", "human_escalation_reason", "response"],
+    "additionalProperties": False,
+}
+
+EXECUTION_RESULT_FALLBACK = {
+    "result_summary": "Результат шага сохранён, но автоматический разбор сейчас недоступен.",
+    "confirmed_facts": [],
+    "hypothesis_update": "Маршрут пока не меняется.",
+    "route_changed": False,
+    "next_step": "Отметьте 3 требования, которые повторяются чаще всего.",
+    "next_step_result": "Список из 3 повторяющихся требований.",
+    "human_escalation_recommended": False,
+    "human_escalation_reason": "",
+    "response": "Я сохранил результат. Маршрут пока не меняем: следующим шагом выделите три наиболее частых требования.",
+}
+
 
 class CareerOpenAIClient:
     def __init__(self, api_key: str, model: str, transcribe_model: str) -> None:
@@ -1110,6 +1139,35 @@ class CareerOpenAIClient:
             language=language,
         )
         return await self._run_json(prompt, RESUME_ANALYSIS_FALLBACK, RESUME_ANALYSIS_SCHEMA, language)
+
+    async def analyze_execution_result(
+        self,
+        *,
+        selected_route: str,
+        constraints: list[str],
+        current_step: dict[str, Any],
+        user_result: str,
+        previous_results: list[dict[str, Any]],
+        language: str = "ru",
+    ) -> dict[str, Any]:
+        """Review a completed step without restarting career diagnosis."""
+        prompt = f"""
+Ты сопровождаешь выполнение уже выбранного карьерного маршрута.
+Маршрут: {selected_route}
+Ограничения: {json.dumps(constraints, ensure_ascii=False)}
+Текущий шаг: {json.dumps(current_step, ensure_ascii=False)}
+Предыдущие результаты: {json.dumps(previous_results[-5:], ensure_ascii=False)}
+Результат пользователя: {user_result}
+
+Разбери только присланный результат. Не начинай диагностику заново и не скрывай
+полезный вывод за консультацией. Отдели новые подтверждённые факты от гипотез.
+Маршрут можно изменить только при новом факте, который ему противоречит; иначе
+route_changed=false. Дай один следующий измеримый шаг. Рекомендуй человека мягко
+только при высоком финансовом риске, противоречивых данных, нескольких близких
+стратегиях, длительном отсутствии результата, интервью или переговорах.
+Верни короткий самостоятельный ответ и JSON по заданной схеме.
+""".strip()
+        return await self._run_json(prompt, EXECUTION_RESULT_FALLBACK, EXECUTION_RESULT_SCHEMA, language)
 
     async def build_career_assessment(
         self,
