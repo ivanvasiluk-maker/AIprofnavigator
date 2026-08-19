@@ -19,6 +19,7 @@ FactType = Literal[
 ]
 
 CITY_COUNTRIES = {
+    "kaunas": ("Lithuania", "LT"), "каунас": ("Lithuania", "LT"), "каунасе": ("Lithuania", "LT"),
     "berlin": ("Germany", "DE"), "берлин": ("Germany", "DE"), "берлине": ("Germany", "DE"),
     "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
     "прага": ("Czechia", "CZ"), "праге": ("Czechia", "CZ"),
@@ -32,6 +33,44 @@ CITY_COUNTRIES = {
     "krakow": ("Poland", "PL"), "kraków": ("Poland", "PL"),
     "краков": ("Poland", "PL"), "кракове": ("Poland", "PL"),
 }
+
+COUNTRY_CURRENCIES = {
+    "Lithuania": "EUR", "Poland": "PLN", "Germany": "EUR", "Czechia": "CZK",
+    "Spain": "EUR", "Portugal": "EUR",
+}
+
+
+class CurrencyContext(BaseModel):
+    """One authoritative currency decision, with its provenance."""
+    residence_country: str | None = None
+    target_countries: list[str] = Field(default_factory=list)
+    residence_currency: str | None = None
+    target_market_currencies: dict[str, str] = Field(default_factory=dict)
+    user_preferred_currency: str | None = None
+    income_currency: str | None = None
+    display_currency: str | None = None
+    source: str = "unknown"
+    confidence: float = Field(default=0, ge=0, le=1)
+
+
+class MoneyFact(BaseModel):
+    amount: float | None = None
+    min: float | None = None
+    max: float | None = None
+    currency: str
+    basis: Literal["net", "gross", "unknown"] = "unknown"
+    period: str
+    source_message_id: str
+    source_quote: str
+
+
+class IncomeConflict(BaseModel):
+    previous_value: dict[str, Any]
+    new_value: dict[str, Any]
+    previous_source: str
+    new_source: str
+    likely_ui_mismatch: bool
+    status: Literal["unresolved", "resolved"] = "unresolved"
 
 COUNTRY_ALIASES = {
     "poland": "Poland", "polska": "Poland", "польша": "Poland",
@@ -85,6 +124,12 @@ class NormalizedUserProfile(BaseModel):
     training_budget: float | None = None
     training_budget_currency: str | None = None
     training_horizon: str | None = None
+    current_income_fact: MoneyFact | None = None
+    minimum_income_fact: MoneyFact | None = None
+    target_income_fact: MoneyFact | None = None
+    training_budget_fact: MoneyFact | None = None
+    currency_context: CurrencyContext = Field(default_factory=CurrencyContext)
+    income_conflicts: list[IncomeConflict] = Field(default_factory=list)
     transferable_skills: list[str] = Field(default_factory=list)
     psychological_barriers: list[str] = Field(default_factory=list)
     life_constraints: list[str] = Field(default_factory=list)
@@ -297,7 +342,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             currency = "EUR" if currency_token in {"€", "eur"} else "CZK" if currency_token in {"czk", "kč"} else "PLN"
             # A learning budget is a separate monetary entity and must never
             # overwrite the salary currency.
-            if re.search(r"обучен|курс|training|education", context, re.I):
+            # A later sentence about training must not reclassify the preceding
+            # target salary merely because it falls inside the evidence quote.
+            money_prefix = text[max(0, match.start() - 28):match.start()]
+            if re.search(r"обучен|курс|training|education|бюджет", money_prefix, re.I):
                 profile.facts.append(_fact(assessment_id, "learning_resource", {
                     "kind": "training_budget", "amount": match.group(2).replace(" ", ""),
                     "currency": currency,
@@ -459,10 +507,33 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 language_map[name] = level
                 language_details[name] = {"language": name, "level": level, "source": fact.source_message_id, "confidence": fact.confidence}
     income_by_kind: dict[str, dict[str, Any]] = {}
+    income_fact_by_kind: dict[str, CanonicalFact] = {}
+    income_conflicts: list[IncomeConflict] = []
     for fact in profile.facts_of_type("income_requirement"):
         value = fact.normalized_value
         if isinstance(value, dict) and value.get("kind") in {"current", "minimum", "target"}:
-            income_by_kind[str(value["kind"])] = value
+            kind = str(value["kind"])
+            # A keyboard answer cannot replace a stronger explicit statement.
+            existing = income_fact_by_kind.get(kind)
+            is_button = fact.source_message_id.startswith(("button", "callback"))
+            existing_is_text = existing is not None and not existing.source_message_id.startswith(("button", "callback", "structured_answer"))
+            loses_structure = existing is not None and existing.normalized_value.get("currency") and not value.get("currency")
+            if existing and existing.normalized_value.get("currency") and value.get("currency"):
+                previous_currency = str(existing.normalized_value["currency"]).upper()
+                new_currency = str(value["currency"]).upper()
+                if previous_currency != new_currency:
+                    likely_ui_mismatch = is_button or fact.source_message_id == "structured_answer"
+                    income_conflicts.append(IncomeConflict(
+                        previous_value=dict(existing.normalized_value), new_value=dict(value),
+                        previous_source=existing.source_message_id, new_source=fact.source_message_id,
+                        likely_ui_mismatch=likely_ui_mismatch,
+                    ))
+                    # Keep the last confirmed canonical value until the conflict
+                    # is resolved explicitly. Both source facts remain auditable.
+                    continue
+            if not (is_button and existing_is_text) and not loses_structure:
+                income_by_kind[kind] = value
+                income_fact_by_kind[kind] = fact
 
     def income_number(kind: str) -> float | None:
         raw = str(income_by_kind.get(kind, {}).get("amount") or income_by_kind.get(kind, {}).get("display") or "")
@@ -514,6 +585,41 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             for item in raw if isinstance(raw, list) else [raw]:
                 if str(item or "").strip():
                     destination.append(str(item).strip())
+    def structured_money(kind: str) -> MoneyFact | None:
+        value, fact = income_by_kind.get(kind), income_fact_by_kind.get(kind)
+        if not value or not fact or not value.get("currency"):
+            return None
+        numbers = re.findall(r"\d+(?:[.,]\d+)?", str(value.get("amount") or value.get("display") or "").replace(" ", ""))
+        if not numbers:
+            return None
+        parsed = [float(number.replace(",", ".")) for number in numbers]
+        return MoneyFact(
+            amount=parsed[0] if len(parsed) == 1 else None,
+            min=parsed[0] if len(parsed) > 1 else None,
+            max=parsed[-1] if len(parsed) > 1 else None,
+            currency=str(value["currency"]).upper(), basis=str(value.get("tax_basis") or "unknown").lower(),
+            period=str(value.get("period") or "month"), source_message_id=fact.source_message_id,
+            source_quote=fact.source_quote,
+        )
+
+    current_money, minimum_money, target_money = (structured_money(kind) for kind in ("current", "minimum", "target"))
+    residence_currency = COUNTRY_CURRENCIES.get(country or "")
+    explicit_currency = next((money.currency for money in (minimum_money, current_money, target_money) if money), None)
+    target_countries = list(dict.fromkeys(
+        [str(item.get("statement") or "").strip() for item in target_evidence if isinstance(item, dict)]
+        + [item for item in (target_primary,) if item]
+    ))
+    target_currencies = {item: COUNTRY_CURRENCIES[item] for item in target_countries if item in COUNTRY_CURRENCIES}
+    market_currency = next(iter(target_currencies.values()), None) if len(set(target_currencies.values())) <= 1 else None
+    display_currency = explicit_currency or market_currency or residence_currency
+    currency_context = CurrencyContext(
+        residence_country=country, target_countries=target_countries,
+        residence_currency=residence_currency, target_market_currencies=target_currencies,
+        user_preferred_currency=explicit_currency, income_currency=explicit_currency,
+        display_currency=display_currency,
+        source="explicit_income" if explicit_currency else "target_market" if market_currency else "residence" if residence_currency else "unknown",
+        confidence=.99 if explicit_currency else .85 if display_currency else 0,
+    )
     profile.normalized_profile = NormalizedUserProfile(
         country=country, city=city, target_market=target_market,
         target_market_primary=target_primary, target_market_secondary=target_secondary,
@@ -539,6 +645,11 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         training_budget=float(budget_match.group(2).replace(" ", "")) if budget_match else (float(str(learning_facts[-1].get("amount"))) if learning_facts else None),
         training_budget_currency=budget_currency,
         training_horizon=f"{horizon_match.group(1)} months" if horizon_match else None,
+        current_income_fact=current_money, minimum_income_fact=minimum_money, target_income_fact=target_money,
+        training_budget_fact=(MoneyFact(amount=float(budget_match.group(2).replace(" ", "")), currency=budget_currency,
+            period="six_months" if re.search(r"шест|6\s*месяц", low_all) else "unknown",
+            source_message_id="source_text", source_quote=budget_match.group(0)) if budget_match and budget_currency else None),
+        currency_context=currency_context, income_conflicts=income_conflicts,
         professional_functions=strings("professional_function"),
         transferable_skills=strings("skill"),
         management_experience=list(dict.fromkeys(management)), digital_tools=tools_found,
@@ -559,6 +670,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     state_raw = data.get("question_state") if isinstance(data.get("question_state"), dict) else {}
     profile.question_state = QuestionState.model_validate(state_raw)
     resolved = {fact.fact_type for fact in profile.facts if fact.normalized_value not in (None, "", "unknown")}
+    if minimum_money and minimum_money.currency and minimum_money.period:
+        resolved.add("minimum_income")
     profile.question_state.resolved_fact_types = sorted(resolved)
     return profile
 
@@ -568,6 +681,7 @@ QUESTION_PRIORITY = [
     ("work_authorization", "work_authorization", "Есть ли у вас право работать на выбранном рынке без дополнительного разрешения?", "Изменит юридическую доступность маршрутов."),
     ("language", "language_level", "Какими языками вы владеете и на каком уровне?", "Изменит доступность локального рынка и уровень входа."),
     ("income_requirement", "minimum_income", "Какой минимальный ежемесячный доход позволит вам перейти без финансового риска? Укажите валюту и сумму до или после налогов.", "Изменит безопасность перехода и сравнение маршрутов."),
+    ("income_requirement", "income_basis", "Указанная сумма — до или после налогов?", "Уточнит корректное сравнение зарплат без повторного вопроса о сумме."),
     ("income_requirement", "income_urgency", "Когда новый маршрут должен начать приносить необходимый доход: в течение месяца, трёх месяцев, полугода или позже?", "Изменит допустимую скорость и риск перехода."),
     ("preferred_format", "work_format", "Что вы готовы рассматривать: работу по найму, самостоятельные услуги, собственный бизнес или сочетание вариантов?", "Изменит модель занятости и основной маршрут."),
     ("market_context", "relocation_travel", "Рассматриваете ли вы релокацию или командировки, и если да — как часто?", "Изменит географическую доступность маршрутов."),
@@ -582,7 +696,11 @@ QUESTION_PRIORITY = [
 def _gap_is_resolved(profile: CanonicalProfile, fact_type: str, gap_id: str) -> bool:
     facts = profile.facts_of_type(fact_type)
     if gap_id == "minimum_income":
-        return any(isinstance(item.normalized_value, dict) and item.normalized_value.get("kind") == "minimum" for item in facts)
+        money = profile.normalized_profile.minimum_income_fact
+        return bool(money and (money.amount is not None or money.min is not None) and money.currency and money.period)
+    if gap_id == "income_basis":
+        money = profile.normalized_profile.minimum_income_fact
+        return money is None or money.basis in {"net", "gross"}
     if gap_id == "income_urgency":
         return any(isinstance(item.normalized_value, dict) and item.normalized_value.get("kind") == "urgency" for item in facts)
     if gap_id == "relocation_travel":

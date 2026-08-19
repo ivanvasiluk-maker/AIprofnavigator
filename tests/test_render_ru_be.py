@@ -1307,8 +1307,8 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         support_hours = next((row for row in support if "сколько часов" in str(row.get("question", "")).lower()), {})
         common_hours = next((row for row in common if "сколько часов" in str(row.get("question", "")).lower()), {})
 
-        self.assertIn("3000-4500 PLN/мес", list(calm_income.get("options", [])))
-        self.assertIn("3000-4500 PLN/мес", list(support_income.get("options", [])))
+        self.assertIn("Минимум: €1200–1500 EUR net/мес", list(calm_income.get("options", [])))
+        self.assertIn("Минимум: €1200–1500 EUR net/мес", list(support_income.get("options", [])))
         self.assertIn("3-5 часов в неделю", list(support_hours.get("options", [])))
         self.assertIn("3-5 часов в неделю", list(common_hours.get("options", [])))
 
@@ -1340,7 +1340,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         income_row = next((row for row in questions if "минимальный доход в месяц" in str(row.get("question", "")).lower()), {})
         hours_row = next((row for row in questions if "сколько часов в неделю готовы уделять обучению" in str(row.get("question", "")).lower()), {})
 
-        self.assertIn("3000-4500 PLN/мес", list(income_row.get("options", [])))
+        self.assertIn("Минимум: €1200–1500 EUR net/мес", list(income_row.get("options", [])))
         self.assertIn("6-10 часов в неделю", list(hours_row.get("options", [])))
 
     def test_question_reply_markup_fallback_uses_intervals_for_income_and_time(self) -> None:
@@ -1356,8 +1356,8 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         income_keyboard = _question_reply_markup(income_analysis, 0)
         self.assertIsNotNone(income_keyboard)
         income_dump = str(getattr(income_keyboard, "keyboard", ""))
-        self.assertIn("3000-4500 PLN/мес", income_dump)
-        self.assertIn("6000+ PLN/мес", income_dump)
+        self.assertIn("Минимум: €1200–1500 EUR net/мес", income_dump)
+        self.assertNotIn("PLN", income_dump)
 
         hours_analysis = {
             "follow_up_questions": [

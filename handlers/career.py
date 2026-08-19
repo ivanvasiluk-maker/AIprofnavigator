@@ -619,31 +619,39 @@ def _resolve_country_config(country_text: str) -> dict[str, str]:
 
 
 def _income_options_for_currency(currency: str) -> tuple[list[str], list[str], list[str]]:
-    """Returns (min_income_options, desired_income_options, training_budget_options) by currency."""
-    if currency == "PLN":
-        return (
-            ["Минимум: до 3000 PLN/мес", "Минимум: 3000-4500 PLN/мес", "Минимум: 4500-6000 PLN/мес", "Минимум: 6000+ PLN/мес"],
-            ["Цель: до 4500 PLN/мес", "Цель: 4500-6000 PLN/мес", "Цель: 6000-8000 PLN/мес", "Цель: 8000+ PLN/мес"],
-            ["Бюджет на обучение: 0 PLN", "Бюджет на обучение: до 500 PLN", "Бюджет на обучение: 500-2000 PLN", "Бюджет на обучение: 2000+ PLN"],
-        )
-    if currency == "GBP":
-        return (
-            ["Минимум: до 1500 GBP/мес", "Минимум: 1500-2500 GBP/мес", "Минимум: 2500-3500 GBP/мес", "Минимум: 3500+ GBP/мес"],
-            ["Цель: до 2500 GBP/мес", "Цель: 2500-3500 GBP/мес", "Цель: 3500-5000 GBP/мес", "Цель: 5000+ GBP/мес"],
-            ["Бюджет на обучение: 0 GBP", "Бюджет на обучение: до 200 GBP", "Бюджет на обучение: 200-800 GBP", "Бюджет на обучение: 800+ GBP"],
-        )
-    if currency in ("USD", "CAD", "AUD"):
-        return (
-            [f"Минимум: до 2000 {currency}/мес", f"Минимум: 2000-3500 {currency}/мес", f"Минимум: 3500-5000 {currency}/мес", f"Минимум: 5000+ {currency}/мес"],
-            [f"Цель: до 3500 {currency}/мес", f"Цель: 3500-5000 {currency}/мес", f"Цель: 5000-8000 {currency}/мес", f"Цель: 8000+ {currency}/мес"],
-            [f"Бюджет на обучение: 0 {currency}", f"Бюджет на обучение: до 300 {currency}", f"Бюджет на обучение: 300-1000 {currency}", f"Бюджет на обучение: 1000+ {currency}"],
-        )
-    # Default: EUR
-    return (
-        ["Минимум: до 1000 EUR/мес", "Минимум: 1000-1500 EUR/мес", "Минимум: 1500-2500 EUR/мес", "Минимум: 2500+ EUR/мес"],
-        ["Цель: до 1500 EUR/мес", "Цель: 1500-2500 EUR/мес", "Цель: 2500-4000 EUR/мес", "Цель: 4000+ EUR/мес"],
-        ["Бюджет на обучение: 0 EUR", "Бюджет на обучение: до 200 EUR", "Бюджет на обучение: 200-800 EUR", "Бюджет на обучение: 800+ EUR"],
-    )
+    """Build one-currency controls; amounts are market configuration, not labels."""
+    currency = str(currency or "").upper()
+    scales = {
+        "EUR": ((1200, 1500, 1800, 2200), (1500, 1800, 2200, 3000), (0, 200, 500, 1000)),
+        "PLN": ((3000, 4500, 6000, 8000), (4500, 6000, 8000, 11000), (0, 500, 2000, 4000)),
+        "GBP": ((1500, 2500, 3500, 4500), (2500, 3500, 5000, 6500), (0, 200, 800, 1500)),
+        "USD": ((2000, 3500, 5000, 7000), (3500, 5000, 8000, 11000), (0, 300, 1000, 2000)),
+    }
+    if currency not in scales:
+        raise ValueError(f"unsupported display currency: {currency or 'Unknown'}")
+    symbol = "€" if currency == "EUR" else currency
+    unit = f"{symbol}" if currency != "EUR" else "€"
+    def income(prefix: str, points: tuple[int, int, int, int]) -> list[str]:
+        a, b, c, d = points
+        suffix = " EUR" if currency == "EUR" else ""
+        return [f"{prefix}до {unit}{a}{suffix} net/мес", f"{prefix}{unit}{a}–{b}{suffix} net/мес",
+                f"{prefix}{unit}{b}–{c}{suffix} net/мес", f"{prefix}{unit}{c}–{d}{suffix} net/мес",
+                f"{prefix}{unit}{d}+{suffix} net/мес", f"Ввести свою сумму ({currency})", f"Не знаю ({currency})"]
+    minimum, desired, budget = scales[currency]
+    budget_suffix = " EUR" if currency == "EUR" else ""
+    return income("Минимум: ", minimum), income("Цель: ", desired), [
+        f"Бюджет на обучение: {symbol}{budget[0]}{budget_suffix}", f"Бюджет на обучение: до {symbol}{budget[2]}{budget_suffix}",
+        f"Бюджет на обучение: {symbol}{budget[1]}–{budget[2]}{budget_suffix}", f"Бюджет на обучение: {symbol}{budget[3]}+{budget_suffix}",
+    ]
+
+
+def _validate_currency_keyboard(options: list[str], display_currency: str) -> None:
+    """Fail closed before Telegram can send controls from another market."""
+    currencies = set(re.findall(r"\b(?:EUR|PLN|GBP|USD|CZK)\b", " ".join(options), re.I))
+    if "€" in " ".join(options):
+        currencies.add("EUR")
+    if currencies and {item.upper() for item in currencies} != {display_currency.upper()}:
+        raise ValueError("currency_ui_mismatch")
 
 
 def _language_options_for_country(country_code: str) -> tuple[list[str], list[str]]:
@@ -703,6 +711,12 @@ _ROUTE_CONTEXT_TRAINING_BUDGET_OPTIONS = [
     "Бюджет на обучение: 800+ EUR",
 ]
 
+# Keep every consumer (including older interview templates) on the same
+# generated currency labels instead of maintaining a second hardcoded set.
+(_ROUTE_CONTEXT_MIN_INCOME_OPTIONS,
+ _ROUTE_CONTEXT_DESIRED_INCOME_OPTIONS,
+ _ROUTE_CONTEXT_TRAINING_BUDGET_OPTIONS) = _income_options_for_currency("EUR")
+
 _ROUTE_CONTEXT_STUDY_TIME_OPTIONS = [
     "Учёба: 0-2 часа в неделю",
     "Учёба: 3-5 часов в неделю",
@@ -755,12 +769,7 @@ _ROUTE_CONTEXT_PORTFOLIO_OPTIONS = [
     "Пока нет портфолио/рекомендаций",
 ]
 
-_INTERVIEW_INCOME_INTERVAL_OPTIONS = [
-    "До 3000 PLN/мес",
-    "3000-4500 PLN/мес",
-    "4500-6000 PLN/мес",
-    "6000+ PLN/мес",
-]
+_INTERVIEW_INCOME_INTERVAL_OPTIONS, _, _ = _income_options_for_currency("EUR")
 
 _INTERVIEW_INCOME_SPEED_OPTIONS = [
     "⚡ 2-4 недели",
@@ -1368,23 +1377,17 @@ def _route_context_question(index: int, route_context: dict | None = None) -> di
         elif q.get("id") == "target_language":
             _, q["options"] = _language_options_for_country("PL")
         elif q.get("id") == "minimum_monthly_income":
-            eur_opts, _, _ = _income_options_for_currency("EUR")
-            _, pln_opts, _ = _income_options_for_currency("PLN")
-            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
+            q["options"], _, _ = _income_options_for_currency("EUR")
         elif q.get("id") == "desired_monthly_income":
-            _, eur_opts, _ = _income_options_for_currency("EUR")
-            _, _, pln_opts = _income_options_for_currency("PLN")
-            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
+            _, q["options"], _ = _income_options_for_currency("EUR")
         elif q.get("id") == "training_budget":
-            _, _, eur_opts = _income_options_for_currency("EUR")
-            _, _, pln_opts = _income_options_for_currency("PLN")
-            q["options"] = eur_opts + [opt for opt in pln_opts if opt not in eur_opts]
+            _, _, q["options"] = _income_options_for_currency("EUR")
         return q
     country_config = _resolve_country_config_for_context(route_context)
     if not country_config and isinstance(route_context.get("country_config"), dict):
         country_config = route_context["country_config"]
     country_code = str((country_config or {}).get("country_code") or "").upper()
-    currency = str((country_config or {}).get("currency") or "PLN")
+    currency = str((country_config or {}).get("currency") or "EUR")
     q_id = str(q.get("id") or "")
     if q_id == "current_language_level":
         q["options"], _ = _language_options_for_country(country_code)
@@ -1396,6 +1399,8 @@ def _route_context_question(index: int, route_context: dict | None = None) -> di
         _, q["options"], _ = _income_options_for_currency(currency)
     elif q_id == "training_budget":
         _, _, q["options"] = _income_options_for_currency(currency)
+    if q_id in {"minimum_monthly_income", "desired_monthly_income", "training_budget"}:
+        _validate_currency_keyboard(list(q.get("options") or []), currency)
     return q
 
 
