@@ -23,6 +23,8 @@ def build_fact_ledger(
     """Create facts exclusively from messages belonging to this assessment."""
     facts: list[dict[str, str]] = []
     for index, message in enumerate(messages, 1):
+        if str(message.get("assessment_id") or "").strip() != assessment_id:
+            continue
         message_id = str(message.get("message_id") or "").strip()
         quote = str(message.get("text") or "").strip()
         if not message_id or not quote:
@@ -41,7 +43,11 @@ def audit_facts(
     messages: Iterable[dict[str, Any]], candidate_routes: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Reject unscoped, synthetic, fixture, fallback, and non-verbatim facts."""
-    message_map = {str(m.get("message_id")): str(m.get("text") or "") for m in messages}
+    message_map = {
+        str(m.get("message_id")): str(m.get("text") or "")
+        for m in messages
+        if str(m.get("assessment_id") or "").strip() == assessment_id
+    }
     accepted: list[str] = []
     rejected: list[str] = []
     source_ids: list[str] = []
@@ -98,6 +104,53 @@ def consistency_errors(report: dict[str, Any], audit: dict[str, Any]) -> list[st
     if not compared.issubset(analyzed):
         errors.append("UNANALYZED_ROUTE_IN_COMPARISON")
     return errors
+
+
+def contamination_errors(
+    report: dict[str, Any], profile_snapshot: dict[str, Any], assessment_id: str
+) -> list[str]:
+    """Detect foreign evidence and unsupported cross-domain route jumps."""
+    errors: list[str] = []
+    if str(report.get("assessment_id") or "").strip() != assessment_id:
+        errors.append("FOREIGN_ASSESSMENT_ID")
+        return errors
+
+    canonical = profile_snapshot.get("canonical_profile") or {}
+    facts = canonical.get("facts") if isinstance(canonical, dict) else []
+    current_facts = [
+        fact for fact in facts or []
+        if isinstance(fact, dict) and str(fact.get("assessment_id") or "") == assessment_id
+    ]
+    if len(current_facts) != len(facts or []):
+        errors.append("FOREIGN_CANONICAL_FACT")
+    source_blob = " ".join(
+        text
+        for fact in current_facts
+        for text in _strings([fact.get("normalized_value"), fact.get("source_quote")])
+    ).casefold()
+    evidence = report.get("evidence") or []
+    evidence_ids = {str(item.get("evidence_id") or "") for item in evidence if isinstance(item, dict)}
+    for route in _route_dicts(report):
+        route_evidence = {str(item) for item in route.get("evidence_ids") or []}
+        if len(route_evidence) < 2 or not route_evidence.issubset(evidence_ids):
+            errors.append(f"UNSCOPED_ROUTE_EVIDENCE:{route.get('route_id') or '?'}")
+
+    dental = any(token in source_blob for token in ("зуб", "dental", "стомат", "корон", "протез", "керамик"))
+    industrial_source = any(token in source_blob for token in ("промышлен", "manufactur", "supplier", "поставщик", "производственн", "цех", "erp"))
+    if dental and not industrial_source:
+        for route in _route_dicts(report):
+            title = str(route.get("title") or "").casefold()
+            if any(token in title for token in ("industrial", "supplier quality", "manufacturing", "промышлен")):
+                errors.append(f"UNSUPPORTED_CROSS_DOMAIN_ROUTE:{route.get('route_id') or '?'}")
+    return list(dict.fromkeys(errors))
+
+
+def _route_dicts(report: dict[str, Any]) -> list[dict[str, Any]]:
+    routes = report.get("routes") or {}
+    result: list[dict[str, Any]] = []
+    for key in ("primary_routes", "transition_routes", "quick_income_routes", "emergency_routes"):
+        result.extend(item for item in routes.get(key) or [] if isinstance(item, dict))
+    return result
 
 
 def _strings(value: Any) -> list[str]:

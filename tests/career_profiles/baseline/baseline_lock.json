@@ -33,7 +33,9 @@
     "UNIVERSAL_CANONICAL_STRATEGY_P0_2026_08_18",
     "REQUIRED_CAREER_CONTEXT_2026_08_18",
     "PERSONAL_NEXT_STEP_AND_SUPPORT_2026_08_18",
-    "NORMALIZED_FACTS_AND_SKILL_CLUSTER_ROUTES_2026_08_18"
+    "NORMALIZED_FACTS_AND_SKILL_CLUSTER_ROUTES_2026_08_18",
+    "ASSESSMENT_DELIVERY_TIMEOUT_FALLBACK_2026_08_19",
+    "ASSESSMENT_CASE_ISOLATION_2026_08_19"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -137,13 +139,26 @@
       "handlers/career.py",
       "prompts.py",
       "tests/test_poland_normalized_routes.py"
+    ],
+    "ASSESSMENT_DELIVERY_TIMEOUT_FALLBACK_2026_08_19": [
+      "config.py",
+      "handlers/career.py",
+      "tests/test_career_assessment.py"
+    ],
+    "ASSESSMENT_CASE_ISOLATION_2026_08_19": [
+      "handlers/career.py",
+      "openai_client.py",
+      "services/assessment_integrity.py",
+      "services/canonical_profile.py",
+      "services/career_assessment.py",
+      "tests/test_assessment_case_isolation.py"
     ]
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
     "prompts.py": "C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
-    "openai_client.py": "E01510567F84466213D9AFBBFE77D1AB93506D6CD909F5DB555F66068EFF1F2E",
-    "handlers/career.py": "167173F9F8D82FBE44B824FA2568F33050DC299EF1A9E00E0002B7F0F1ECC713",
+    "openai_client.py": "581695B4FCE14CC73DEF62D611D63830EC72D727C55A74022A8A42156292AA74",
+    "handlers/career.py": "2DE68E7CAF07BCCC4C4E88A61516676090ABE910DCCF84FEA90789149766819B",
     "states.py": "F1B46E7A83CFB3443841F3F6A3D2B8887EF564D63FCA983BE8542419CC50401D",
     "services/evidence_profile.py": "D59E515D72D8C6985F60C03A594FB62DD5628E91B693B16E60A66A71D6829238",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",

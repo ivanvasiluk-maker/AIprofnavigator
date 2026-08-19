@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import io
 import os
 import re
@@ -206,7 +207,7 @@ from services.career_assessment import (
     render_telegram_map,
     validate_career_assessment,
 )
-from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors
+from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors, contamination_errors
 from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
@@ -429,6 +430,15 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
 
 
 _STORY_RESET_FIELDS: dict[str, object] = {
+    # assessment boundary: none of these objects may survive a new case
+    "assessment_id": "",
+    "profile_version": "",
+    "source_messages": [],
+    "uploaded_documents": [],
+    "canonical_profile": {},
+    "profile_snapshot": {},
+    "career_assessment": {},
+    "route_comparison": {},
     # previous conclusion
     "final_report": {},
     "report_chunks": {},
@@ -7104,7 +7114,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     if not isinstance(stored_payload, dict):
         candidate = data.get("final_report")
         stored_payload = candidate if isinstance(candidate, dict) and candidate.get("assessment_id") else None
-    if isinstance(stored_payload, dict):
+    current_assessment_id = str(data.get("assessment_id") or "").strip()
+    if isinstance(stored_payload, dict) and current_assessment_id and str(stored_payload.get("assessment_id") or "").strip() == current_assessment_id:
         try:
             stored_assessment = career_assessment_from_dict(stored_payload)
             validate_career_assessment(stored_assessment).require_valid()
@@ -7176,6 +7187,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     source_messages = list(data.get("source_messages") or [])
     source_messages.extend(
         {
+            "assessment_id": assessment_id,
             "message_id": str(row.get("source_message_id") or ""),
             "text": str(row.get("answer") or ""),
             "created_at": str(row.get("created_at") or ""),
@@ -7192,6 +7204,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
     except Exception:
         pass
+    # Freeze the sole generator input.  Deep serialization prevents later FSM
+    # updates from mutating the profile while routes are being generated.
+    snapshot = copy.deepcopy(snapshot)
+    snapshot["assessment_id"] = assessment_id
     await state.update_data(
         profile_snapshot=snapshot,
         assessment_id=assessment_id,
@@ -7206,59 +7222,51 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         meta={**runtime_meta, "assessment_id": assessment_id, "profile_version": profile_version},
     )
 
+    generation_error = ""
     try:
-        assessment = await ai_client.build_career_assessment(
-            snapshot,
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-            story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
-            language=lang,
+        assessment = await asyncio.wait_for(
+            ai_client.build_career_assessment(
+                snapshot,
+                assessment_id=assessment_id,
+                session_id=session_id,
+                profile_version=profile_version,
+                story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+                resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+                language=lang,
+            ),
+            timeout=settings.career_assessment_timeout_seconds,
         )
     except Exception as exc:
-        preliminary = build_preliminary_assessment(
+        # A model request used to be able to occupy this handler for almost two
+        # minutes (initial generation plus repair).  Telegram then showed only
+        # "Собираю вашу карту".  A deterministic assessment is a complete,
+        # renderable result, so continue through the normal HTML delivery path.
+        generation_error = type(exc).__name__
+        assessment = build_preliminary_assessment(
             snapshot,
             data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
         )
-        preliminary_payload = preliminary.to_dict()
-        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
-        await state.update_data(
-            career_assessment=preliminary_payload,
-            final_report=preliminary_payload,
-            report_generation_status="ASSESSMENT_VALIDATION_FAILED",
-            report_generation_error=type(exc).__name__,
-        )
+        assessment.metadata["recovered_by"] = "deterministic_fallback"
+        assessment.metadata["generation_error"] = generation_error
         await _track_event(
             message,
             state,
-            "report_failed",
+            "report_generation_fallback",
             meta={
                 **runtime_meta,
                 "assessment_id": assessment_id,
                 "profile_version": profile_version,
-                "error": type(exc).__name__,
+                "error": generation_error,
             },
         )
-        await message.answer(
-            render_telegram_map(preliminary),
-            reply_markup=first_step_selection_keyboard(preliminary),
-        )
-        try:
-            save_report_version(assessment_id, public_user_id, preliminary_payload, session_id=session_id)
-        except Exception:
-            pass
-        await message.answer(
-            "Я сохранил ваши ответы и подготовил предварительную карту, но подробный документ пока не прошёл "
-            "техническую проверку. Вы можете пользоваться кратким выводом, а документ можно попробовать пересобрать.",
-            reply_markup=assessment_recovery_keyboard(),
-        )
-        return
 
-    consistency_failures = consistency_errors(assessment.to_dict(), integrity_audit)
+    consistency_failures = [
+        *consistency_errors(assessment.to_dict(), integrity_audit),
+        *contamination_errors(assessment.to_dict(), snapshot, assessment_id),
+    ]
     if consistency_failures:
         # build_career_assessment already performs its model repair pass.  A
         # remaining contradiction is therefore reduced to a source-only map;
@@ -7273,6 +7281,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         assessment.metadata.update({
             "integrity_repair": "source_only_fallback",
             "consistency_errors": consistency_failures,
+            "context_contamination": any(
+                code.startswith(("FOREIGN_", "UNSUPPORTED_CROSS_DOMAIN", "UNSCOPED_ROUTE"))
+                for code in consistency_failures
+            ),
             "debug_log": integrity_audit,
         })
 
@@ -7307,6 +7319,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         final_report=assessment_payload,
         final_report_generated=True,
         report_generation_status=generation_status,
+        report_generation_error=generation_error,
         assessment_diagnostics=diagnostics,
         assessment_validation=validation.to_dict(),
         route_comparison=render_route_comparison(assessment),
@@ -7631,9 +7644,11 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "balanced"})
     profile["preferred_input"] = preferred_input
 
+    assessment_id = uuid.uuid4().hex
     await state.update_data(
-        assessment_id=uuid.uuid4().hex,
+        assessment_id=assessment_id,
         source_messages=[{
+            "assessment_id": assessment_id,
             "message_id": str(getattr(message, "message_id", "")),
             "text": clean,
             "created_at": datetime.now(timezone.utc).isoformat(),

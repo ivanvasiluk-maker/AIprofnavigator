@@ -81,6 +81,9 @@ _ROUTE_SCHEMA = _object_schema(
         "why_it_fits": _STRING,
         "evidence_ids": _STRINGS,
         "preserves": _STRINGS,
+        "transferable_functions": _STRINGS,
+        "new_functions": _STRINGS,
+        "typical_tasks": _STRINGS,
         "risks": _STRINGS,
         "missing": _STRINGS,
         "entry_level": _STRING,
@@ -141,6 +144,7 @@ CAREER_ASSESSMENT_SCHEMA = _object_schema(
             "items": _object_schema(
                 {
                     "evidence_id": _STRING,
+                    "assessment_id": _STRING,
                     "fact": _STRING,
                     "source_type": {"type": "string", "enum": ["history", "resume", "answer"]},
                     "source_reference": _STRING,
@@ -302,6 +306,7 @@ class EvidenceItem:
     fact: str
     source_type: Literal["history", "resume", "answer"]
     source_reference: str
+    assessment_id: str = ""
 
 
 @dataclass(slots=True)
@@ -335,6 +340,9 @@ class CareerRoute:
     entry_level: str
     disconfirming_conditions: list[str]
     market_test: str
+    transferable_functions: list[str] = field(default_factory=list)
+    new_functions: list[str] = field(default_factory=list)
+    typical_tasks: list[str] = field(default_factory=list)
     entry_path: EntryPathType = "bridge_project"
     evidence_claims: list[dict[str, Any]] = field(default_factory=list)
     market_notes: list[str] = field(default_factory=list)
@@ -611,6 +619,9 @@ def _route(item: dict[str, Any], category: RouteCategory) -> CareerRoute:
         entry_level=str(item.get("entry_level") or "").strip(),
         disconfirming_conditions=_texts(item.get("disconfirming_conditions")),
         market_test=str(item.get("market_test") or "").strip(),
+        transferable_functions=_texts(item.get("transferable_functions")) or _texts(item.get("preserves")),
+        new_functions=_texts(item.get("new_functions")),
+        typical_tasks=_texts(item.get("typical_tasks")),
         entry_path=str(item.get("entry_path") or "bridge_project").strip(),  # type: ignore[arg-type]
         evidence_claims=claims,
         market_notes=_texts(item.get("market_notes")),
@@ -670,6 +681,7 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
                 fact=str(item.get("fact") or "").strip(),
                 source_type=str(item.get("source_type") or "answer").strip(),  # type: ignore[arg-type]
                 source_reference=str(item.get("source_reference") or "").strip(),
+                assessment_id=str(item.get("assessment_id") or payload.get("assessment_id") or "").strip(),
             )
             for item in payload.get("evidence") or []
             if isinstance(item, dict)
@@ -890,6 +902,7 @@ def build_preliminary_assessment(
             fact=fact,
             source_type="history" if index == 1 else "answer",
             source_reference=f"profile_snapshot:{index}",
+            assessment_id=assessment_id,
         )
         for index, fact in enumerate(facts[:4], start=1)
     ]
@@ -1148,15 +1161,22 @@ def build_deterministic_assessment(
     # Generate adjacent hypotheses from demonstrated skill clusters, not from
     # the current job title. Explicit interests remain first-class candidates.
     cluster_blob = " ".join(functions + transferable_skills).casefold()
+    identity_blob = " ".join([*current_roles, *historical_roles, *functions]).casefold()
+    industrial_context = any(marker in identity_blob for marker in (
+        "промышлен", "производств", "manufactur", "supplier", "поставщик", "цех", "смена", "erp",
+    ))
+    dental_context = any(marker in identity_blob for marker in (
+        "зуб", "dental", "стомат", "корон", "протез", "керамик", "cad/cam",
+    ))
     cluster_routes: list[str] = []
     cluster_generation_requested = bool(target_roles or interests) or any(
         marker in change_text for marker in ("больше аналит", "данн", "уйти от", "меньше физ", "меньше руч")
     )
-    if cluster_generation_requested and any(marker in cluster_blob for marker in ("контрол", "quality", "дефект", "root cause", "rca")):
+    if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("контрол", "quality", "дефект", "root cause", "rca")):
         cluster_routes.extend(["Quality Engineer / Supplier Quality", "Quality Assurance Specialist"])
-    if cluster_generation_requested and any(marker in cluster_blob for marker in ("производ", "process", "процесс", "смен", "координ")):
+    if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("производ", "process", "процесс", "смен", "координ")):
         cluster_routes.extend(["Process Improvement / Production Planning", "Project Coordinator в промышленности"])
-    if cluster_generation_requested and any(marker in cluster_blob for marker in ("excel", "power bi", "erp", "данн", "аналит")):
+    if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("excel", "power bi", "erp", "данн", "аналит")):
         cluster_routes.append("Manufacturing Data Analyst")
     if cluster_generation_requested and any(marker in cluster_blob for marker in ("техническ", "диагност", "клиент", "коммуникац")):
         cluster_routes.append("Technical Support Specialist")
@@ -1200,7 +1220,7 @@ def build_deterministic_assessment(
     if not unique_facts:
         unique_facts.append(("Запрошена карьерная оценка", "answer", "assessment:request"))
     evidence = [
-        EvidenceItem(f"fallback-evidence-{index}", fact, source_type, reference)
+        EvidenceItem(f"fallback-evidence-{index}", fact, source_type, reference, assessment_id)
         for index, (fact, source_type, reference) in enumerate(unique_facts, 1)
     ]
     for item in evidence:
@@ -1212,7 +1232,7 @@ def build_deterministic_assessment(
         item = evidence[0]
         evidence.append(EvidenceItem(
             "fallback-evidence-2", item.fact, item.source_type,
-            f"{item.source_reference}:structural_anchor",
+            f"{item.source_reference}:structural_anchor", assessment_id,
         ))
     default_evidence_ids = [item.evidence_id for item in evidence[:4]]
 
@@ -1252,6 +1272,44 @@ def build_deterministic_assessment(
 
     candidates: list[dict[str, Any]] = []
 
+    def relevant_functions_for_role(title: str) -> list[str]:
+        low = title.casefold()
+        groups = {
+            "support": ("диагност", "ошиб", "проблем", "клиент", "стоматолог", "объяс", "техническ", "cad/cam"),
+            "quality": ("контрол", "quality", "дефект", "причин", "rca", "аудит", "документац"),
+            "coordinator": ("координ", "организ", "срок", "команд", "клиент", "планир"),
+            "data": ("данн", "excel", "power bi", "sql", "erp", "аналит"),
+        }
+        selected_markers: tuple[str, ...] = ()
+        if any(token in low for token in ("trainer", "обуч")):
+            selected_markers = ("объяс", "техническ", "клиент", "обуч", "коммуникац")
+        elif any(token in low for token in ("warranty", "гарант")):
+            selected_markers = ("диагност", "ошиб", "неисправ", "схем", "документац", "клиент")
+        elif any(token in low for token in ("support", "поддерж")):
+            selected_markers = groups["support"]
+        elif any(token in low for token in ("quality", "качест")):
+            selected_markers = groups["quality"]
+        elif any(token in low for token in ("coordinator", "координ", "planner", "planning")):
+            selected_markers = groups["coordinator"]
+        elif any(token in low for token in ("data", "analyst", "аналит")):
+            selected_markers = groups["data"]
+        elif any(token in low for token in ("cad/cam", "digital dental", "цифров")):
+            selected_markers = ("cad/cam", "цифров", "стоматолог", "дефект", "техническ")
+        elif any(token in low for token in ("корпоратив", "employee assistance")):
+            selected_markers = ("индивидуаль", "консультац", "групп")
+        elif any(token in low for token in ("психообраз", "образовательн")):
+            selected_markers = ("групп", "программ", "обуч")
+        elif any(token in low for token in ("супервиз", "supervis")):
+            selected_markers = ("консультац", "программ", "практик")
+        elif "product marketing" in low:
+            selected_markers = ("позиционир", "рынк", "b2b", "продукт")
+        elif any(token in low for token in ("customer insights", "исследован")):
+            selected_markers = ("исслед", "b2b", "клиент", "рынк")
+        elif any(token in low for token in ("program manager", "менеджер программ")):
+            selected_markers = ("управлен", "команд", "позиционир", "программ")
+        relevant = [function for function in functions if any(marker in function.casefold() for marker in selected_markers)]
+        return list(dict.fromkeys(relevant))
+
     def add_candidate(
         title: str,
         kind: str,
@@ -1276,11 +1334,16 @@ def build_deterministic_assessment(
     # alternatives must come from target-role research rather than the former
     # ``current profession + specialization + first function`` template.
     for role in target_roles:
+        route_functions = relevant_functions_for_role(role)
+        role_low = role.casefold()
+        cross_domain_industrial = dental_context and any(marker in role_low for marker in ("industrial", "supplier quality", "manufacturing", "промышлен"))
+        if cross_domain_industrial and len(route_functions) < 2:
+            continue
         add_candidate(
             role,
             "retraining" if substantial_change else "transition",
-            functions[:3],
-            [role, *functions[:3]],
+            route_functions,
+            route_functions,
         )
     if wants_self_employment and (current_role or functions):
         base = current_role or functions[0]
@@ -1436,6 +1499,20 @@ def build_deterministic_assessment(
         -int(item[1]["score"]),
         item[2],
     ))
+    # Two differently named routes backed by the exact same functions are not
+    # independent hypotheses. Keep the first and leave the slot for a genuinely
+    # different application of the person's experience.
+    diverse_evaluated: list[tuple[dict[str, Any], dict[str, Any], int]] = []
+    seen_function_sets: set[tuple[str, ...]] = set()
+    for item in evaluated:
+        signature = tuple(sorted(str(value).casefold() for value in item[0]["functions"]))
+        deduplicate = item[0]["kind"] in {"transition", "retraining"}
+        if deduplicate and signature and signature in seen_function_sets:
+            continue
+        if deduplicate and signature:
+            seen_function_sets.add(signature)
+        diverse_evaluated.append(item)
+    evaluated = diverse_evaluated
 
     non_experimental = [item for item in evaluated if not item[0]["experimental"]]
     experimental = [item for item in evaluated if item[0]["experimental"]]
@@ -1463,7 +1540,9 @@ def build_deterministic_assessment(
 
     def route_model(title: str, route_functions: list[str]) -> tuple[str, str, str]:
         low = title.casefold()
-        if "supplier quality" in low or "quality engineer" in low:
+        if "supplier quality" in low:
+            return ("аудит поставщиков, разбор входящих дефектов и корректирующие действия", "оклад специалиста по качеству поставщиков", "аудиты поставщиков и аналитика несоответствий")
+        if "quality engineer" in low:
             return ("RCA, работа с поставщиками и предупреждение повторных дефектов", "оклад инженера по качеству", "периодические аудиты при преимущественно аналитической работе")
         if "production planning" in low or "production planner" in low or "process improvement" in low:
             return ("планирование производства, поиск потерь и улучшение потока", "оклад производственного планировщика", "низкая физическая и высокая системная нагрузка")
@@ -1590,6 +1669,9 @@ def build_deterministic_assessment(
             ),
             disconfirming_conditions=disconfirming,
             market_test=market_test,
+            transferable_functions=route_functions,
+            new_functions=[daily_focus],
+            typical_tasks=[daily_focus],
             entry_path=entry_path,
             evidence_claims=[{
                 "claim": why,
@@ -1813,6 +1895,14 @@ def validate_career_assessment(
         )
     if len(assessment.evidence) < 2:
         add_error("MISSING_ROUTE_EVIDENCE", "evidence", "assessment must contain at least two evidence items", len(assessment.evidence))
+    for index, item in enumerate(assessment.evidence):
+        if item.assessment_id != assessment.assessment_id:
+            add_error(
+                "FOREIGN_ASSESSMENT_EVIDENCE",
+                f"evidence[{index}].assessment_id",
+                "evidence must belong to the current assessment",
+                item.assessment_id,
+            )
     resume_facts = {item.fact.casefold() for item in assessment.evidence if item.source_type == "resume" and item.fact.strip()}
     assessment.metadata["resume_important_facts_count"] = len(resume_facts)
     if assessment.status == "full" and resume_facts and len(resume_facts) < 8:

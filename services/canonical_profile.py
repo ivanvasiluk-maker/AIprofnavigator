@@ -58,6 +58,7 @@ class NormalizedUserProfile(BaseModel):
     education: list[str] = Field(default_factory=list)
     years_experience: float | None = None
     languages: dict[str, str] = Field(default_factory=dict)
+    language_details: list[dict[str, Any]] = Field(default_factory=list)
     current_income: float | None = None
     minimum_income: float | None = None
     target_income: str | None = None
@@ -273,7 +274,9 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             low,
             re.I,
         ):
-            profile.facts.append(_fact(assessment_id, "language", {"language": match.group(1), "level": match.group(2).upper()}, message_id, match.group(0), .95, created_at or None))
+            raw_language = match.group(1).casefold()
+            language = next((name for marker, name in LANGUAGE_ALIASES.items() if marker in raw_language), match.group(1).title())
+            profile.facts.append(_fact(assessment_id, "language", {"language": language, "level": match.group(2).upper()}, message_id, match.group(0), .95, created_at or None))
         for marker, language in LANGUAGE_ALIASES.items():
             match = re.search(rf"(?:{re.escape(marker)}\w*)\s*[—:=-]?\s*([abc][12]|native|fluent)", low, re.I)
             if match:
@@ -401,6 +404,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         if isinstance(fact.normalized_value, dict):
             market.update({k: v for k, v in fact.normalized_value.items() if v not in (None, "")})
     language_map: dict[str, str] = {}
+    language_details: dict[str, dict[str, Any]] = {}
     for fact in profile.facts_of_type("language"):
         value = fact.normalized_value
         if isinstance(value, dict):
@@ -408,6 +412,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             level = str(value.get("level") or "").strip()
             if name and level:
                 language_map[name] = level
+                language_details[name] = {"language": name, "level": level, "source": fact.source_message_id, "confidence": fact.confidence}
     income_by_kind: dict[str, dict[str, Any]] = {}
     for fact in profile.facts_of_type("income_requirement"):
         value = fact.normalized_value
@@ -457,7 +462,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         work_rights=work_rights, current_role=profile.current_role,
         education=list(dict.fromkeys(education)),
         years_experience=float(experience_match.group(1).replace(",", ".")) if experience_match else None,
-        languages=language_map, current_income=income_number("current"),
+        languages=language_map, language_details=list(language_details.values()), current_income=income_number("current"),
         minimum_income=income_number("minimum"), target_income=target_raw,
         currency=str(latest_income.get("currency") or "").upper() or None,
         gross_net=str(latest_income.get("tax_basis") or "").lower() or None,

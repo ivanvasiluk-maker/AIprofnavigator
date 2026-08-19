@@ -10,7 +10,7 @@ B = ("Больше 10 лет работаю психологом, 25 клиен�
 
 
 def ledger(aid, uid, text):
-    messages = [{"message_id": f"m-{aid}", "text": text, "created_at": "2026-08-17T00:00:00+00:00"}]
+    messages = [{"assessment_id": aid, "message_id": f"m-{aid}", "text": text, "created_at": "2026-08-17T00:00:00+00:00"}]
     return messages, build_fact_ledger(aid, uid, messages)
 
 
