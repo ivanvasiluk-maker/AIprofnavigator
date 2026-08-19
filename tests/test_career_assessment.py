@@ -62,6 +62,7 @@ def profile_10_assessment_payload() -> dict:
             "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу.",
         }
     return {
+        "metadata": {"generator_version": CAREER_PIPELINE_VERSION},
         "assessment_id": "assessment-profile-10",
         "session_id": "session-profile-10",
         "profile_version": "1",

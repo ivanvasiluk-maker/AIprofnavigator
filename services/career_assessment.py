@@ -881,7 +881,13 @@ def build_preliminary_assessment(
     core = [
         title for title in (hypotheses or ([current_identity] if current_identity else []))
         if title and not title.casefold().startswith("пользователь") and len(title.split()) <= 8
-    ] or ["Текущая профессиональная специализация"]
+    ] or _texts(profile_snapshot.get("professional_functions"))[:3] or _texts(profile_snapshot.get("current_role"))[:1]
+    if not core:
+        return build_deterministic_assessment(
+            profile_snapshot, story_analysis, {}, assessment_id=assessment_id,
+            session_id=session_id, profile_version=profile_version,
+            fallback_reason="preliminary_profile_requires_deterministic_routing",
+        )
     facts = _texts(story_analysis.get("facts_extracted"))
     story_text = str(profile_snapshot.get("story_text") or "").strip()
     career_goal = str(profile_snapshot.get("career_goal") or "").strip()
@@ -1180,6 +1186,20 @@ def build_deterministic_assessment(
         cluster_routes.append("Manufacturing Data Analyst")
     if cluster_generation_requested and any(marker in cluster_blob for marker in ("техническ", "диагност", "клиент", "коммуникац")):
         cluster_routes.append("Technical Support Specialist")
+    information_work = any(marker in cluster_blob for marker in (
+        "документац", "инструкц", "структур", "редакт", "писат", "knowledge", "баз знан", "объяс",
+    ))
+    if cluster_generation_requested and information_work:
+        # Adjacent routes are functional hypotheses. They remain useful even
+        # with low market confidence and are subsequently ranked against the
+        # user's constraints and desired change.
+        cluster_routes.extend([
+            "Technical Writer / Documentation Specialist",
+            "Knowledge Manager / Knowledge Base Manager",
+            "Customer Education / Learning Content",
+        ])
+        if any(marker in cluster_blob for marker in ("процесс", "межфунк", "баг", "координ", "продукт")):
+            cluster_routes.append("Product Operations")
     target_roles = list(dict.fromkeys([*target_roles, *cluster_routes]))
 
     source_groups: list[tuple[dict[str, Any], str, str, tuple[str, ...]]] = [
@@ -1307,6 +1327,16 @@ def build_deterministic_assessment(
             selected_markers = ("исслед", "b2b", "клиент", "рынк")
         elif any(token in low for token in ("program manager", "менеджер программ")):
             selected_markers = ("управлен", "команд", "позиционир", "программ")
+        elif any(token in low for token in ("technical writer", "documentation", "техническ писат")):
+            selected_markers = ("документац", "инструкц", "редакт", "писат", "структур", "объяс", "информац")
+        elif any(token in low for token in ("knowledge manager", "knowledge base", "управлени знан")):
+            selected_markers = ("knowledge", "баз", "знан", "системат", "инструкц", "обуч")
+        elif any(token in low for token in ("customer education", "learning content")):
+            selected_markers = ("обуч", "материал", "объяс", "клиент", "коммуникац", "писат")
+        elif "product operations" in low:
+            selected_markers = ("процесс", "координ", "межфунк", "баг", "данн", "продукт")
+        elif any(token in low for token in ("product manager", "продуктов")):
+            selected_markers = ("продукт", "приорит", "исслед", "клиент", "межфунк", "данн")
         relevant = [function for function in functions if any(marker in function.casefold() for marker in selected_markers)]
         return list(dict.fromkeys(relevant))
 
@@ -1642,10 +1672,13 @@ def build_deterministic_assessment(
             "Гипотеза опровергается, если её основные задачи совпадут с нежелательными задачами",
             "Гипотеза опровергается, если обязательные требования нельзя закрыть в доступные сроки",
         ]
-        market_test = (
-            f"Тест маршрута «{label}»: собрать {8 + index * 2} актуальных описаний, измерить долю задач "
-            f"«{daily_focus}», проверить оплату как «{income_model}» и получить внешние сигналы: {index}."
+        market_test_patterns = (
+            f"Вакансии «{label}»: разобрать 10 свежих описаний и посчитать частоту задач «{daily_focus}».",
+            f"Экспертная проверка «{label}»: провести два разговора с нанимающими менеджерами о входе, требованиях и модели «{income_model}».",
+            f"Портфельный тест «{label}»: сделать один образец результата по функции «{daily_focus}» и запросить три внешние оценки.",
+            f"Финансовый пилот «{label}»: получить пять откликов с указанным диапазоном оплаты и сверить их с минимумом пользователя.",
         )
+        market_test = market_test_patterns[(index - 1) % len(market_test_patterns)]
         why = (
             f"Маршрут «{label}» использует подтверждённую основу «{source_facts[(index - 1) % len(source_facts)]}». "
             f"Его отдельная карьерная модель — {daily_focus}; оплата строится как {income_model}."

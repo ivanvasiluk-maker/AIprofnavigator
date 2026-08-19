@@ -19,6 +19,9 @@ FactType = Literal[
 ]
 
 CITY_COUNTRIES = {
+    "berlin": ("Germany", "DE"), "берлин": ("Germany", "DE"), "берлине": ("Germany", "DE"),
+    "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
+    "прага": ("Czechia", "CZ"), "праге": ("Czechia", "CZ"),
     "porto": ("Portugal", "PT"), "порту": ("Portugal", "PT"),
     "vilnius": ("Lithuania", "LT"), "вильнюс": ("Lithuania", "LT"),
     "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"),
@@ -35,6 +38,9 @@ COUNTRY_ALIASES = {
     "польше": "Poland", "польшу": "Poland", "польши": "Poland",
     "spain": "Spain", "испания": "Spain", "испании": "Spain",
     "portugal": "Portugal", "португалия": "Portugal", "португалии": "Portugal",
+    "czechia": "Czechia", "czech republic": "Czechia", "чехия": "Czechia", "чехии": "Czechia", "чехию": "Czechia",
+    "lithuania": "Lithuania", "литва": "Lithuania", "литве": "Lithuania", "литву": "Lithuania",
+    "germany": "Germany", "германия": "Germany", "германии": "Germany", "германию": "Germany",
 }
 
 LANGUAGE_ALIASES = {
@@ -43,6 +49,7 @@ LANGUAGE_ALIASES = {
     "испанск": "Spanish", "spanish": "Spanish",
     "русск": "Russian", "russian": "Russian",
     "украинск": "Ukrainian", "українськ": "Ukrainian", "ukrainian": "Ukrainian",
+    "чешск": "Czech", "czech": "Czech",
 }
 
 
@@ -50,11 +57,16 @@ class NormalizedUserProfile(BaseModel):
     country: str | None = None
     city: str | None = None
     target_market: str | None = None
+    target_market_primary: str | None = None
+    target_market_secondary: str | None = None
     relocation_allowed: bool | None = None
     remote_allowed: bool | None = None
     hybrid_allowed: bool | None = None
+    full_time: bool | None = None
+    night_shifts: bool | None = None
     work_rights: bool | None = None
     current_role: str | None = None
+    previous_roles: list[str] = Field(default_factory=list)
     education: list[str] = Field(default_factory=list)
     years_experience: float | None = None
     languages: dict[str, str] = Field(default_factory=dict)
@@ -62,11 +74,21 @@ class NormalizedUserProfile(BaseModel):
     current_income: float | None = None
     minimum_income: float | None = None
     target_income: str | None = None
+    target_income_min: float | None = None
+    target_income_max: float | None = None
     currency: str | None = None
+    income_currency: str | None = None
+    income_period: str | None = None
     gross_net: str | None = None
     schedule_constraints: list[str] = Field(default_factory=list)
-    training_hours_per_week: float | None = None
+    training_hours_per_week: float | str | None = None
     training_budget: float | None = None
+    training_budget_currency: str | None = None
+    training_horizon: str | None = None
+    transferable_skills: list[str] = Field(default_factory=list)
+    psychological_barriers: list[str] = Field(default_factory=list)
+    life_constraints: list[str] = Field(default_factory=list)
+    financial_minimum_status: str = "confirmed"
     professional_functions: list[str] = Field(default_factory=list)
     management_experience: list[str] = Field(default_factory=list)
     digital_tools: list[str] = Field(default_factory=list)
@@ -218,8 +240,16 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             sources.append((str(row.get("source_message_id") or row.get("question_id") or "clarification"), str(row["answer"]), str(row.get("created_at") or "")))
 
     route = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    evidence_profile = data.get("evidence_profile") if isinstance(data.get("evidence_profile"), dict) else {}
+    residence_evidence = evidence_profile.get("residence_country") if isinstance(evidence_profile.get("residence_country"), dict) else {}
+    residence_city_evidence = evidence_profile.get("residence_city") if isinstance(evidence_profile.get("residence_city"), dict) else {}
+    target_evidence = evidence_profile.get("target_countries") if isinstance(evidence_profile.get("target_countries"), list) else []
+    target_format_evidence = evidence_profile.get("target_market_format") if isinstance(evidence_profile.get("target_market_format"), dict) else {}
     structured = {
-        "country": route.get("country") or data.get("country"), "city": route.get("city") or data.get("city"),
+        "country": route.get("country") or data.get("country") or residence_evidence.get("statement"),
+        "city": route.get("city") or data.get("city") or residence_city_evidence.get("statement"),
+        "target_market_primary": next((item.get("statement") for item in target_evidence if isinstance(item, dict) and item.get("statement")), None),
+        "target_market_secondary": target_format_evidence.get("statement"),
         "work_authorization": route.get("documents_and_work_rights") or data.get("work_authorization_status"),
         "minimum_income": route.get("minimum_monthly_income") or data.get("minimum_income"),
         "current_income": route.get("current_monthly_income") or data.get("current_income"),
@@ -244,6 +274,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 display_city = (
                     "Валенсия" if city in {"валенсия", "валенсии"}
                     else "Краков" if city in {"краков", "кракове"}
+                    else "Prague" if city in {"prague", "praha", "прага", "праге"}
+                    else "Berlin" if city in {"berlin", "берлин", "берлине"}
                     else city.title()
                 )
                 profile.facts.append(_fact(assessment_id, "market_context", {"city": display_city, "country": country, "country_code": code}, message_id, text, .98, created_at or None))
@@ -253,7 +285,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 if re.search(rf"\b{re.escape(alias)}\b", low):
                     profile.facts.append(_fact(assessment_id, "market_context", {"country": country}, message_id, alias, .94, created_at or None))
                     break
-        for match in re.finditer(r"(?:(€|eur|pln|zł)\s*)?(\d[\d\s]*(?:[–-]\d[\d\s]*)?)\s*(€|eur|pln|zł)?\s*(net|gross)?", text, re.I):
+        for match in re.finditer(r"(?:(€|eur|pln|zł|czk|kč)\s*)?(\d[\d\s]*(?:[–-]\s*\d[\d\s]*)?)\s*(€|eur|pln|zł|czk|kč)?\s*(net|gross)?", text, re.I):
             currency_token = (match.group(1) or match.group(3) or "").casefold()
             if not currency_token:
                 continue
@@ -262,15 +294,23 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             minimum_at = max((m.start() for m in re.finditer(r"миним|minimum", classifier, re.I)), default=-1)
             target_at = max((m.start() for m in re.finditer(r"цел|жела|target", classifier, re.I)), default=-1)
             kind = "target" if target_at > minimum_at else "minimum" if minimum_at >= 0 else "current"
-            currency = "EUR" if currency_token in {"€", "eur"} else "PLN"
+            currency = "EUR" if currency_token in {"€", "eur"} else "CZK" if currency_token in {"czk", "kč"} else "PLN"
+            # A learning budget is a separate monetary entity and must never
+            # overwrite the salary currency.
+            if re.search(r"обучен|курс|training|education", context, re.I):
+                profile.facts.append(_fact(assessment_id, "learning_resource", {
+                    "kind": "training_budget", "amount": match.group(2).replace(" ", ""),
+                    "currency": currency,
+                }, message_id, context, .95, created_at or None))
+                continue
             profile.facts.append(_fact(assessment_id, "income_requirement", {"kind": kind, "amount": match.group(2).replace(" ", ""), "currency": currency, "tax_basis": (match.group(4) or "unknown").lower(), "period": "month"}, message_id, context, .9, created_at or None))
         if re.search(r"прав[оа]\s+на\s+работ|work authori[sz]", low):
             authorized = not bool(re.search(r"нет|не име|without", low))
             profile.facts.append(_fact(assessment_id, "work_authorization", authorized, message_id, text, .9, created_at or None))
         for match in re.finditer(
             r"(украинск\w*|українськ\w*|русск\w*|испанск\w*|іспанськ\w*|"
-            r"португальск\w*|английск\w*|украинский|ukrainian|russian|spanish|"
-            r"portuguese|english)\s*[—:=-]?\s*(свободн\w*|родн\w*|[abc][12]|native|fluent)",
+            r"португальск\w*|чешск\w*|английск\w*|украинский|ukrainian|russian|spanish|"
+            r"portuguese|czech|english)\s*[—:=-]?\s*(свободн\w*|родн\w*|[abc][12]|native|fluent)",
             low,
             re.I,
         ):
@@ -293,6 +333,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     country = str(structured["country"] or "").strip()
     mapped = CITY_COUNTRIES.get(city.casefold().replace("ё", "е"))
     add_structured("market_context", {"city": city or None, "country": country or (mapped[0] if mapped else None), "country_code": mapped[1] if mapped else None}, f"{city}, {country}".strip(", "))
+    add_structured("market_context", {
+        "target_market_primary": structured["target_market_primary"],
+        "target_market_secondary": structured["target_market_secondary"],
+    }, f"{structured['target_market_primary'] or ''}, {structured['target_market_secondary'] or ''}".strip(", "))
     add_structured("work_authorization", structured["work_authorization"], str(structured["work_authorization"] or ""))
     for kind in ("current_income", "minimum_income", "target_income"):
         add_structured("income_requirement", {"kind": kind.removesuffix("_income"), "display": structured[kind]}, str(structured[kind] or ""))
@@ -411,6 +455,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             name = str(value.get("language") or "").strip()
             level = str(value.get("level") or "").strip()
             if name and level:
+                level = "native" if level.casefold().startswith(("родн", "native")) else "fluent" if level.casefold().startswith(("свобод", "fluent")) else level.upper()
                 language_map[name] = level
                 language_details[name] = {"language": name, "level": level, "source": fact.source_message_id, "confidence": fact.confidence}
     income_by_kind: dict[str, dict[str, Any]] = {}
@@ -424,11 +469,19 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         match = re.search(r"\d+(?:[.,]\d+)?", raw.replace(" ", ""))
         return float(match.group().replace(",", ".")) if match else None
 
-    latest_income = income_by_kind.get("target") or income_by_kind.get("minimum") or income_by_kind.get("current") or {}
+    # Salary currency belongs to the income entity. Do not infer or replace it
+    # from residence, target market, or a differently denominated study budget.
+    latest_income = income_by_kind.get("current") or income_by_kind.get("minimum") or income_by_kind.get("target") or {}
     target_raw = str(income_by_kind.get("target", {}).get("amount") or income_by_kind.get("target", {}).get("display") or "").strip() or None
     country = str(market.get("country") or "").strip() or None
     city = str(market.get("city") or "").strip() or None
+    # Keep the legacy display field for existing renderers; route generation
+    # uses the normalized primary/secondary fields below.
     target_market = " / ".join(item for item in (city, country) if item) or None
+    target_primary = str(market.get("target_market_primary") or country or "").strip() or None
+    target_secondary = str(market.get("target_market_secondary") or "").strip() or (
+        "international_remote" if re.search(r"международн\w*\s+(?:удален|remote)|international\s+remote", low_all) else None
+    )
     relocation_allowed = None
     if re.search(r"(?:не\s+(?:хочу|готов|могу)\s+переезж|переезж\w*\s+не\s+(?:хочу|готов|могу)|переезд\w*\s+не)", low_all):
         relocation_allowed = False
@@ -440,8 +493,15 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         else False if str(work_rights_value).casefold() in {"нет", "false", "without"} else None
     )
     experience_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:лет|года|год|years?)\s+(?:опыт|стаж)", low_all)
-    hours_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:час\w*|hours?)\s+(?:в\s+)?недел", low_all)
-    budget_match = re.search(r"(?:бюджет\w*|обучени\w*)[^\d€]*(\d[\d\s]*)\s*(€|eur|pln|zł)?", low_all)
+    hours_match = re.search(r"(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?)\s*(?:час\w*|hours?)\s+(?:в\s+)?недел", low_all)
+    budget_match = re.search(r"(?:бюджет\w*|обучени\w*|курс\w*)[^\d€]*(?:(€|eur|pln|zł|czk|kč)\s*)?(\d[\d\s]*)(?:\s*(€|eur|pln|zł|czk|kč))?", low_all)
+    horizon_match = re.search(r"(?:за|на|в течение)\s*(\d+)\s*(месяц\w*|months?)", low_all)
+    target_numbers = re.findall(r"\d+(?:[.,]\d+)?", (target_raw or "").replace(" ", ""))
+    learning_facts = [f.normalized_value for f in profile.facts_of_type("learning_resource") if isinstance(f.normalized_value, dict)]
+    budget_currency_token = (budget_match.group(1) or budget_match.group(3) or "") if budget_match else ""
+    budget_currency = ({"€": "EUR", "EUR": "EUR", "PLN": "PLN", "ZŁ": "PLN", "CZK": "CZK", "KČ": "CZK"}.get(budget_currency_token.upper()))
+    if learning_facts:
+        budget_currency = str(learning_facts[-1].get("currency") or budget_currency or "") or None
     analysis_values = [data.get("story_analysis"), data.get("resume_analysis")]
     management: list[str] = []
     tools_found = list(dict.fromkeys(re.findall(r"\b(?:Excel|ERP|Power\s*BI|SQL|SAP|CRM|CAD/?CAM)\b", all_text, re.I)))
@@ -456,28 +516,40 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                     destination.append(str(item).strip())
     profile.normalized_profile = NormalizedUserProfile(
         country=country, city=city, target_market=target_market,
+        target_market_primary=target_primary, target_market_secondary=target_secondary,
         relocation_allowed=relocation_allowed,
         remote_allowed=True if re.search(r"удален|remote", low_all) else None,
         hybrid_allowed=True if re.search(r"гибрид|hybrid", low_all) else None,
+        full_time=True if re.search(r"полный\s+(?:день|рабоч)|full[ -]?time", low_all) else None,
+        night_shifts=False if re.search(r"без\s+ночн|ночн\w*\s+смен\w*\s+не|no night", low_all) else None,
         work_rights=work_rights, current_role=profile.current_role,
+        previous_roles=roles[:-1],
         education=list(dict.fromkeys(education)),
         years_experience=float(experience_match.group(1).replace(",", ".")) if experience_match else None,
         languages=language_map, language_details=list(language_details.values()), current_income=income_number("current"),
         minimum_income=income_number("minimum"), target_income=target_raw,
+        target_income_min=float(target_numbers[0].replace(",", ".")) if target_numbers else None,
+        target_income_max=float(target_numbers[-1].replace(",", ".")) if len(target_numbers) > 1 else None,
         currency=str(latest_income.get("currency") or "").upper() or None,
+        income_currency=str(latest_income.get("currency") or "").upper() or None,
+        income_period=str(latest_income.get("period") or "month"),
         gross_net=str(latest_income.get("tax_basis") or "").lower() or None,
         schedule_constraints=strings("constraint"),
-        training_hours_per_week=float(hours_match.group(1).replace(",", ".")) if hours_match else None,
-        training_budget=float(budget_match.group(1).replace(" ", "")) if budget_match else None,
+        training_hours_per_week=(hours_match.group(1).replace(" ", "") if hours_match and re.search(r"[–-]", hours_match.group(1)) else float(hours_match.group(1).replace(",", ".")) if hours_match else None),
+        training_budget=float(budget_match.group(2).replace(" ", "")) if budget_match else (float(str(learning_facts[-1].get("amount"))) if learning_facts else None),
+        training_budget_currency=budget_currency,
+        training_horizon=f"{horizon_match.group(1)} months" if horizon_match else None,
         professional_functions=strings("professional_function"),
+        transferable_skills=strings("skill"),
         management_experience=list(dict.fromkeys(management)), digital_tools=tools_found,
         desired_changes=profile.target_change, undesired_tasks=strings("undesirable_task"),
         candidate_interests=profile.candidate_routes,
     )
     issues: list[str] = []
-    expected_currency = {"Poland": "PLN", "Spain": "EUR", "Portugal": "EUR"}.get(country or "")
-    if expected_currency and profile.normalized_profile.currency and profile.normalized_profile.currency != expected_currency:
-        issues.append("Валюта дохода не соответствует выбранному рынку и требует подтверждения")
+    # A different residence currency is not a contradiction: users may be paid
+    # by international employers. Only contradictory user statements are.
+    if any(len(group) > 1 for group in profile.contradictions):
+        profile.normalized_profile.financial_minimum_status = "conflict"
     if profile.contradictions:
         issues.append("Есть противоречащие друг другу подтверждённые факты")
     if profile.normalized_profile.target_market and len(profile.normalized_profile.target_market) > 80:
