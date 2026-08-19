@@ -237,14 +237,14 @@ class TestRouteContextReplyMarkup(unittest.TestCase):
             self.assertIn(opt, labels,
                           f"B8: keyboard for income_urgency must contain '{opt}'")
 
-    def test_B9_minimum_income_keyboard_contains_pln_intervals(self):
-        """minimum_monthly_income keyboard must contain PLN interval labels."""
+    def test_B9_minimum_income_keyboard_uses_safe_default_currency(self):
+        """Without country context the keyboard must use one safe currency."""
         idx = _rc_field_index("minimum_monthly_income")
         q = _route_context_question(idx)
         kb = _route_context_reply_markup(q)
         labels = _keyboard_flat_texts(kb)
-        self.assertTrue(any("PLN" in label for label in labels),
-                        "B9: minimum_income keyboard must contain PLN interval labels")
+        self.assertTrue(any("EUR" in label for label in labels))
+        self.assertFalse(any("PLN" in label for label in labels))
 
     def test_B10_study_time_keyboard_contains_hour_options(self):
         """available_time_for_study keyboard must contain hour interval labels."""
@@ -292,8 +292,8 @@ class TestQuestionListsHaveIntervalOptions(unittest.TestCase):
         q = self._find_question(qs, "минимальный доход")
         self.assertIsNotNone(q, "C1: _questions_calm must contain a minimum-income question")
         opts = q.get("options", [])
-        self.assertTrue(any("PLN" in str(o) for o in opts),
-                        f"C1: calm minimum-income options must contain PLN, got {opts!r}")
+        self.assertTrue(any("EUR" in str(o) for o in opts))
+        self.assertFalse(any("PLN" in str(o) for o in opts))
 
     def test_C2_calm_income_speed_has_speed_options(self):
         """_questions_calm income-speed question must have speed interval options."""
@@ -310,8 +310,8 @@ class TestQuestionListsHaveIntervalOptions(unittest.TestCase):
         q = self._find_question(qs, "минимальный доход")
         self.assertIsNotNone(q, "C3: _questions_support must contain a minimum-income question")
         opts = q.get("options", [])
-        self.assertTrue(any("PLN" in str(o) for o in opts),
-                        f"C3: support minimum-income options must contain PLN, got {opts!r}")
+        self.assertTrue(any("EUR" in str(o) for o in opts))
+        self.assertFalse(any("PLN" in str(o) for o in opts))
 
     def test_C4_support_time_question_has_hour_options(self):
         """_questions_support hours-per-week question must have hour interval options."""
@@ -328,8 +328,8 @@ class TestQuestionListsHaveIntervalOptions(unittest.TestCase):
         q = self._find_question(qs, "минимальный доход")
         self.assertIsNotNone(q, "C5: _segment_common_questions must contain a minimum-income question")
         opts = q.get("options", [])
-        self.assertTrue(any("PLN" in str(o) for o in opts),
-                        f"C5: segment minimum-income options must contain PLN, got {opts!r}")
+        self.assertTrue(any("EUR" in str(o) for o in opts))
+        self.assertFalse(any("PLN" in str(o) for o in opts))
 
     def test_C6_segment_common_time_question_has_hour_options(self):
         """_segment_common_questions hours question must have hour interval options."""
@@ -361,13 +361,13 @@ class TestQuestionReplyMarkupFallback(unittest.TestCase):
             ]
         }
 
-    def test_D1_income_question_without_options_gets_pln_keyboard(self):
-        """LLM question about minimum income with empty options → PLN keyboard injected."""
+    def test_D1_income_question_without_context_gets_single_currency_keyboard(self):
+        """An unscoped LLM question must never inject a Polish keyboard."""
         analysis = self._analysis_with_question("Какой минимальный доход нужен в месяц?", [])
         kb = _question_reply_markup(analysis, 0)
         labels = _keyboard_flat_texts(kb)
-        self.assertTrue(any("PLN" in l for l in labels),
-                        f"D1: income question without options must get PLN keyboard, got {labels!r}")
+        self.assertTrue(any("EUR" in label for label in labels))
+        self.assertFalse(any("PLN" in label for label in labels))
 
     def test_D2_speed_question_without_options_gets_speed_keyboard(self):
         """LLM 'как быстро нужен доход' with empty options → speed-interval keyboard injected."""
