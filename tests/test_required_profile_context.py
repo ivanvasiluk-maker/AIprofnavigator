@@ -17,5 +17,5 @@ def test_all_languages_are_extracted_from_dialogue_and_structured_context():
         str(fact.normalized_value).casefold()
         for fact in profile.facts_of_type("language")
     )
-    for expected in ("украин", "русск", "испан", "англий", "каталан"):
+    for expected in ("ukrainian", "russian", "spanish", "english", "каталан"):
         assert expected in rendered

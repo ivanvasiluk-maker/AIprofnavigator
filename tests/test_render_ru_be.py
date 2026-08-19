@@ -31,6 +31,7 @@ from handlers.career import (
     _present_route_selection,
     _send_final_map_bundle,
     handle_route_selection_actions,
+    handle_answer_review_actions,
     process_answers_input,
     process_story_input,
     _set_mvp_questions,
@@ -53,6 +54,8 @@ from handlers import voice as voice_handlers
 from keyboards import (
     ALL_ROUTE_SELECTION_ACTIONS,
     CAREER_STRATEGY_HELP,
+    ANSWER_CONTEXT_NO,
+    ANSWER_CONTEXT_YES,
     INPUT_TEXT,
     INPUT_VOICE,
     LANG_RU,
@@ -2029,6 +2032,54 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending.get("review_type"), "context_mismatch")
         self.assertEqual(state.data.get("qa_index"), 1)
         self.assertEqual(len(state.data.get("qa_answers", [])), 1)
+
+    async def test_context_review_recovers_snapshot_and_exits_yes_no_keyboard(self) -> None:
+        review = {
+            "index": 1,
+            "question": "Второй вопрос",
+            "question_id": 2,
+            "answer": "Старая кнопка",
+            "review_type": "context_mismatch",
+            "normalized_answer": "ответ по текущему вопросу: Старая кнопка",
+        }
+        state = FakeState(data={
+            "language": "ru",
+            "story_analysis": {"follow_up_questions": [
+                {"id": 1, "question": "Первый вопрос", "options": ["Старая кнопка"]},
+                {"id": 2, "question": "Второй вопрос", "options": ["Новый ответ"]},
+            ]},
+            "qa_index": 1,
+            "qa_answers": [{"question": "Первый вопрос", "answer": "Старая кнопка"}],
+            "pending_answer_review": {},
+            "answer_review_snapshot": review,
+        }, current_state=CareerFlow.waiting_for_answers.state)
+        message = FakeMessage(ANSWER_CONTEXT_NO)
+
+        with patch("handlers.career._track_event", new=AsyncMock()):
+            await handle_answer_review_actions(message, state)
+
+        self.assertEqual(state.data.get("pending_answer_review"), {})
+        self.assertEqual(state.data.get("answer_review_snapshot"), {})
+        sent_text = str(message.answer.await_args.args[0])
+        self.assertIn("Второй вопрос", sent_text)
+
+    async def test_duplicate_context_confirmation_restores_active_question(self) -> None:
+        state = FakeState(data={
+            "language": "ru",
+            "story_analysis": {"follow_up_questions": [
+                {"id": 1, "question": "Текущий вопрос", "options": ["Да", "Нет"]},
+            ]},
+            "qa_index": 0,
+            "pending_answer_review": {},
+            "answer_review_snapshot": {},
+        }, current_state=CareerFlow.waiting_for_answers.state)
+        message = FakeMessage(ANSWER_CONTEXT_YES)
+
+        await handle_answer_review_actions(message, state)
+
+        sent_text = str(message.answer.await_args.args[0])
+        self.assertIn("Текущий вопрос", sent_text)
+        self.assertNotIn("Ответьте одним сообщением", sent_text)
 
     async def test_free_text_overwhelm_signal_is_classified(self) -> None:
         state = FakeState(

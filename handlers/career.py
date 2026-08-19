@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import io
 import os
 import re
@@ -206,7 +207,7 @@ from services.career_assessment import (
     render_telegram_map,
     validate_career_assessment,
 )
-from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors
+from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors, contamination_errors
 from states import CareerFlow, InterviewContext
 from utils.analytics import behavior_insights, behavior_offer_snapshot, days_since_first_seen, ensure_public_user_id, log_behavior_event
 from utils.persistence import get_report_by_generation_id, save_profile_version, save_report_version, touch_session, update_report_files
@@ -429,6 +430,15 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
 
 
 _STORY_RESET_FIELDS: dict[str, object] = {
+    # assessment boundary: none of these objects may survive a new case
+    "assessment_id": "",
+    "profile_version": "",
+    "source_messages": [],
+    "uploaded_documents": [],
+    "canonical_profile": {},
+    "profile_snapshot": {},
+    "career_assessment": {},
+    "route_comparison": {},
     # previous conclusion
     "final_report": {},
     "report_chunks": {},
@@ -454,6 +464,7 @@ _STORY_RESET_FIELDS: dict[str, object] = {
     "preliminary_route_selected": False,
     "selected_preliminary_route": "",
     "pending_answer_review": {},
+    "answer_review_snapshot": {},
     "pending_question_append": {},
     "pending_choice_reason": {},
     "awaiting_extended_diagnostics_choice": False,
@@ -1156,13 +1167,26 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
                 for name, facts in canonical_profile.grouped().items()
             },
         },
+        "normalized_profile": canonical_profile.normalized_profile.model_dump(mode="json"),
+        "consistency_issues": list(canonical_profile.consistency_issues),
     }
+
+    # Promote normalized scalars/lists for existing assessment consumers. Empty
+    # extraction results never overwrite a stronger structured answer.
+    for key, value in canonical_profile.normalized_profile.model_dump(mode="json").items():
+        if value not in (None, "", [], {}):
+            snapshot[key] = value
 
     normalized_answers = {
         "income_urgency": _clean_profile_value(route_context.get("income_urgency") or data.get("income_urgency")),
         "minimum_income": _clean_profile_value(route_context.get("minimum_monthly_income") or data.get("minimum_income") or route_context.get("minimum_income")),
         "target_income": _clean_profile_value(route_context.get("desired_monthly_income") or data.get("target_income") or route_context.get("target_income")),
-        "currency": str((country_config or {}).get("currency") or str(data.get("currency") or "EUR")).upper(),
+        "currency": str(
+            canonical_profile.normalized_profile.currency
+            or (country_config or {}).get("currency")
+            or data.get("currency")
+            or "EUR"
+        ).upper(),
         "learning_budget": _clean_profile_value(route_context.get("training_budget") or data.get("learning_budget")),
         "learning_hours_week": _clean_profile_value(route_context.get("available_time_for_study") or data.get("learning_hours_week")),
         "career_goal": _clean_profile_value(route_context.get("career_goal_type") or data.get("career_goal")),
@@ -6645,9 +6669,16 @@ def _ensure_canonical_career_decision(report: dict, route_id: str | None = None)
     missing_data = decision.get("missing_data") if isinstance(decision.get("missing_data"), list) else []
     missing_data = [str(item).strip() for item in missing_data if str(item).strip()]
     if not missing_data:
-        for key in ["minimum_monthly_income", "income_urgency", "country_duration_primary", "documents_and_work_rights"]:
-            if str(route_context.get(key) or "").strip():
-                missing_data.append(str(key))
+        # Only absent decision-changing facts are missing. Use human labels: this
+        # collection can be rendered in HTML/PDF and must never expose schema keys.
+        required_facts = [
+            ("minimum_monthly_income", "обязательный минимум дохода"),
+            ("income_urgency", "срок выхода на необходимый доход"),
+            ("documents_and_work_rights", "право на работу на выбранном рынке"),
+        ]
+        for key, label in required_facts:
+            if not str(route_context.get(key) or "").strip():
+                missing_data.append(label)
 
     country_name = (
         str(decision.get("country_name") or profile_snapshot.get("country_name") or route_context.get("country") or report.get("country_name") or "").strip()
@@ -6678,6 +6709,9 @@ def _ensure_canonical_career_decision(report: dict, route_id: str | None = None)
         "country_name": country_name,
         "city": city,
         "current_role": str(decision.get("current_role") or "").strip(),
+        "target_change": list(decision.get("target_change", []) if isinstance(decision.get("target_change"), list) else []),
+        "candidate_routes": [main_route, *alternative_routes],
+        "recommended_route": main_route,
         "constraints": list(decision.get("constraints", []) if isinstance(decision.get("constraints"), list) else []),
         "resources": list(decision.get("resources", []) if isinstance(decision.get("resources"), list) else []),
         "main_route": main_route,
@@ -7080,7 +7114,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     if not isinstance(stored_payload, dict):
         candidate = data.get("final_report")
         stored_payload = candidate if isinstance(candidate, dict) and candidate.get("assessment_id") else None
-    if isinstance(stored_payload, dict):
+    current_assessment_id = str(data.get("assessment_id") or "").strip()
+    if isinstance(stored_payload, dict) and current_assessment_id and str(stored_payload.get("assessment_id") or "").strip() == current_assessment_id:
         try:
             stored_assessment = career_assessment_from_dict(stored_payload)
             validate_career_assessment(stored_assessment).require_valid()
@@ -7152,6 +7187,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     source_messages = list(data.get("source_messages") or [])
     source_messages.extend(
         {
+            "assessment_id": assessment_id,
             "message_id": str(row.get("source_message_id") or ""),
             "text": str(row.get("answer") or ""),
             "created_at": str(row.get("created_at") or ""),
@@ -7168,6 +7204,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         save_profile_version(public_user_id, "profile_snapshot", snapshot, session_id=session_id)
     except Exception:
         pass
+    # Freeze the sole generator input.  Deep serialization prevents later FSM
+    # updates from mutating the profile while routes are being generated.
+    snapshot = copy.deepcopy(snapshot)
+    snapshot["assessment_id"] = assessment_id
     await state.update_data(
         profile_snapshot=snapshot,
         assessment_id=assessment_id,
@@ -7182,59 +7222,51 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         meta={**runtime_meta, "assessment_id": assessment_id, "profile_version": profile_version},
     )
 
+    generation_error = ""
     try:
-        assessment = await ai_client.build_career_assessment(
-            snapshot,
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-            story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
-            language=lang,
+        assessment = await asyncio.wait_for(
+            ai_client.build_career_assessment(
+                snapshot,
+                assessment_id=assessment_id,
+                session_id=session_id,
+                profile_version=profile_version,
+                story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+                resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+                language=lang,
+            ),
+            timeout=settings.career_assessment_timeout_seconds,
         )
     except Exception as exc:
-        preliminary = build_preliminary_assessment(
+        # A model request used to be able to occupy this handler for almost two
+        # minutes (initial generation plus repair).  Telegram then showed only
+        # "Собираю вашу карту".  A deterministic assessment is a complete,
+        # renderable result, so continue through the normal HTML delivery path.
+        generation_error = type(exc).__name__
+        assessment = build_preliminary_assessment(
             snapshot,
             data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
         )
-        preliminary_payload = preliminary.to_dict()
-        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
-        await state.update_data(
-            career_assessment=preliminary_payload,
-            final_report=preliminary_payload,
-            report_generation_status="ASSESSMENT_VALIDATION_FAILED",
-            report_generation_error=type(exc).__name__,
-        )
+        assessment.metadata["recovered_by"] = "deterministic_fallback"
+        assessment.metadata["generation_error"] = generation_error
         await _track_event(
             message,
             state,
-            "report_failed",
+            "report_generation_fallback",
             meta={
                 **runtime_meta,
                 "assessment_id": assessment_id,
                 "profile_version": profile_version,
-                "error": type(exc).__name__,
+                "error": generation_error,
             },
         )
-        await message.answer(
-            render_telegram_map(preliminary),
-            reply_markup=first_step_selection_keyboard(preliminary),
-        )
-        try:
-            save_report_version(assessment_id, public_user_id, preliminary_payload, session_id=session_id)
-        except Exception:
-            pass
-        await message.answer(
-            "Я сохранил ваши ответы и подготовил предварительную карту, но подробный документ пока не прошёл "
-            "техническую проверку. Вы можете пользоваться кратким выводом, а документ можно попробовать пересобрать.",
-            reply_markup=assessment_recovery_keyboard(),
-        )
-        return
 
-    consistency_failures = consistency_errors(assessment.to_dict(), integrity_audit)
+    consistency_failures = [
+        *consistency_errors(assessment.to_dict(), integrity_audit),
+        *contamination_errors(assessment.to_dict(), snapshot, assessment_id),
+    ]
     if consistency_failures:
         # build_career_assessment already performs its model repair pass.  A
         # remaining contradiction is therefore reduced to a source-only map;
@@ -7249,6 +7281,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         assessment.metadata.update({
             "integrity_repair": "source_only_fallback",
             "consistency_errors": consistency_failures,
+            "context_contamination": any(
+                code.startswith(("FOREIGN_", "UNSUPPORTED_CROSS_DOMAIN", "UNSCOPED_ROUTE"))
+                for code in consistency_failures
+            ),
             "debug_log": integrity_audit,
         })
 
@@ -7283,6 +7319,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         final_report=assessment_payload,
         final_report_generated=True,
         report_generation_status=generation_status,
+        report_generation_error=generation_error,
         assessment_diagnostics=diagnostics,
         assessment_validation=validation.to_dict(),
         route_comparison=render_route_comparison(assessment),
@@ -7607,9 +7644,11 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         profile.update({"pace": "normal", "support_need": "medium", "detail_preference": "balanced"})
     profile["preferred_input"] = preferred_input
 
+    assessment_id = uuid.uuid4().hex
     await state.update_data(
-        assessment_id=uuid.uuid4().hex,
+        assessment_id=assessment_id,
         source_messages=[{
+            "assessment_id": assessment_id,
             "message_id": str(getattr(message, "message_id", "")),
             "text": clean,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -8066,15 +8105,20 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     "reason": "context_mismatch",
                 },
             )
+            review_payload = {
+                "index": qa_index,
+                "question": question_text,
+                "question_id": current_q_id,
+                "answer": clean,
+                "review_type": "context_mismatch",
+                "normalized_answer": inferred_meaning,
+            }
+            # Keep a recovery copy until the choice is consumed. Telegram can
+            # deliver rapid reply-keyboard taps while another update is saving
+            # FSM data; losing the transient pending value used to trap the chat.
             await state.update_data(
-                pending_answer_review={
-                    "index": qa_index,
-                    "question": question_text,
-                    "question_id": current_q_id,
-                    "answer": clean,
-                    "review_type": "context_mismatch",
-                    "normalized_answer": inferred_meaning,
-                }
+                pending_answer_review=review_payload,
+                answer_review_snapshot=review_payload,
             )
             await message.answer(t(lang, "answer_context_mismatch_intro"), reply_markup=answer_review_keyboard(context_mismatch=True))
             await message.answer(
@@ -8808,7 +8852,27 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
     lang = _user_language(data)
     action = (message.text or "").strip()
     pending = data.get("pending_answer_review") or {}
+    if not pending and action in {ANSWER_CONTEXT_YES, ANSWER_CONTEXT_NO}:
+        snapshot = data.get("answer_review_snapshot") or {}
+        if (
+            isinstance(snapshot, dict)
+            and snapshot.get("review_type") == "context_mismatch"
+            and int(snapshot.get("index", -1)) == int(data.get("qa_index", 0))
+        ):
+            pending = snapshot
     if not pending:
+        # A duplicate/stale confirmation must remove the obsolete yes/no
+        # keyboard and restore the actual active question, never show a hint
+        # that leaves the person on the same unusable keyboard.
+        analysis = data.get("story_analysis") or {}
+        qa_index = int(data.get("qa_index", 0))
+        questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
+        if action in {ANSWER_CONTEXT_YES, ANSWER_CONTEXT_NO} and qa_index < len(questions):
+            await message.answer(
+                _question_prompt(analysis, qa_index, lang),
+                reply_markup=_question_reply_markup(analysis, qa_index),
+            )
+            return
         await message.answer(t(lang, "question_answer_hint"))
         return
 
@@ -8822,7 +8886,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
         quick_report_after_questions = bool(data.get("quick_report_after_questions"))
 
         if action == ANSWER_CONTEXT_NO:
-            await state.update_data(pending_answer_review={})
+            await state.update_data(pending_answer_review={}, answer_review_snapshot={})
             await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
             next_q = questions[qa_index] if qa_index < len(questions) and isinstance(questions[qa_index], dict) else {}
             await _track_event(
@@ -8854,6 +8918,7 @@ async def handle_answer_review_actions(message: Message, state: FSMContext) -> N
                 qa_answers=qa_answers,
                 qa_index=qa_index,
                 pending_answer_review={},
+                answer_review_snapshot={},
                 evidence_profile=evidence_payload,
             )
             await _sync_interview_context_after_answer(state, data, evidence_payload, accepted_answer)

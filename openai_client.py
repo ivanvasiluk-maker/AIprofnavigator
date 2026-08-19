@@ -1226,6 +1226,10 @@ route_changed=false. Дай один следующий измеримый ша�
 - personal_insights содержит минимум три вывода, каждый связывает минимум два evidence_id и даёт отдельное practical_consequence;
 - psychology_factors добавляй только по явным психологическим/социальным фактам; миграцию, язык, деньги, лицензии и физические ограничения не психологизируй;
 - для каждого маршрута выбери отдельный entry_path и сделай уникальными why_it_fits, missing, risks, market_test и disconfirming_conditions;
+- для каждого маршрута отдельно заполни transferable_functions, new_functions и typical_tasks; typical_tasks описывает целевую роль, а не копирует текущие задачи;
+- evidence_ids каждого маршрута должны ссылаться минимум на два факта только текущего assessment_id и смыслово объяснять именно этот переход;
+- assessment_id каждого evidence дословно равен fixed_identity.assessment_id;
+- cross-domain маршрут допустим только при явном мосте из минимум двух transferable_functions; иначе не включай его;
 - каждый существенный route claim помести в evidence_claims с непустыми evidence_fact_ids; claim без фактов запрещён;
 - психологические и социальные условия выводи только из явно сообщённых фактов, без диагнозов;
 - основной маршрут обязан ссылаться минимум на два evidence_id;

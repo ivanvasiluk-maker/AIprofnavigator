@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import unittest
 from unittest.mock import AsyncMock
@@ -443,7 +444,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
         class State:
             def __init__(self, payload: dict) -> None:
-                self.data = {"career_assessment": payload}
+                self.data = {"assessment_id": payload["assessment_id"], "career_assessment": payload}
                 self.current_state = None
 
             async def update_data(self, **kwargs) -> None:
@@ -521,6 +522,55 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generated_meta["html_renderer_version"], CAREER_HTML_RENDERER_VERSION)
         self.assertEqual(generated_meta["assessment_id"], "assessment-profile-10")
         self.assertEqual(generated_meta["profile_version"], "1")
+
+    async def test_generation_timeout_delivers_fallback_map_and_html(self) -> None:
+        class State:
+            def __init__(self) -> None:
+                self.data = {
+                    "public_user_id": "public-timeout-user",
+                    "session_id": "session-timeout",
+                    "assessment_id": "assessment-timeout",
+                    "profile_version": "1",
+                }
+                self.current_state = None
+
+            async def update_data(self, **kwargs) -> None:
+                self.data.update(kwargs)
+
+            async def set_state(self, value) -> None:
+                self.current_state = value
+
+        state = State()
+        message = type("MessageStub", (), {"answer": AsyncMock(), "answer_document": AsyncMock()})()
+
+        async def never_finishes(*args, **kwargs):
+            await asyncio.sleep(60)
+
+        with TemporaryDirectory() as output_dir:
+            html_path = Path(output_dir) / "career_assessment_assessment-timeout.html"
+            with (
+                unittest.mock.patch(
+                    "handlers.career._build_profile_snapshot",
+                    return_value={"country_code": "PL", "country_name": "Польша", "currency": "PLN", "ready_for_report": True},
+                ),
+                unittest.mock.patch("handlers.career._snapshot_is_ready_for_report", return_value=True),
+                unittest.mock.patch("handlers.career.ai_client.build_career_assessment", side_effect=never_finishes),
+                unittest.mock.patch("handlers.career.settings.career_assessment_timeout_seconds", 0.01),
+                unittest.mock.patch("handlers.career.generate_assessment_html_file", return_value=html_path),
+                unittest.mock.patch("handlers.career._track_event", new=AsyncMock()),
+                unittest.mock.patch("handlers.career.save_profile_version"),
+                unittest.mock.patch("handlers.career.save_report_version"),
+                unittest.mock.patch("handlers.career.update_report_files"),
+            ):
+                html_path.write_text("fallback", encoding="utf-8")
+                await _build_and_send_career_assessment(message, state, "ru", state.data)
+
+        self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
+        self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_FALLBACK_READY")
+        self.assertEqual(state.data["report_generation_error"], "TimeoutError")
+        self.assertTrue(state.data["final_report_generated"])
+        self.assertTrue(any("Основной маршрут:" in call.args[0] for call in message.answer.await_args_list))
+        message.answer_document.assert_awaited_once()
 
     async def test_incomplete_snapshot_warns_but_still_generates_assessment(self) -> None:
         class State:

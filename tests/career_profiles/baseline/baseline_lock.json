@@ -4,7 +4,7 @@
   "application_version": "baseline_worktree_1d23e2c_dirty",
   "git_commit": "1d23e2c6020a6f6e1e87a736c92b0d58bfd4248e",
   "git_worktree_dirty": true,
-  "prompt_version": "prompts.py@sha256:84747A7DA2565546379FA9D05490381D1AED778A13A4B4BC6ACDF1E456BC3F1D",
+  "prompt_version": "prompts.py@sha256:C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
   "model": "gpt-4o-mini",
   "model_parameters": {
     "temperature": 0.2,
@@ -32,7 +32,10 @@
     "CAREER_STRATEGY_REPORT_P0_2026_08_18",
     "UNIVERSAL_CANONICAL_STRATEGY_P0_2026_08_18",
     "REQUIRED_CAREER_CONTEXT_2026_08_18",
-    "PERSONAL_NEXT_STEP_AND_SUPPORT_2026_08_18"
+    "PERSONAL_NEXT_STEP_AND_SUPPORT_2026_08_18",
+    "NORMALIZED_FACTS_AND_SKILL_CLUSTER_ROUTES_2026_08_18",
+    "ASSESSMENT_DELIVERY_TIMEOUT_FALLBACK_2026_08_19",
+    "ASSESSMENT_CASE_ISOLATION_2026_08_19"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -129,13 +132,33 @@
       "utils/reporting.py",
       "tests/test_market_strategy_patch.py",
       "tests/test_market_strategy_acceptance.py"
+    ],
+    "NORMALIZED_FACTS_AND_SKILL_CLUSTER_ROUTES_2026_08_18": [
+      "services/canonical_profile.py",
+      "services/career_assessment.py",
+      "handlers/career.py",
+      "prompts.py",
+      "tests/test_poland_normalized_routes.py"
+    ],
+    "ASSESSMENT_DELIVERY_TIMEOUT_FALLBACK_2026_08_19": [
+      "config.py",
+      "handlers/career.py",
+      "tests/test_career_assessment.py"
+    ],
+    "ASSESSMENT_CASE_ISOLATION_2026_08_19": [
+      "handlers/career.py",
+      "openai_client.py",
+      "services/assessment_integrity.py",
+      "services/canonical_profile.py",
+      "services/career_assessment.py",
+      "tests/test_assessment_case_isolation.py"
     ]
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
-    "prompts.py": "84747A7DA2565546379FA9D05490381D1AED778A13A4B4BC6ACDF1E456BC3F1D",
-    "openai_client.py": "E01510567F84466213D9AFBBFE77D1AB93506D6CD909F5DB555F66068EFF1F2E",
-    "handlers/career.py": "628D9C3AAAF20F7781FE6F76C74CE1610F8BCC3A77719053A1D128FCBAA6D183",
+    "prompts.py": "C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
+    "openai_client.py": "581695B4FCE14CC73DEF62D611D63830EC72D727C55A74022A8A42156292AA74",
+    "handlers/career.py": "2DE68E7CAF07BCCC4C4E88A61516676090ABE910DCCF84FEA90789149766819B",
     "states.py": "F1B46E7A83CFB3443841F3F6A3D2B8887EF564D63FCA983BE8542419CC50401D",
     "services/evidence_profile.py": "D59E515D72D8C6985F60C03A594FB62DD5628E91B693B16E60A66A71D6829238",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",
