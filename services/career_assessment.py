@@ -881,7 +881,13 @@ def build_preliminary_assessment(
     core = [
         title for title in (hypotheses or ([current_identity] if current_identity else []))
         if title and not title.casefold().startswith("пользователь") and len(title.split()) <= 8
-    ] or ["Текущая профессиональная специализация"]
+    ] or _texts(profile_snapshot.get("professional_functions"))[:3] or _texts(profile_snapshot.get("current_role"))[:1]
+    if not core:
+        return build_deterministic_assessment(
+            profile_snapshot, story_analysis, {}, assessment_id=assessment_id,
+            session_id=session_id, profile_version=profile_version,
+            fallback_reason="preliminary_profile_requires_deterministic_routing",
+        )
     facts = _texts(story_analysis.get("facts_extracted"))
     story_text = str(profile_snapshot.get("story_text") or "").strip()
     career_goal = str(profile_snapshot.get("career_goal") or "").strip()
@@ -1666,10 +1672,13 @@ def build_deterministic_assessment(
             "Гипотеза опровергается, если её основные задачи совпадут с нежелательными задачами",
             "Гипотеза опровергается, если обязательные требования нельзя закрыть в доступные сроки",
         ]
-        market_test = (
-            f"Тест маршрута «{label}»: собрать {8 + index * 2} актуальных описаний, измерить долю задач "
-            f"«{daily_focus}», проверить оплату как «{income_model}» и получить внешние сигналы: {index}."
+        market_test_patterns = (
+            f"Вакансии «{label}»: разобрать 10 свежих описаний и посчитать частоту задач «{daily_focus}».",
+            f"Экспертная проверка «{label}»: провести два разговора с нанимающими менеджерами о входе, требованиях и модели «{income_model}».",
+            f"Портфельный тест «{label}»: сделать один образец результата по функции «{daily_focus}» и запросить три внешние оценки.",
+            f"Финансовый пилот «{label}»: получить пять откликов с указанным диапазоном оплаты и сверить их с минимумом пользователя.",
         )
+        market_test = market_test_patterns[(index - 1) % len(market_test_patterns)]
         why = (
             f"Маршрут «{label}» использует подтверждённую основу «{source_facts[(index - 1) % len(source_facts)]}». "
             f"Его отдельная карьерная модель — {daily_focus}; оплата строится как {income_model}."

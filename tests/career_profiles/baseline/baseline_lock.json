@@ -35,7 +35,9 @@
     "PERSONAL_NEXT_STEP_AND_SUPPORT_2026_08_18",
     "NORMALIZED_FACTS_AND_SKILL_CLUSTER_ROUTES_2026_08_18",
     "ASSESSMENT_DELIVERY_TIMEOUT_FALLBACK_2026_08_19",
-    "ASSESSMENT_CASE_ISOLATION_2026_08_19"
+    "ASSESSMENT_CASE_ISOLATION_2026_08_19",
+    "INTERVIEW_RAPID_TAP_SERIALIZATION_2026_08_19",
+    "RUNTIME_PIPELINE_DIAGNOSTICS_AND_ROUTING_2026_08_19"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -152,15 +154,29 @@
       "services/canonical_profile.py",
       "services/career_assessment.py",
       "tests/test_assessment_case_isolation.py"
+    ],
+    "INTERVIEW_RAPID_TAP_SERIALIZATION_2026_08_19": [
+      "handlers/career.py",
+      "localization.py",
+      "tests/test_render_ru_be.py"
+    ],
+    "RUNTIME_PIPELINE_DIAGNOSTICS_AND_ROUTING_2026_08_19": [
+      "bot.py",
+      "Dockerfile",
+      "handlers/career.py",
+      "services/evidence_profile.py",
+      "services/canonical_profile.py",
+      "services/career_assessment.py",
+      "tests/test_runtime_multifactor_routing.py"
     ]
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
     "prompts.py": "C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
     "openai_client.py": "581695B4FCE14CC73DEF62D611D63830EC72D727C55A74022A8A42156292AA74",
-    "handlers/career.py": "2DE68E7CAF07BCCC4C4E88A61516676090ABE910DCCF84FEA90789149766819B",
+    "handlers/career.py": "BF997DE3EFCD3415DEDE9803808D500E7BB84621EC2191A2A05C19E795652E73",
     "states.py": "F1B46E7A83CFB3443841F3F6A3D2B8887EF564D63FCA983BE8542419CC50401D",
-    "services/evidence_profile.py": "D59E515D72D8C6985F60C03A594FB62DD5628E91B693B16E60A66A71D6829238",
+    "services/evidence_profile.py": "CA9D9470B31594417DB7C0F98566BBDC9736F5C502332D669097E66C8174A311",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",
     "services/hypothesis_engine.py": "95B016B60E9D6D06B20F769EA3B6EB29EF998BBDD4328C8AF58CE48788515351",
     "services/career_guardrails.py": "D3DFEDDB32BD698A94B724CD8AA51D4D89F64F69B7623C25B5503990A66819C4",

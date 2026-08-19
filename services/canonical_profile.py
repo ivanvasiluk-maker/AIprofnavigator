@@ -19,6 +19,7 @@ FactType = Literal[
 ]
 
 CITY_COUNTRIES = {
+    "berlin": ("Germany", "DE"), "берлин": ("Germany", "DE"), "берлине": ("Germany", "DE"),
     "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
     "прага": ("Czechia", "CZ"), "праге": ("Czechia", "CZ"),
     "porto": ("Portugal", "PT"), "порту": ("Portugal", "PT"),
@@ -239,8 +240,16 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             sources.append((str(row.get("source_message_id") or row.get("question_id") or "clarification"), str(row["answer"]), str(row.get("created_at") or "")))
 
     route = data.get("route_context") if isinstance(data.get("route_context"), dict) else {}
+    evidence_profile = data.get("evidence_profile") if isinstance(data.get("evidence_profile"), dict) else {}
+    residence_evidence = evidence_profile.get("residence_country") if isinstance(evidence_profile.get("residence_country"), dict) else {}
+    residence_city_evidence = evidence_profile.get("residence_city") if isinstance(evidence_profile.get("residence_city"), dict) else {}
+    target_evidence = evidence_profile.get("target_countries") if isinstance(evidence_profile.get("target_countries"), list) else []
+    target_format_evidence = evidence_profile.get("target_market_format") if isinstance(evidence_profile.get("target_market_format"), dict) else {}
     structured = {
-        "country": route.get("country") or data.get("country"), "city": route.get("city") or data.get("city"),
+        "country": route.get("country") or data.get("country") or residence_evidence.get("statement"),
+        "city": route.get("city") or data.get("city") or residence_city_evidence.get("statement"),
+        "target_market_primary": next((item.get("statement") for item in target_evidence if isinstance(item, dict) and item.get("statement")), None),
+        "target_market_secondary": target_format_evidence.get("statement"),
         "work_authorization": route.get("documents_and_work_rights") or data.get("work_authorization_status"),
         "minimum_income": route.get("minimum_monthly_income") or data.get("minimum_income"),
         "current_income": route.get("current_monthly_income") or data.get("current_income"),
@@ -266,6 +275,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                     "Валенсия" if city in {"валенсия", "валенсии"}
                     else "Краков" if city in {"краков", "кракове"}
                     else "Prague" if city in {"prague", "praha", "прага", "праге"}
+                    else "Berlin" if city in {"berlin", "берлин", "берлине"}
                     else city.title()
                 )
                 profile.facts.append(_fact(assessment_id, "market_context", {"city": display_city, "country": country, "country_code": code}, message_id, text, .98, created_at or None))
@@ -323,6 +333,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     country = str(structured["country"] or "").strip()
     mapped = CITY_COUNTRIES.get(city.casefold().replace("ё", "е"))
     add_structured("market_context", {"city": city or None, "country": country or (mapped[0] if mapped else None), "country_code": mapped[1] if mapped else None}, f"{city}, {country}".strip(", "))
+    add_structured("market_context", {
+        "target_market_primary": structured["target_market_primary"],
+        "target_market_secondary": structured["target_market_secondary"],
+    }, f"{structured['target_market_primary'] or ''}, {structured['target_market_secondary'] or ''}".strip(", "))
     add_structured("work_authorization", structured["work_authorization"], str(structured["work_authorization"] or ""))
     for kind in ("current_income", "minimum_income", "target_income"):
         add_structured("income_requirement", {"kind": kind.removesuffix("_income"), "display": structured[kind]}, str(structured[kind] or ""))
@@ -464,7 +478,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     # Keep the legacy display field for existing renderers; route generation
     # uses the normalized primary/secondary fields below.
     target_market = " / ".join(item for item in (city, country) if item) or None
-    target_secondary = "international_remote" if re.search(r"международн\w*\s+(?:удален|remote)|international\s+remote", low_all) else None
+    target_primary = str(market.get("target_market_primary") or country or "").strip() or None
+    target_secondary = str(market.get("target_market_secondary") or "").strip() or (
+        "international_remote" if re.search(r"международн\w*\s+(?:удален|remote)|international\s+remote", low_all) else None
+    )
     relocation_allowed = None
     if re.search(r"(?:не\s+(?:хочу|готов|могу)\s+переезж|переезж\w*\s+не\s+(?:хочу|готов|могу)|переезд\w*\s+не)", low_all):
         relocation_allowed = False
@@ -499,7 +516,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                     destination.append(str(item).strip())
     profile.normalized_profile = NormalizedUserProfile(
         country=country, city=city, target_market=target_market,
-        target_market_primary=country, target_market_secondary=target_secondary,
+        target_market_primary=target_primary, target_market_secondary=target_secondary,
         relocation_allowed=relocation_allowed,
         remote_allowed=True if re.search(r"удален|remote", low_all) else None,
         hybrid_allowed=True if re.search(r"гибрид|hybrid", low_all) else None,

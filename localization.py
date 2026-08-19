@@ -162,6 +162,10 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ru": "Вы хотите сказать: {meaning}?",
         "be": "",
     },
+    "late_multi_choice_saved": {
+        "ru": "Добавил «{choice}» к предыдущему выбору. Текущий вопрос остаётся активным.",
+        "be": "",
+    },
     "answer_validation_need_number": {
         "ru": "Нужна конкретика в цифрах. Добавьте число или диапазон.",
         "be": "",

@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import copy
 import io
+import json
 import os
 import re
 import tempfile
 import uuid
 import zipfile
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -200,7 +202,7 @@ from services.career_assessment import (
     CAREER_PIPELINE_VERSION,
     CAREER_TELEGRAM_RENDERER_VERSION,
     CareerAssessment,
-    build_preliminary_assessment,
+    build_deterministic_assessment,
     career_assessment_from_dict,
     render_first_step_instruction,
     render_route_comparison,
@@ -218,6 +220,47 @@ router = Router()
 _REMINDER_TASKS: dict[int, asyncio.Task] = {}
 _PDF_TASKS: dict[int, asyncio.Task] = {}
 _PDF_READY_BY_CHAT: dict[int, str] = {}
+_INTERVIEW_UPDATE_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _runtime_build_metadata() -> dict[str, str]:
+    commit = str(os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "").strip()
+    if not commit:
+        try:
+            git_dir = Path(__file__).resolve().parents[1] / ".git"
+            head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+            commit = (git_dir / head.removeprefix("ref: ")).read_text(encoding="utf-8").strip() if head.startswith("ref: ") else head
+        except (OSError, ValueError):
+            commit = "unknown"
+    build_time = str(os.getenv("BUILD_TIME") or "").strip()
+    if not build_time:
+        try:
+            build_time = (Path(__file__).resolve().parents[1] / ".build_time").read_text(encoding="utf-8").strip()
+        except OSError:
+            build_time = datetime.fromtimestamp(Path(__file__).stat().st_mtime, timezone.utc).isoformat()
+    return {"build_commit": commit, "build_time": build_time, "environment": str(settings.environment)}
+
+
+def _runtime_debug_log(event: str, **payload: object) -> None:
+    print(json.dumps({"event": event, **_runtime_build_metadata(), **payload}, ensure_ascii=False, default=str), flush=True)
+
+
+def _serialize_interview_update(handler):
+    """Serialize rapid reply-keyboard updates for one Telegram chat.
+
+    Aiogram can execute adjacent updates concurrently. Both handlers below
+    perform read-modify-write operations on the same FSM lists and indexes, so
+    processing them without a chat lock can reorder Done and the preceding
+    option or advance two questions at once.
+    """
+    @wraps(handler)
+    async def wrapped(message: Message, state: FSMContext, *args, **kwargs):
+        chat = getattr(message, "chat", None)
+        key = int(getattr(chat, "id", 0) or getattr(getattr(message, "from_user", None), "id", 0) or id(state))
+        lock = _INTERVIEW_UPDATE_LOCKS.setdefault(key, asyncio.Lock())
+        async with lock:
+            return await handler(message, state, *args, **kwargs)
+    return wrapped
 
 _BARRIER_DONE_ALIASES = {
     "все",
@@ -1137,6 +1180,7 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
 
     evidence_profile = data.get("evidence_profile") if isinstance(data.get("evidence_profile"), dict) else {}
     residence_evidence = evidence_profile.get("residence_country") if isinstance(evidence_profile.get("residence_country"), dict) else {}
+    residence_city_evidence = evidence_profile.get("residence_city") if isinstance(evidence_profile.get("residence_city"), dict) else {}
     target_evidence = evidence_profile.get("target_countries") if isinstance(evidence_profile.get("target_countries"), list) else []
     residence_country = str(residence_evidence.get("statement") or route_context.get("residence_country") or data.get("residence_country") or "").strip()
     target_countries = [str(item.get("statement") or "").strip() for item in target_evidence if isinstance(item, dict) and str(item.get("statement") or "").strip()]
@@ -1147,7 +1191,7 @@ def _build_profile_snapshot(data: dict[str, object]) -> dict[str, object]:
         "country_name": str((country_config or {}).get("country_name") or str(route_context.get("country") or "").strip() or "").strip(),
         "residence_country": residence_country,
         "target_countries": target_countries,
-        "city": str(route_context.get("city") or "").strip(),
+        "city": str(residence_city_evidence.get("statement") or route_context.get("city") or "").strip(),
         "currency": str((country_config or {}).get("currency") or "EUR").upper(),
         "local_language": str((country_config or {}).get("local_language") or "-").strip(),
         "market_locale": str((country_config or {}).get("market_locale") or "unknown").strip(),
@@ -2510,6 +2554,34 @@ def _update_evidence_after_answer(data: dict, question_row: dict | object, answe
     gap_key = str(question_row.get("gap_key") or "").strip() if isinstance(question_row, dict) else ""
     if gap_key:
         profile = apply_answer_to_profile(profile, gap_key, answer_text)
+    assessment_id = str(data.get("assessment_id") or data.get("report_generation_id") or "pending-assessment")
+    canonical_before = build_canonical_profile(data, assessment_id=assessment_id)
+    diagnostic_data = copy.deepcopy(data)
+    diagnostic_data["qa_answers"] = [
+        *(diagnostic_data.get("qa_answers") or []),
+        {
+            "assessment_id": assessment_id,
+            "question_id": str(question_row.get("id") or "") if isinstance(question_row, dict) else "",
+            "answer": answer_text,
+            "source_message_id": "runtime-diagnostic",
+        },
+    ]
+    canonical_after = build_canonical_profile(diagnostic_data, assessment_id=assessment_id)
+    _runtime_debug_log(
+        "assessment_answer_routed",
+        assessment_id=assessment_id,
+        question_id=str(question_row.get("id") or "") if isinstance(question_row, dict) else "",
+        target_fact_type=gap_key,
+        target_schema_path=f"evidence_profile.{gap_key}" if gap_key else "qa_answers",
+        raw_answer=answer_text,
+        extracted_facts=profile.model_dump(mode="json"),
+        canonical_profile_before=canonical_before.model_dump(mode="json"),
+        canonical_profile_after=canonical_after.model_dump(mode="json"),
+        generator_version=CAREER_PIPELINE_VERSION,
+        renderer_version=CAREER_TELEGRAM_RENDERER_VERSION,
+        fallback_reason=None,
+        validation_errors=[],
+    )
     from services.interview_policy import is_ready_for_conclusion
     mode = str(data.get("user_mode") or "calm_steps")
     ready = profile_ready_for_safe_conclusion(profile) and is_ready_for_conclusion(profile, user_mode=mode)
@@ -7104,8 +7176,10 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
 
 
 async def _build_and_send_career_assessment(message: Message, state: FSMContext, lang: str, data: dict) -> None:
+    build_meta = _runtime_build_metadata()
     runtime_meta = {
-        "commit_sha": str(os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown"),
+        **build_meta,
+        "commit_sha": build_meta["build_commit"],
         "pipeline_version": CAREER_PIPELINE_VERSION,
         "telegram_renderer_version": CAREER_TELEGRAM_RENDERER_VERSION,
         "html_renderer_version": CAREER_HTML_RENDERER_VERSION,
@@ -7119,6 +7193,9 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         try:
             stored_assessment = career_assessment_from_dict(stored_payload)
             validate_career_assessment(stored_assessment).require_valid()
+            stored_generator = str(stored_assessment.metadata.get("generator_version") or "")
+            if stored_generator != CAREER_PIPELINE_VERSION:
+                raise ValueError("cached assessment was generated by an obsolete pipeline")
         except (TypeError, ValueError):
             stored_assessment = None
         if stored_assessment is not None:
@@ -7170,6 +7247,21 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     data = {**data, "assessment_id": assessment_id}
     snapshot = _build_profile_snapshot(data)
+    _runtime_debug_log(
+        "career_generation_started",
+        assessment_id=assessment_id,
+        question_id=None,
+        target_fact_type=None,
+        target_schema_path="profile_snapshot.canonical_profile",
+        raw_answer=None,
+        extracted_facts=(snapshot.get("canonical_profile") or {}).get("facts", []),
+        canonical_profile_before=data.get("canonical_profile") or {},
+        canonical_profile_after=snapshot.get("canonical_profile") or {},
+        generator_version=CAREER_PIPELINE_VERSION,
+        renderer_version=CAREER_TELEGRAM_RENDERER_VERSION,
+        fallback_reason=None,
+        validation_errors=[],
+    )
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
         snapshot["missing_fields"] = missing_fields
@@ -7242,9 +7334,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         # "Собираю вашу карту".  A deterministic assessment is a complete,
         # renderable result, so continue through the normal HTML delivery path.
         generation_error = type(exc).__name__
-        assessment = build_preliminary_assessment(
+        assessment = build_deterministic_assessment(
             snapshot,
             data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7271,8 +7364,9 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         # build_career_assessment already performs its model repair pass.  A
         # remaining contradiction is therefore reduced to a source-only map;
         # never reuse a stored or previous conclusion here.
-        assessment = build_preliminary_assessment(
+        assessment = build_deterministic_assessment(
             snapshot,
+            {},
             {},
             assessment_id=assessment_id,
             session_id=session_id,
@@ -7294,9 +7388,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         snapshot_currency=str(snapshot.get("currency") or "") or None,
     )
     if not validation.valid:
-        assessment = build_preliminary_assessment(
+        assessment = build_deterministic_assessment(
             snapshot,
             data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
+            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7308,12 +7403,30 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         )
     diagnostics = dict(assessment.metadata)
     diagnostics.update(runtime_meta)
+    assessment.metadata.update(runtime_meta)
+    assessment.metadata["generator_version"] = CAREER_PIPELINE_VERSION
+    assessment.metadata["renderer_version"] = CAREER_TELEGRAM_RENDERER_VERSION
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
     generation_status = {
         "repair": "ASSESSMENT_REPAIRED",
         "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
     }.get(recovered_by, "ASSESSMENT_READY")
     assessment_payload = assessment.to_dict()
+    _runtime_debug_log(
+        "career_generation_finished",
+        assessment_id=assessment_id,
+        question_id=None,
+        target_fact_type=None,
+        target_schema_path="career_assessment",
+        raw_answer=None,
+        extracted_facts=(snapshot.get("canonical_profile") or {}).get("facts", []),
+        canonical_profile_before=snapshot.get("canonical_profile") or {},
+        canonical_profile_after=snapshot.get("canonical_profile") or {},
+        generator_version=CAREER_PIPELINE_VERSION,
+        renderer_version=CAREER_TELEGRAM_RENDERER_VERSION,
+        fallback_reason=assessment.metadata.get("fallback_reason") or generation_error or None,
+        validation_errors=validation.to_dict().get("errors", []),
+    )
     await state.update_data(
         career_assessment=assessment_payload,
         final_report=assessment_payload,
@@ -7792,6 +7905,7 @@ async def handle_story_confirmation_text(message: Message, state: FSMContext) ->
     await message.answer(t(lang, "story_confirmation_prompt"), reply_markup=story_confirmation_keyboard())
 
 
+@_serialize_interview_update
 async def process_answers_input(message: Message, state: FSMContext, text: str) -> None:
     clean = (text or "").strip()
     data = await state.get_data()
@@ -8093,6 +8207,48 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
 
         # Reject stale button answers from previous questions and require explicit confirmation.
         if clean.lower() not in current_options_low and _is_known_previous_button(questions, qa_index, clean):
+            completed_multi = data.get("recent_completed_multi") if isinstance(data.get("recent_completed_multi"), dict) else {}
+            completed_options = {
+                str(item).strip().lower()
+                for item in completed_multi.get("options", [])
+                if str(item).strip()
+            }
+            completed_index = int(completed_multi.get("question_index", -2))
+            # Telegram may deliver two rapid reply-keyboard taps out of order:
+            # the user taps an option and then immediately taps Done, while the
+            # Done update reaches us first.  This is not a semantic conflict.
+            # Merge the late option into the just-completed multi-select answer
+            # and keep the already displayed current question active.
+            if completed_index == qa_index - 1 and clean.lower() in completed_options:
+                selected_values = [str(item) for item in completed_multi.get("selected_values", []) if str(item).strip()]
+                max_select = int(completed_multi.get("max_select") or 5)
+                if clean not in selected_values and len(selected_values) < max_select:
+                    selected_values.append(clean)
+                    answer_index = int(completed_multi.get("answer_index", -1))
+                    if 0 <= answer_index < len(qa_answers) and isinstance(qa_answers[answer_index], dict):
+                        qa_answers[answer_index]["answer"] = ", ".join(selected_values)
+                    multi_key = str(completed_multi.get("multi_key") or "")
+                    update_payload: dict[str, object] = {
+                        "qa_answers": qa_answers,
+                        "recent_completed_multi": {**completed_multi, "selected_values": selected_values},
+                    }
+                    projection_keys = {
+                        "psych": ("selected_psych_markers", "selected_barriers", "selected_fears"),
+                        "psych_state": ("selected_psych_state",),
+                        "coping": ("selected_coping",),
+                        "social": ("selected_social_state",),
+                        "integration": ("selected_integration_state",),
+                        "energy": ("selected_energy_sources",),
+                        "priorities": ("selected_career_priorities",),
+                    }
+                    for projection_key in projection_keys.get(multi_key, ()):
+                        update_payload[projection_key] = selected_values[:max_select]
+                    await state.update_data(**update_payload)
+                await message.answer(
+                    t(lang, "late_multi_choice_saved", choice=clean),
+                    reply_markup=_question_reply_markup(analysis, qa_index),
+                )
+                return
             semantic_intent = str(current.get("semantic_intent") or "ответ по текущему вопросу") if isinstance(current, dict) else "ответ по текущему вопросу"
             inferred_meaning = f"{semantic_intent}: {clean}"
             await _track_event(
@@ -8204,6 +8360,14 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     "pending_answer_review": {},
                     selected_key: [],
                     "evidence_profile": evidence_payload,
+                    "recent_completed_multi": {
+                        "question_index": qa_index - 1,
+                        "answer_index": len(qa_answers) - 1,
+                        "multi_key": multi_key,
+                        "options": [item for item in options if item != done_text],
+                        "selected_values": selected_values[:max_select],
+                        "max_select": max_select,
+                    },
                 }
                 if multi_key == "psych":
                     update_payload["selected_psych_markers"] = selected_values[:5]
@@ -8847,6 +9011,7 @@ async def handle_story_text(message: Message, state: FSMContext) -> None:
 
 
 @router.message(CareerFlow.waiting_for_answers, F.text.in_(ALL_ANSWER_REVIEW_ACTIONS))
+@_serialize_interview_update
 async def handle_answer_review_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)

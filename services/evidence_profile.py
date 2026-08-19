@@ -121,6 +121,7 @@ class CareerEvidenceProfile(BaseModel):
     market_entry_level: EvidenceItem | None = None
 
     residence_country: EvidenceItem | None = None
+    residence_city: EvidenceItem | None = None
     target_countries: list[EvidenceItem] = Field(default_factory=list)
     work_authorization: EvidenceItem | None = None
     work_languages: list[EvidenceItem] = Field(default_factory=list)
@@ -469,10 +470,37 @@ def apply_answer_to_profile(profile: CareerEvidenceProfile, gap_key: str, answer
         confidence="probable",
     )
     if gap_key == "residence_country":
-        profile.residence_country = evidence
+        low = text.casefold().replace("ё", "е")
+        locations = (
+            (("берлин", "berlin"), "Berlin", "Germany"),
+            (("праг", "prague", "praha"), "Prague", "Czechia"),
+            (("краков", "krakow", "kraków"), "Krakow", "Poland"),
+        )
+        country_aliases = (
+            (("германи", "germany", "deutschland"), "Germany"),
+            (("чехи", "czechia", "czech republic"), "Czechia"),
+            (("польш", "poland", "polska"), "Poland"),
+        )
+        city_country = next(((city, country) for aliases, city, country in locations if any(alias in low for alias in aliases)), None)
+        country = city_country[1] if city_country else next((name for aliases, name in country_aliases if any(alias in low for alias in aliases)), "")
+        profile.residence_country = EvidenceItem(
+            statement=country or text, source="user_clarification",
+            confidence="confirmed" if country else "probable",
+        )
+        if city_country:
+            profile.residence_city = EvidenceItem(statement=city_country[0], source="user_clarification", confidence="confirmed")
     elif gap_key == "target_country":
-        profile.target_countries.append(evidence)
-        profile.target_market_format = evidence
+        low = text.casefold().replace("ё", "е")
+        both = any(marker in low for marker in ("и так и так", "оба вариант", "both", "локальн", "международн"))
+        residence = profile.residence_country.statement if profile.residence_country else ""
+        if residence and (both or any(marker in low for marker in ("стране проживания", "локальн"))):
+            if residence not in {item.statement for item in profile.target_countries}:
+                profile.target_countries.append(EvidenceItem(statement=residence, source="user_clarification", confidence="confirmed"))
+        if both or any(marker in low for marker in ("международн", "remote", "удален")):
+            profile.target_market_format = EvidenceItem(statement="international_remote", source="user_clarification", confidence="confirmed")
+        elif not profile.target_countries:
+            profile.target_countries.append(evidence)
+            profile.target_market_format = evidence
     elif gap_key == "work_authorization":
         profile.work_authorization = evidence
     elif gap_key == "work_languages":

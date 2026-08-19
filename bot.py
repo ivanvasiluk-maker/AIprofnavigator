@@ -126,6 +126,9 @@ async def main() -> None:
             {
                 "event": "career_pipeline_started",
                 "commit_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown",
+                "build_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown",
+                "build_time": os.getenv("BUILD_TIME") or "see .build_time",
+                "environment": settings.environment,
                 "pipeline_version": CAREER_PIPELINE_VERSION,
                 "telegram_renderer_version": CAREER_TELEGRAM_RENDERER_VERSION,
                 "html_renderer_version": CAREER_HTML_RENDERER_VERSION,

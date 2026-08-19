@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+ARG GIT_COMMIT_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV GIT_COMMIT_SHA=${GIT_COMMIT_SHA} \
+    BUILD_TIME=${BUILD_TIME}
+
 # Install dependencies for Playwright and PDF rendering
 RUN apt-get update && apt-get install -y \
     libnss3 \
@@ -30,6 +35,7 @@ RUN python -m playwright install chromium
 
 # Copy application
 COPY . .
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > .build_time
 
 # Create reports directory
 RUN mkdir -p reports

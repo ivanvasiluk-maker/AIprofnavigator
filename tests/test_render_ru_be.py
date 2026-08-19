@@ -2063,6 +2063,52 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         sent_text = str(message.answer.await_args.args[0])
         self.assertIn("Второй вопрос", sent_text)
 
+    async def test_late_multi_select_tap_is_merged_without_context_review(self) -> None:
+        questions = [
+            {
+                "id": 1,
+                "question": "Что уже есть в новой стране?",
+                "options": ["Есть друзья", "Есть профессиональные контакты", "✅ Готово"],
+                "multi_key": "integration",
+                "done_text": "✅ Готово",
+                "max_select": 5,
+            },
+            {"id": 2, "question": "Что сейчас мешает?", "options": ["Страх", "Нет ясности"]},
+        ]
+        state = FakeState(data={
+            "language": "ru",
+            "story_analysis": {"follow_up_questions": questions},
+            "qa_index": 1,
+            "qa_answers": [{"question": questions[0]["question"], "answer": "Есть друзья"}],
+            "recent_completed_multi": {
+                "question_index": 0,
+                "answer_index": 0,
+                "multi_key": "integration",
+                "options": ["Есть друзья", "Есть профессиональные контакты"],
+                "selected_values": ["Есть друзья"],
+                "max_select": 5,
+            },
+            "user_mode": "calm_steps",
+            "interaction_profile": {},
+            "interaction_turn": 0,
+        }, current_state=CareerFlow.waiting_for_answers.state)
+        message = FakeMessage()
+
+        with patch("handlers.career._track_event", new=AsyncMock()):
+            await process_answers_input(message, state, "Есть профессиональные контакты")
+
+        self.assertEqual(state.data["qa_index"], 1)
+        self.assertEqual(
+            state.data["qa_answers"][0]["answer"],
+            "Есть друзья, Есть профессиональные контакты",
+        )
+        self.assertEqual(
+            state.data["selected_integration_state"],
+            ["Есть друзья", "Есть профессиональные контакты"],
+        )
+        self.assertFalse(state.data.get("pending_answer_review"))
+        self.assertIn("Текущий вопрос остаётся активным", str(message.answer.await_args.args[0]))
+
     async def test_duplicate_context_confirmation_restores_active_question(self) -> None:
         state = FakeState(data={
             "language": "ru",
