@@ -29,15 +29,28 @@ _NON_ROLE_TITLE_PATTERNS = (
     r"(?:пять|шесть|семь|восемь|девять|десять)\s*[-–—]\s*(?:пять|шесть|семь|восемь|девять|десять)\s*(?:выезд|звонк|заказ|смен)",
     r"болит|боль|вечерн(?:ие|их) звонк|тяжел(?:ая|ой) физическ",
     r"не хочет|не хочу|нежелательн|ограничени",
+    r"эмигрант|эмиграци|мигрант|бежен|переехал|переехала|живет в (?:польш|германи|европ)",
+    r"(?:ищ(?:ет|ущий|ущая)|найти) (?:новое )?направлен|хоч(?:ет|ущий|ущая) сменить професси",
+    r"не знает,? (?:какое|куда|что)|карьерн(?:ая|ую) цель|поиск направления",
 )
 
 
-def is_market_role_title(title: str) -> bool:
-    """Reject conditions, symptoms and refusals masquerading as occupations."""
+def is_valid_occupation_title(title: str) -> bool:
+    """Return whether ``title`` denotes a paid role rather than life context/goal."""
     value = str(title or "").strip().casefold().replace("ё", "е")
     if not value or len(value.split()) > 12:
         return False
-    return not any(re.search(pattern, value, re.I) for pattern in _NON_ROLE_TITLE_PATTERNS)
+    if any(re.search(pattern, value, re.I) for pattern in _NON_ROLE_TITLE_PATTERNS):
+        return False
+    # A sentence/answer is not a vacancy title even when it escaped the phrase
+    # rules above. Market titles are concise noun phrases, not narrated facts.
+    if value.endswith((".", "!", "?")) or "," in value:
+        return False
+    return True
+
+
+# Backwards-compatible public name used by existing integrity checks.
+is_market_role_title = is_valid_occupation_title
 
 CAREER_PIPELINE_VERSION = "career-assessment-v2"
 CAREER_TELEGRAM_RENDERER_VERSION = "career-assessment-telegram-v1"
@@ -880,8 +893,11 @@ def build_preliminary_assessment(
     current_identity = str(story_analysis.get("current_identity") or "").strip()
     core = [
         title for title in (hypotheses or ([current_identity] if current_identity else []))
-        if title and not title.casefold().startswith("пользователь") and len(title.split()) <= 8
-    ] or _texts(profile_snapshot.get("professional_functions"))[:3] or _texts(profile_snapshot.get("current_role"))[:1]
+        if title and not title.casefold().startswith("пользователь") and is_valid_occupation_title(title)
+    ] or _texts(profile_snapshot.get("professional_functions"))[:3] or [
+        title for title in _texts(profile_snapshot.get("current_role"))
+        if is_valid_occupation_title(title)
+    ][:1]
     if not core:
         return build_deterministic_assessment(
             profile_snapshot, story_analysis, {}, assessment_id=assessment_id,
@@ -1122,19 +1138,19 @@ def build_deterministic_assessment(
 
     # Current roles and target roles are deliberately separate. Target roles
     # must never be used as evidence of current identity or seniority.
-    current_roles = concise(
+    current_roles = [role for role in concise(
         values(profile_snapshot, "current_role", "profession")
         + values(story_analysis, "current_role", "current_identity", "profession")
         + values(resume_analysis, "current_role")
-    )
+    ) if is_valid_occupation_title(role)]
     if not current_roles:
-        current_roles = concise(values(story_analysis, "professional_core_hypotheses"))[:1]
+        current_roles = [role for role in concise(values(story_analysis, "professional_core_hypotheses")) if is_valid_occupation_title(role)][:1]
     historical_roles = concise(values(resume_analysis, "job_titles", "positions", "roles"))
-    target_roles = concise(
+    target_roles = [role for role in concise(
         values(profile_snapshot, "target_roles")
         + values(story_analysis, "career_hypotheses", "target_roles", "role_hypotheses")
         + values(resume_analysis, "target_roles")
-    )
+    ) if is_valid_occupation_title(role)]
     target_roles = [role for role in target_roles if role not in current_roles]
 
     confirmed_functions = concise(
@@ -1150,7 +1166,8 @@ def build_deterministic_assessment(
     interests = concise(values(story_analysis, "interests", "preferred_directions"))
     unwanted = concise(
         values(story_analysis, "tasks_to_avoid", "functions_to_avoid")
-        + values(profile_snapshot, "undesired_tasks")
+        + values(story_analysis, "explicit_refusals")
+        + values(profile_snapshot, "undesired_tasks", "explicit_refusals")
     )
     functions = list(dict.fromkeys(confirmed_functions + transferable_skills))
     current_role = current_roles[0] if current_roles else ""
@@ -1178,6 +1195,17 @@ def build_deterministic_assessment(
     cluster_generation_requested = bool(target_roles or interests) or any(
         marker in change_text for marker in ("больше аналит", "данн", "уйти от", "меньше физ", "меньше руч")
     )
+    operations_context = (
+        sum(any(marker in function.casefold() for marker in ("организ", "распредел", "контрол", "процесс", "отдел", "команд")) for function in functions) >= 2
+        and any(marker in identity_blob for marker in ("руковод", "начальник", "команд", "отдел"))
+    )
+    if operations_context:
+        cluster_routes.extend([
+            "Operations Manager",
+            "Business Operations Manager",
+            "Process Improvement Specialist",
+            "Team Operations Lead",
+        ])
     if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("контрол", "quality", "дефект", "root cause", "rca")):
         cluster_routes.extend(["Quality Engineer / Supplier Quality", "Quality Assurance Specialist"])
     if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("производ", "process", "процесс", "смен", "координ")):
@@ -1335,6 +1363,12 @@ def build_deterministic_assessment(
             selected_markers = ("обуч", "материал", "объяс", "клиент", "коммуникац", "писат")
         elif "product operations" in low:
             selected_markers = ("процесс", "координ", "межфунк", "баг", "данн", "продукт")
+        elif "process improvement" in low:
+            selected_markers = ("процесс", "контрол", "обязанност")
+        elif "team operations" in low:
+            selected_markers = ("организ", "распредел", "контрол", "команд")
+        elif any(token in low for token in ("operations manager", "business operations")):
+            selected_markers = ("организ", "распредел", "контрол", "процесс", "отдел", "команд", "обязанност")
         elif any(token in low for token in ("product manager", "продуктов")):
             selected_markers = ("продукт", "приорит", "исслед", "клиент", "межфунк", "данн")
         relevant = [function for function in functions if any(marker in function.casefold() for marker in selected_markers)]
@@ -1349,7 +1383,7 @@ def build_deterministic_assessment(
         experimental: bool = False,
     ) -> None:
         clean_title = title.strip()
-        if clean_title:
+        if is_valid_occupation_title(clean_title):
             candidates.append({
                 "title": clean_title,
                 "kind": kind,
@@ -1358,12 +1392,21 @@ def build_deterministic_assessment(
                 "experimental": experimental,
             })
 
-    if current_role and functions:
+    rejection_blob = " ".join(unwanted + [desired_change or ""]).casefold()
+
+    def conflicts_with_explicit_rejection(title: str) -> bool:
+        low = title.casefold()
+        rejects_bank = any(marker in rejection_blob for marker in ("не хочу работать в банк", "не хочет работать в банк", "отказ от банк", "не банковск"))
+        return rejects_bank and any(marker in low for marker in ("банк", "bank director", "bank manager", "кредитн"))
+
+    if current_role and functions and not conflicts_with_explicit_rejection(current_role):
         add_candidate(current_role, "continuation", functions[:3], [current_role, *functions[:3]])
     # A function is evidence for a route, never a market title by itself. Concrete
     # alternatives must come from target-role research rather than the former
     # ``current profession + specialization + first function`` template.
     for role in target_roles:
+        if conflicts_with_explicit_rejection(role):
+            continue
         route_functions = relevant_functions_for_role(role)
         role_low = role.casefold()
         cross_domain_industrial = dental_context and any(marker in role_low for marker in ("industrial", "supplier quality", "manufacturing", "промышлен"))
@@ -1768,7 +1811,7 @@ def build_deterministic_assessment(
             market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
         ),
         identity=ProfessionalIdentity(
-            professional_core=confirmed_functions[:3] or current_roles[:2] or ["Подтверждённые функции отсутствуют"],
+            professional_core=confirmed_functions[:4] or current_roles[:2] or ["Подтверждённые функции отсутствуют"],
             core_description="Ядро определено через подтверждённые функции; название роли используется только как дополнительный контекст.",
             secondary_functions=functions[3:7],
             seniority_current=(
@@ -2200,6 +2243,9 @@ def render_telegram_map(assessment: CareerAssessment) -> str:
     ]
     if assessment.identity.seniority_transition:
         lines.append(f"Переходный уровень: {assessment.identity.seniority_transition}")
+    a2_languages = [item.language for item in assessment.context.current_languages if "a2" in f"{item.language} {item.level or ''}".casefold()]
+    if a2_languages:
+        lines.append(f"Языковое ограничение: {', '.join(a2_languages)} сужает роли с постоянным управлением людьми; операционные роли можно проверять сейчас.")
     lines.extend(["", f"Основной маршрут: {recommended.title if recommended else ''}"])
     if alternative:
         lines.append(f"Альтернатива: {alternative.title}")
@@ -2275,7 +2321,13 @@ def _routes_html(title: str, routes: list[CareerRoute], evidence: dict[str, str]
 
 def render_assessment_html(assessment: CareerAssessment) -> str:
     ensure_strategy_sections(assessment)
-    evidence = {item.evidence_id: item.fact for item in assessment.evidence}
+    # Evidence remains available to gates and audit, but questionnaire dumps and
+    # the free-form intake story are not user-facing report paragraphs.
+    evidence = {
+        item.evidence_id: item.fact
+        for item in assessment.evidence
+        if not item.source_reference.endswith((":story_text", ":answers_text"))
+    }
     recommended = assessment.routes.by_id(assessment.routes.recommended_route_id)
     alternatives = [
         route.title
