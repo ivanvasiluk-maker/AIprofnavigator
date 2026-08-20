@@ -123,22 +123,41 @@ def contamination_errors(
     ]
     if len(current_facts) != len(facts or []):
         errors.append("FOREIGN_CANONICAL_FACT")
-    source_blob = " ".join(
-        text
+    source_blob = " ".join(dict.fromkeys(
+        text.casefold()
         for fact in current_facts
         for text in _strings([fact.get("normalized_value"), fact.get("source_quote")])
-    ).casefold()
+    ))
     evidence = report.get("evidence") or []
     evidence_ids = {str(item.get("evidence_id") or "") for item in evidence if isinstance(item, dict)}
-    for route in _route_dicts(report):
+    routes = _route_dicts(report)
+    for route in routes:
         route_evidence = {str(item) for item in route.get("evidence_ids") or []}
         if len(route_evidence) < 2 or not route_evidence.issubset(evidence_ids):
             errors.append(f"UNSCOPED_ROUTE_EVIDENCE:{route.get('route_id') or '?'}")
+        if (route.get("is_primary") or route.get("rank") == 1) and int(route.get("function_match_count") or 0) < 2 and not route.get("domain_match"):
+            errors.append(f"SINGLE_FUNCTION_PRIMARY_ROUTE:{route.get('route_id') or '?'}")
+
+    # Psychological claims and scenarios are allowed only when grounded in the
+    # current assessment. This also prevents a generic fallback leaking in.
+    report_text = " ".join(_strings(report)).casefold()
+    for claim in ("хаос в голове", "откладываю", "потерял уверенность", "потеряла уверенность", "начинаю и бросаю"):
+        if claim in report_text and claim not in source_blob:
+            errors.append("UNSUPPORTED_PSYCHOLOGICAL_CLAIM")
+            break
+    reagent_allergy = any(token in source_blob for token in ("аллерги", "реактив"))
+    if reagent_allergy:
+        for scenario in report.get("scenarios") or []:
+            if not isinstance(scenario, dict):
+                continue
+            scenario_text = " ".join(_strings(scenario)).casefold()
+            if scenario.get("kind") in {"safe", "ambitious"} and any(token in scenario_text for token in ("реактив", "лаборатор")) and "предупреж" not in scenario_text:
+                errors.append(f"CONSTRAINT_VIOLATING_SCENARIO:{scenario.get('kind')}")
 
     dental = any(token in source_blob for token in ("зуб", "dental", "стомат", "корон", "протез", "керамик"))
     industrial_source = any(token in source_blob for token in ("промышлен", "manufactur", "supplier", "поставщик", "производственн", "цех", "erp"))
     if dental and not industrial_source:
-        for route in _route_dicts(report):
+        for route in routes:
             title = str(route.get("title") or "").casefold()
             if any(token in title for token in ("industrial", "supplier quality", "manufacturing", "промышлен")):
                 errors.append(f"UNSUPPORTED_CROSS_DOMAIN_ROUTE:{route.get('route_id') or '?'}")

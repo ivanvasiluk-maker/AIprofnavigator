@@ -45,7 +45,13 @@ def _resolve_unicode_font_path() -> Path | None:
 
 
 def _safe_text(value: object, default: str = "-") -> str:
+    if value is True:
+        return "есть"
+    if value is False:
+        return "нет"
     text = str(value or "").strip()
+    if text.casefold() in {"unknown", "none", "null", "undefined"}:
+        return "не указано"
     return text if text else default
 
 
