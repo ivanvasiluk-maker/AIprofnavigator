@@ -19,6 +19,7 @@ FactType = Literal[
 ]
 
 CITY_COUNTRIES = {
+    "tbilisi": ("Georgia", "GE"), "тбилиси": ("Georgia", "GE"),
     "kaunas": ("Lithuania", "LT"), "каунас": ("Lithuania", "LT"), "каунасе": ("Lithuania", "LT"),
     "berlin": ("Germany", "DE"), "берлин": ("Germany", "DE"), "берлине": ("Germany", "DE"),
     "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
@@ -35,8 +36,12 @@ CITY_COUNTRIES = {
 }
 
 COUNTRY_CURRENCIES = {
+    "Georgia": "GEL",
     "Lithuania": "EUR", "Poland": "PLN", "Germany": "EUR", "Czechia": "CZK",
     "Spain": "EUR", "Portugal": "EUR",
+}
+COUNTRY_CODE_CURRENCIES = {
+    "GE": "GEL", "LT": "EUR", "DE": "EUR", "PT": "EUR", "ES": "EUR", "PL": "PLN",
 }
 
 
@@ -73,6 +78,7 @@ class IncomeConflict(BaseModel):
     status: Literal["unresolved", "resolved"] = "unresolved"
 
 COUNTRY_ALIASES = {
+    "georgia": "Georgia", "грузия": "Georgia", "грузии": "Georgia", "грузию": "Georgia",
     "poland": "Poland", "polska": "Poland", "польша": "Poland",
     "польше": "Poland", "польшу": "Poland", "польши": "Poland",
     "spain": "Spain", "испания": "Spain", "испании": "Spain",
@@ -83,6 +89,7 @@ COUNTRY_ALIASES = {
 }
 
 LANGUAGE_ALIASES = {
+    "грузинск": "Georgian", "georgian": "Georgian",
     "польск": "Polish", "polish": "Polish", "polski": "Polish",
     "английск": "English", "english": "English",
     "испанск": "Spanish", "spanish": "Spanish",
@@ -91,11 +98,22 @@ LANGUAGE_ALIASES = {
     "чешск": "Czech", "czech": "Czech",
 }
 
+CONSTRAINT_PATTERNS = {
+    "reagent_allergy": re.compile(r"аллерги\w*[^.]{0,30}реактив|реактив\w*[^.]{0,30}аллерги"),
+    "no_night_shifts": re.compile(r"без\s+ночн|ночн\w*\s+смен\w*\s+не|no night"),
+    "reduced_physical_load": re.compile(r"сниженн\w*\s+физическ\w*\s+нагруз"),
+    "no_resignation_before_offer": re.compile(r"не\s+могу\s+увольн\w*[^.]{0,30}оффер|до\s+оффер\w*\s+не\s+увольн"),
+    "no_relocation": re.compile(r"релокаци\w*\s+невозмож|не\s+(?:хочу|готов|могу)\s+переезж"),
+}
+
 
 class NormalizedUserProfile(BaseModel):
     country: str | None = None
+    country_code: str | None = None
     city: str | None = None
+    local_currency: str | None = None
     target_market: str | None = None
+    target_market_formats: list[str] = Field(default_factory=list)
     target_market_primary: str | None = None
     target_market_secondary: str | None = None
     relocation_allowed: bool | None = None
@@ -330,7 +348,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 if re.search(rf"\b{re.escape(alias)}\b", low):
                     profile.facts.append(_fact(assessment_id, "market_context", {"country": country}, message_id, alias, .94, created_at or None))
                     break
-        for match in re.finditer(r"(?:(€|eur|pln|zł|czk|kč)\s*)?(\d[\d\s]*(?:[–-]\s*\d[\d\s]*)?)\s*(€|eur|pln|zł|czk|kč)?\s*(net|gross)?", text, re.I):
+        for match in re.finditer(r"(?:(€|eur|gel|pln|zł|czk|kč)\s*)?(\d[\d\s]*(?:[–-]\s*\d[\d\s]*)?)\s*(€|eur|gel|pln|zł|czk|kč)?\s*(net|gross)?", text, re.I):
             currency_token = (match.group(1) or match.group(3) or "").casefold()
             if not currency_token:
                 continue
@@ -339,7 +357,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             minimum_at = max((m.start() for m in re.finditer(r"миним|minimum", classifier, re.I)), default=-1)
             target_at = max((m.start() for m in re.finditer(r"цел|жела|target", classifier, re.I)), default=-1)
             kind = "target" if target_at > minimum_at else "minimum" if minimum_at >= 0 else "current"
-            currency = "EUR" if currency_token in {"€", "eur"} else "CZK" if currency_token in {"czk", "kč"} else "PLN"
+            currency = "EUR" if currency_token in {"€", "eur"} else "GEL" if currency_token == "gel" else "CZK" if currency_token in {"czk", "kč"} else "PLN"
             # A learning budget is a separate monetary entity and must never
             # overwrite the salary currency.
             # A later sentence about training must not reclassify the preceding
@@ -357,8 +375,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             profile.facts.append(_fact(assessment_id, "work_authorization", authorized, message_id, text, .9, created_at or None))
         for match in re.finditer(
             r"(украинск\w*|українськ\w*|русск\w*|испанск\w*|іспанськ\w*|"
-            r"португальск\w*|чешск\w*|английск\w*|украинский|ukrainian|russian|spanish|"
-            r"portuguese|czech|english)\s*[—:=-]?\s*(свободн\w*|родн\w*|[abc][12]|native|fluent)",
+            r"португальск\w*|чешск\w*|грузинск\w*|английск\w*|украинский|ukrainian|russian|spanish|"
+            r"portuguese|czech|georgian|english)\s*[—:=-]?\s*(свободн\w*|родн\w*|[abc][12]|native|fluent)",
             low,
             re.I,
         ):
@@ -369,6 +387,14 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
             match = re.search(rf"(?:{re.escape(marker)}\w*)\s*[—:=-]?\s*([abc][12]|native|fluent)", low, re.I)
             if match:
                 profile.facts.append(_fact(assessment_id, "language", {"language": language, "level": match.group(1).upper()}, message_id, match.group(0), .97, created_at or None))
+        for code, pattern in CONSTRAINT_PATTERNS.items():
+            if match := pattern.search(low):
+                # Store only the supporting phrase: repeating a long story for
+                # every constraint needlessly inflates persisted/LLM context.
+                profile.facts.append(_fact(
+                    assessment_id, "constraint", code, message_id,
+                    text[match.start():match.end()], .98, created_at or None,
+                ))
 
     def add_structured(fact_type: FactType, value: Any, quote: str) -> None:
         meaningful = value not in (None, "", [], {})
@@ -387,7 +413,13 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     }, f"{structured['target_market_primary'] or ''}, {structured['target_market_secondary'] or ''}".strip(", "))
     add_structured("work_authorization", structured["work_authorization"], str(structured["work_authorization"] or ""))
     for kind in ("current_income", "minimum_income", "target_income"):
-        add_structured("income_requirement", {"kind": kind.removesuffix("_income"), "display": structured[kind]}, str(structured[kind] or ""))
+        display = str(structured[kind] or "")
+        money = re.search(r"(\d[\d\s]*(?:[–-]\s*\d[\d\s]*)?).*?\b(EUR|GEL|PLN|CZK)\b(?:.*?\b(net|gross)\b)?", display, re.I)
+        value = {"kind": kind.removesuffix("_income"), "display": structured[kind]}
+        if money:
+            value.update(amount=money.group(1).replace(" ", ""), currency=money.group(2).upper(),
+                         tax_basis=(money.group(3) or "unknown").lower(), period="month")
+        add_structured("income_requirement", value, display)
     add_structured("income_requirement", {"kind": "urgency", "display": structured["income_urgency"]}, str(structured["income_urgency"] or ""))
     language_values = structured["language"] if isinstance(structured["language"], list) else [structured["language"]]
     for language_value in language_values:
@@ -554,7 +586,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         "international_remote" if re.search(r"международн\w*\s+(?:удален|remote)|international\s+remote", low_all) else None
     )
     relocation_allowed = None
-    if re.search(r"(?:не\s+(?:хочу|готов|могу)\s+переезж|переезж\w*\s+не\s+(?:хочу|готов|могу)|переезд\w*\s+не)", low_all):
+    if re.search(r"(?:не\s+(?:хочу|готов|могу)\s+переезж|переезж\w*\s+не\s+(?:хочу|готов|могу)|переезд\w*\s+не|релокаци\w*\s+невозмож)", low_all):
         relocation_allowed = False
     elif re.search(r"(?:готов\w*\s+к\s+переезд|могу\s+переех|relocat)", low_all):
         relocation_allowed = True
@@ -603,7 +635,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         )
 
     current_money, minimum_money, target_money = (structured_money(kind) for kind in ("current", "minimum", "target"))
-    residence_currency = COUNTRY_CURRENCIES.get(country or "")
+    country_code = str(market.get("country_code") or "").upper()
+    residence_currency = COUNTRY_CODE_CURRENCIES.get(country_code) or COUNTRY_CURRENCIES.get(country or "")
     explicit_currency = next((money.currency for money in (minimum_money, current_money, target_money) if money), None)
     target_countries = list(dict.fromkeys(
         [str(item.get("statement") or "").strip() for item in target_evidence if isinstance(item, dict)]
@@ -621,7 +654,12 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         confidence=.99 if explicit_currency else .85 if display_currency else 0,
     )
     profile.normalized_profile = NormalizedUserProfile(
-        country=country, city=city, target_market=target_market,
+        country=country, country_code=country_code or None, city=city, local_currency=residence_currency,
+        target_market=target_market,
+        target_market_formats=[item for item, matched in (
+            ("local", bool(re.search(r"локальн|local", low_all))),
+            ("remote", bool(re.search(r"удален|remote", low_all))),
+        ) if matched],
         target_market_primary=target_primary, target_market_secondary=target_secondary,
         relocation_allowed=relocation_allowed,
         remote_allowed=True if re.search(r"удален|remote", low_all) else None,
@@ -636,8 +674,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         minimum_income=income_number("minimum"), target_income=target_raw,
         target_income_min=float(target_numbers[0].replace(",", ".")) if target_numbers else None,
         target_income_max=float(target_numbers[-1].replace(",", ".")) if len(target_numbers) > 1 else None,
-        currency=str(latest_income.get("currency") or "").upper() or None,
-        income_currency=str(latest_income.get("currency") or "").upper() or None,
+        currency=str(latest_income.get("currency") or display_currency or "").upper() or None,
+        income_currency=str(latest_income.get("currency") or display_currency or "").upper() or None,
         income_period=str(latest_income.get("period") or "month"),
         gross_net=str(latest_income.get("tax_basis") or "").lower() or None,
         schedule_constraints=strings("constraint"),
