@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from handlers import career
 
@@ -110,6 +111,28 @@ class FinalizationHotfixTest(unittest.TestCase):
         self.assertEqual(decision["city"], "Вильнюс")
         self.assertIn("Product Discovery", [route["title"] for route in decision["alternative_routes"]])
         self.assertEqual(report["career_decision"]["recommended_main_path"], "Product Marketing Manager")
+
+    def test_finalize_sends_fallback_when_report_builder_crashes(self):
+        async def run_test():
+            fake_state = FakeState()
+            fake_message = FakeMessage()
+            career.SESSION_FSM_CACHE[("user-42", "test-session")] = fake_state
+            career.SESSION_MESSAGE_CACHE[("user-42", "test-session")] = fake_message
+
+            with patch.object(
+                career,
+                "_build_and_send_report",
+                new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
+            ):
+                await career.finalize_career_flow("user-42", "test-session", "barriers_completed")
+
+            sent = "\n".join(fake_message.sent)
+            self.assertIn("Предварительное карьерное заключение", sent)
+            self.assertTrue(fake_state.data.get("final_report_generated"))
+            self.assertTrue(fake_state.data.get("report_already_generated"))
+            self.assertFalse(fake_state.data.get("report_generation_in_progress"))
+
+        asyncio.run(run_test())
 
 
 if __name__ == "__main__":

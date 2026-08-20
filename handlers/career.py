@@ -389,7 +389,22 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
         report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
         if not report:
             await _build_and_send_report(message, state, lang) if message else None
-            report = (await state.get_data()).get("final_report") if isinstance((await state.get_data()).get("final_report"), dict) else {}
+            fresh_data = await state.get_data()
+            report = fresh_data.get("final_report") if isinstance(fresh_data.get("final_report"), dict) else {}
+            # The report builder owns delivery of both the Telegram map and the
+            # downloadable document.  Once it has produced a report, do not send
+            # a second legacy summary from this wrapper; only close the
+            # finalization/idempotency flags.  Keeping REPORT_GENERATION_FAILED
+            # allows the user to retry a document whose short map was delivered.
+            if report and bool(fresh_data.get("final_report_generated")):
+                generation_status = str(fresh_data.get("report_generation_status") or "REPORT_READY")
+                await state.update_data(
+                    short_report_sent=True,
+                    report_already_generated=True,
+                    report_generation_in_progress=False,
+                    report_generation_status=generation_status,
+                )
+                return
         if not report:
             payload = _ensure_preliminary_report({}, data)
             decision = payload.get("career_decision") or {}
@@ -8751,8 +8766,15 @@ async def complete_barriers(message: Message, state: FSMContext) -> None:
     selected = list(data.get("selected_psych_markers") or [])
     if not selected:
         selected = ["Не указано"]
-    await state.update_data(selected_psych_markers=selected, selected_fears=selected[:6])
-    await _build_and_send_report(message, state, lang)
+    await state.update_data(
+        selected_psych_markers=selected,
+        selected_fears=selected[:6],
+        required_questions_completed=True,
+    )
+    # All normal interview paths end here.  Go through the finalization wrapper
+    # so an unexpected provider, persistence, or renderer exception still gives
+    # the user a deterministic short conclusion instead of a silent dead end.
+    await finalize_career_flow(public_user_id, session_id, "barriers_completed")
 
 
 @router.message(CareerFlow.ROUTE_CONTEXT, F.text)
