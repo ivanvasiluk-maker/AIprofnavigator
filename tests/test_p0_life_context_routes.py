@@ -40,6 +40,8 @@ def build_maria():
 
 def test_life_context_is_not_occupation():
     assert not is_valid_occupation_title("Эмигрант в Польше, ищущий новое направление карьеры")
+    assert not is_valid_occupation_title("Планирую найти новую карьеру")
+    assert not is_valid_occupation_title("Хочу разобраться, кем работать дальше")
     assessment = build_maria()
     visible_roles = [*assessment.identity.professional_core, *(route.title for route in assessment.routes.all_routes())]
     assert all("эмигрант" not in value.casefold() and "ищущ" not in value.casefold() for value in visible_roles)
@@ -47,7 +49,10 @@ def test_life_context_is_not_occupation():
 
 def test_explicit_rejection_blocks_route():
     assessment = build_maria()
-    assert all("банк" not in route.title.casefold() for route in assessment.routes.primary_routes)
+    assert all(
+        "банк" not in route.title.casefold() and "кредитн" not in route.title.casefold()
+        for route in assessment.routes.all_routes()
+    )
     assert assessment.routes.primary_routes[0].title in {
         "Operations Manager", "Business Operations Manager", "Process Improvement Specialist", "Team Operations Lead"
     }
@@ -65,6 +70,7 @@ def test_report_has_decision_density():
     titles = [route.title for route in assessment.routes.all_routes()]
     report = render_telegram_map(assessment).casefold()
     assert len(titles) >= 2 and all(is_valid_occupation_title(title) for title in titles)
+    assert all(len(set(route.transferable_functions)) >= 2 for route in assessment.routes.all_routes())
     assert report.count(titles[0].casefold()) <= 3
     assert "вопрос 7" not in report
     assert all(claim not in report for claim in ("боюсь выглядеть глупо", "жду идеального плана", "откладываю"))
