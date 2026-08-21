@@ -32,6 +32,7 @@ _NON_ROLE_TITLE_PATTERNS = (
     r"эмигрант|эмиграци|мигрант|бежен|переехал|переехала|живет в (?:польш|германи|европ)",
     r"(?:ищ(?:ет|ущий|ущая)|найти) (?:новое )?направлен|хоч(?:ет|ущий|ущая) сменить професси",
     r"не знает,? (?:какое|куда|что)|карьерн(?:ая|ую) цель|поиск направления",
+    r"(?:планирую|пытаюсь|хочу) (?:найти|выбрать|понять|разобраться).*(?:карьер|професси|кем работать|направлен)",
 )
 
 
@@ -1396,7 +1397,7 @@ def build_deterministic_assessment(
 
     def conflicts_with_explicit_rejection(title: str) -> bool:
         low = title.casefold()
-        rejects_bank = any(marker in rejection_blob for marker in ("не хочу работать в банк", "не хочет работать в банк", "отказ от банк", "не банковск"))
+        rejects_bank = bool(re.search(r"не хоч(?:у|ет) работать\b.{0,40}\bбанк|отказ от банк|не банковск", rejection_blob))
         return rejects_bank and any(marker in low for marker in ("банк", "bank director", "bank manager", "кредитн"))
 
     if current_role and functions and not conflicts_with_explicit_rejection(current_role):
