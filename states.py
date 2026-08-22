@@ -54,6 +54,7 @@ class CareerFlow(StatesGroup):
     REPORT_NEEDS_CLARIFICATION = State()
     REPORT_GENERATING = State()
     REPORT_READY = State()
+    START_GUIDE = State()
     REPORT_GENERATION_FAILED = State()
     PDF_GENERATING = State()
     PDF_READY = State()
