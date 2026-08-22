@@ -58,6 +58,63 @@ _CEO_LABELS: frozenset[str] = frozenset({
     "ceo", "cto", "cfo", "coo", "c-level", "chief", "вице-президент",
 })
 
+# Canonical role families used by safety checks.  This deliberately remains a
+# small, auditable taxonomy: unknown roles fall back to normalized text instead
+# of being guessed by an LLM.
+_ROLE_FAMILY_TERMS: dict[str, frozenset[str]] = {
+    "accounting": frozenset({"бухгалтер", "бухгалтерия", "accountant", "accounting", "bookkeeper"}),
+    "audit": frozenset({"аудитор", "аудит", "auditor", "audit"}),
+    "tax": frozenset({"налоговый консультант", "налог", "tax consultant", "tax advisor"}),
+    "project_management": frozenset({
+        "project manager", "project coordinator", "проджект менеджер", "руководитель проекта",
+        "координатор проекта", "организация проекта",
+    }),
+    "event_work": frozenset({
+        "event manager", "event coordinator", "event project", "организатор мероприятия",
+        "координатор мероприятия", "организация мероприятия", "провести мероприятие",
+    }),
+    "software_engineering": frozenset({
+        "developer", "software engineer", "engineering", "разработчик", "разработка",
+    }),
+    "erp_analysis": frozenset({"erp", "business analyst", "бизнес аналитик", "системный аналитик"}),
+    "people_management": frozenset({
+        "people management", "team lead", "head of", "director", "engineering manager",
+        "управление командой", "руководитель", "директор", "тимлид",
+    }),
+    "executive": frozenset({"ceo", "cto", "cfo", "coo", "c-level", "chief", "вице президент"}),
+}
+
+_BROAD_REFUSAL_MARKERS: frozenset[str] = frozenset({
+    "вообще", "сфера", "область", "больше не", "не рассматриваю", "не хочу работать в",
+    "никак", "any", "entire field", "no more", "do not want to work in",
+})
+
+_RELATED_REFUSAL_FAMILIES: dict[str, frozenset[str]] = {
+    "accounting": frozenset({"accounting", "audit", "tax"}),
+}
+
+_EXECUTIVE_SCALE_SIGNALS: frozenset[str] = frozenset({
+    "p&l", "profit and loss", "executive team", "совет директоров", "корпоративная стратегия",
+    "несколько подразделений", "multi department", "бюджет компании", "company budget",
+})
+
+
+def normalize_career_text(text: str) -> str:
+    """Normalize role text for deterministic cross-language guardrails."""
+    normalized = str(text or "").lower().replace("ё", "е")
+    normalized = re.sub(r"[^a-zа-я0-9&+]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def extract_role_families(text: str) -> set[str]:
+    """Return known canonical families without inventing a family for unknown text."""
+    normalized = normalize_career_text(text)
+    return {
+        family
+        for family, terms in _ROLE_FAMILY_TERMS.items()
+        if any(normalize_career_text(term) in normalized for term in terms)
+    }
+
 
 def _text_blob(report: dict) -> str:
     """Flatten all string values in the report into one searchable text."""
@@ -158,15 +215,27 @@ def validate_explicit_refusals(profile: CareerEvidenceProfile, report: dict) -> 
     if not profile.explicit_refusals:
         return errors
     roles = _recommended_roles(report)
-    report_blob = " ".join(roles)
+    normalized_roles = [(role, normalize_career_text(role), extract_role_families(role)) for role in roles]
     for refusal in profile.explicit_refusals:
-        token = refusal.statement.strip().lower()
+        token = normalize_career_text(refusal.statement)
         if not token or len(token) < 5:
             continue
-        # Check first 30 chars of refusal against recommended roles
-        fragment = token[:30]
-        if fragment in report_blob:
-            errors.append(f"[CRITICAL] Report recommends '{fragment}' which user explicitly refused.")
+        refusal_families = extract_role_families(token)
+        is_broad = any(marker in token for marker in _BROAD_REFUSAL_MARKERS)
+        blocked_families = set(refusal_families)
+        if is_broad:
+            for family in refusal_families:
+                blocked_families.update(_RELATED_REFUSAL_FAMILIES.get(family, ()))
+
+        for role, normalized_role, role_families in normalized_roles:
+            exact_match = token in normalized_role or normalized_role in token
+            family_match = bool(blocked_families & role_families)
+            if exact_match or family_match:
+                errors.append(
+                    f"[CRITICAL] Report recommends '{role}' which conflicts with explicit refusal "
+                    f"'{refusal.statement[:80]}'."
+                )
+                break
     return errors
 
 
@@ -189,6 +258,20 @@ def validate_seniority_transfer(profile: CareerEvidenceProfile, report: dict) ->
         if not has_any_confirmed and profile.functions:
             errors.append(f"[WARNING] Report uses high-seniority label '{label}' but no confirmed seniority in evidence profile.")
             break
+
+    confirmed_families: set[str] = set()
+    for function in profile.functions:
+        if function.inferred_seniority and function.inferred_seniority not in {"unknown", "trainee", "junior", "strong_junior"}:
+            confirmed_families.update(extract_role_families(function.function_name))
+    for role in _recommended_roles(report):
+        if not any(label in normalize_career_text(role) for label in _HIGH_SENIORITY_LABELS):
+            continue
+        target_families = extract_role_families(role) - {"people_management", "executive"}
+        if target_families and confirmed_families and target_families.isdisjoint(confirmed_families):
+            errors.append(
+                f"[CRITICAL] High seniority in '{role}' is not supported for the target role family; "
+                "seniority from another function must not be transferred automatically."
+            )
     return errors
 
 
@@ -215,7 +298,7 @@ def validate_function_evidence(profile: CareerEvidenceProfile, report: dict) -> 
     """Error 3: single episode turned into career profession."""
     errors: list[str] = []
     single_episode_names = {
-        f.function_name.lower()
+        normalize_career_text(f.function_name)
         for f in profile.functions
         if f.frequency == "single_episode" and f.function_name
     }
@@ -224,7 +307,10 @@ def validate_function_evidence(profile: CareerEvidenceProfile, report: dict) -> 
     roles = _recommended_roles(report)
     for role in roles:
         for name in single_episode_names:
-            if name in role:
+            name_families = extract_role_families(name)
+            role_families = extract_role_families(role)
+            same_family = bool(name_families & role_families)
+            if name in normalize_career_text(role) or same_family:
                 errors.append(
                     f"[CRITICAL] Function '{name}' was a single episode in profile "
                     "but appears as main career path in report."
@@ -294,14 +380,14 @@ def validate_management_assumption(profile: CareerEvidenceProfile, report: dict)
         for label in _CEO_LABELS:
             if label in roles_blob:
                 has_ceo_evidence = any(
-                    label in ev.statement.lower()
+                    any(signal in normalize_career_text(ev.statement) for signal in _EXECUTIVE_SCALE_SIGNALS)
                     for f in profile.functions
                     for ev in f.evidence
                 )
                 if not has_ceo_evidence:
                     errors.append(
-                        f"[WARNING] Entrepreneur in profile but report recommends '{label}' "
-                        "without explicit corporate leadership evidence."
+                        f"[CRITICAL] Entrepreneur in profile but report recommends '{label}' "
+                        "without evidence of corporate executive scale."
                     )
                 break
 
