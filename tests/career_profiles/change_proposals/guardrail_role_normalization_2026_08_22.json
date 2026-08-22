@@ -1,0 +1,29 @@
+{
+  "change_id": "GUARDRAIL_ROLE_NORMALIZATION_2026_08_22",
+  "source_error_codes": [
+    "DIRECT_REFUSAL_VIOLATED",
+    "SINGLE_EPISODE_PROMOTED",
+    "SENIORITY_AUTO_TRANSFERRED",
+    "UNSUPPORTED_C_LEVEL"
+  ],
+  "affected_profiles_expected_to_improve": [
+    "Profiles with broad profession-family refusals",
+    "Profiles whose evidence and recommended roles use different languages or synonyms",
+    "Small-business owners incorrectly promoted to corporate C-level",
+    "Career changers whose seniority belongs to a different function"
+  ],
+  "profiles_at_regression_risk": [
+    "Profiles with ambiguous broad refusal wording",
+    "Profiles with uncommon role titles outside the controlled taxonomy",
+    "Executives whose evidence omits organizational scale"
+  ],
+  "universal_rule_changed": "Career safety rules normalize known role families deterministically, preserve narrow versus broad refusal scope, block unsupported C-level recommendations, and prevent seniority or single-episode evidence from transferring across role synonyms.",
+  "files_to_change": [
+    "services/career_guardrails.py",
+    "tests/test_acceptance_conversational_interview.py",
+    "reports/FIVE_CASES_DOUBLE_RUN_2026-08-22.md"
+  ],
+  "feature_flag": "existing career guardrail validation boundary",
+  "rollback_condition": "Rollback if a supported route is blocked without a matching refusal or evidence-family conflict, or if conversational acceptance tests regress.",
+  "acceptance_condition": "Acceptance tests must prove cross-language broad and narrow refusals, synonym-aware single-episode blocking, function-specific seniority, critical unsupported C-level handling, and supported positive exceptions."
+}

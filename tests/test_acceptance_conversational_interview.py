@@ -7,6 +7,7 @@ from services.career_guardrails import (
     validate_function_evidence,
     validate_management_assumption,
     validate_regulated_professions,
+    validate_seniority_transfer,
 )
 from services.evidence_profile import CareerEvidenceProfile, EvidenceItem, FunctionEvidence, LegalAccess, next_question_from_profile
 from services.interview_policy import evaluate_report_readiness, get_route_specific_gaps, is_ready_for_conclusion
@@ -86,6 +87,23 @@ class ConversationalInterviewAcceptanceTests(unittest.TestCase):
         report_assistant["real_solutions"] = [{"title": "Event Assistant (hypothesis)"}]
         errors_assistant = validate_function_evidence(profile, report_assistant)
         self.assertFalse(any(err.startswith("[CRITICAL]") for err in errors_assistant))
+
+    def test_single_event_episode_is_blocked_through_role_synonym(self) -> None:
+        profile = CareerEvidenceProfile(
+            functions=[
+                FunctionEvidence(
+                    function_name="организация мероприятия",
+                    evidence=[_ev("Один раз помог(ла) провести мероприятие")],
+                    frequency="single_episode",
+                )
+            ]
+        )
+        report = _base_report()
+        report["career_decision"]["recommended_main_path"] = "Event Project Coordinator"
+
+        errors = validate_function_evidence(profile, report)
+
+        self.assertTrue(any(err.startswith("[CRITICAL]") for err in errors))
 
     def test_different_seniority_per_function_is_preserved(self) -> None:
         profile = CareerEvidenceProfile(
@@ -187,7 +205,24 @@ class ConversationalInterviewAcceptanceTests(unittest.TestCase):
         report = _base_report()
         report["career_decision"]["recommended_main_path"] = "CEO of retail corporation"
         errors = validate_management_assumption(profile, report)
-        self.assertTrue(any(err.startswith("[WARNING]") for err in errors))
+        self.assertTrue(any(err.startswith("[CRITICAL]") for err in errors))
+
+    def test_entrepreneur_ceo_requires_executive_scale_evidence(self) -> None:
+        profile = CareerEvidenceProfile(
+            functions=[
+                FunctionEvidence(
+                    function_name="business owner",
+                    evidence=[_ev("Отвечал за P&L и корпоративную стратегию")],
+                    frequency="daily",
+                )
+            ]
+        )
+        report = _base_report()
+        report["career_decision"]["recommended_main_path"] = "CEO"
+
+        errors = validate_management_assumption(profile, report)
+
+        self.assertFalse(any(err.startswith("[CRITICAL]") for err in errors))
 
     def test_direct_refusal_blocks_refused_routes(self) -> None:
         profile = CareerEvidenceProfile(
@@ -201,6 +236,48 @@ class ConversationalInterviewAcceptanceTests(unittest.TestCase):
         ]
         errors = validate_explicit_refusals(profile, report)
         self.assertTrue(any(err.startswith("[CRITICAL]") for err in errors))
+
+    def test_broad_accounting_refusal_blocks_related_routes_and_english_synonyms(self) -> None:
+        profile = CareerEvidenceProfile(
+            explicit_refusals=[_ev("Не хочу больше работать в бухгалтерии вообще")]
+        )
+        for role in ("Auditor", "Налоговый консультант", "Accountant"):
+            with self.subTest(role=role):
+                report = _base_report()
+                report["career_decision"]["recommended_main_path"] = role
+                errors = validate_explicit_refusals(profile, report)
+                self.assertTrue(any(err.startswith("[CRITICAL]") for err in errors))
+
+    def test_narrow_accountant_refusal_does_not_block_auditor(self) -> None:
+        profile = CareerEvidenceProfile(explicit_refusals=[_ev("Не хочу должность бухгалтера")])
+        report = _base_report()
+        report["career_decision"]["recommended_main_path"] = "Аудитор"
+
+        errors = validate_explicit_refusals(profile, report)
+
+        self.assertFalse(any(err.startswith("[CRITICAL]") for err in errors))
+
+    def test_seniority_is_not_transferred_between_role_families(self) -> None:
+        profile = CareerEvidenceProfile(
+            functions=[
+                FunctionEvidence(
+                    function_name="Accounting",
+                    evidence=[_ev("8 лет самостоятельно вел(а) бухгалтерию")],
+                    frequency="daily",
+                    inferred_seniority="senior",
+                )
+            ]
+        )
+        senior_report = _base_report()
+        senior_report["career_decision"]["recommended_main_path"] = "Senior ERP Business Analyst"
+        transition_report = _base_report()
+        transition_report["career_decision"]["recommended_main_path"] = "ERP Business Analyst (transition)"
+
+        senior_errors = validate_seniority_transfer(profile, senior_report)
+        transition_errors = validate_seniority_transfer(profile, transition_report)
+
+        self.assertTrue(any(err.startswith("[CRITICAL]") for err in senior_errors))
+        self.assertFalse(any(err.startswith("[CRITICAL]") for err in transition_errors))
 
     def test_stop_when_enough_data_is_known(self) -> None:
         profile = CareerEvidenceProfile(
