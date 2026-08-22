@@ -32,6 +32,7 @@ _NON_ROLE_TITLE_PATTERNS = (
     r"эмигрант|эмиграци|мигрант|бежен|переехал|переехала|живет в (?:польш|германи|европ)",
     r"(?:ищ(?:ет|ущий|ущая)|найти) (?:новое )?направлен|хоч(?:ет|ущий|ущая) сменить професси",
     r"не знает,? (?:какое|куда|что)|карьерн(?:ая|ую) цель|поиск направления",
+    r"(?:планирую|пытаюсь|хочу) (?:найти|выбрать|понять|разобраться).*(?:карьер|професси|кем работать|направлен)",
 )
 
 
@@ -1396,7 +1397,7 @@ def build_deterministic_assessment(
 
     def conflicts_with_explicit_rejection(title: str) -> bool:
         low = title.casefold()
-        rejects_bank = any(marker in rejection_blob for marker in ("не хочу работать в банк", "не хочет работать в банк", "отказ от банк", "не банковск"))
+        rejects_bank = bool(re.search(r"не хоч(?:у|ет) работать\b.{0,40}\bбанк|отказ от банк|не банковск", rejection_blob))
         return rejects_bank and any(marker in low for marker in ("банк", "bank director", "bank manager", "кредитн"))
 
     if current_role and functions and not conflicts_with_explicit_rejection(current_role):
@@ -2228,6 +2229,206 @@ STEP_BUTTON_LABELS: dict[FirstStepType, str] = {
 }
 
 
+def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
+    """Project the validated assessment into the sole view-model used by follow-ups."""
+    validate_career_assessment(assessment).require_valid()
+    primary = assessment.routes.by_id(assessment.routes.recommended_route_id)
+    alternatives = [
+        route for route in assessment.routes.all_routes()
+        if primary is None or route.route_id != primary.route_id
+    ][:4]
+    first_step = assessment.first_steps[0] if assessment.first_steps else None
+    uncertainty = (
+        assessment.questions.unanswered_critical_questions[0]
+        if assessment.questions.unanswered_critical_questions
+        else "Требования и спрос на выбранный маршрут нужно подтвердить по вакансиям."
+    )
+    insight = assessment.personal_insights[0].text if assessment.personal_insights else assessment.identity.core_description
+    return {
+        "professional_core": list(assessment.identity.professional_core),
+        "secondary_functions": list(assessment.identity.secondary_functions),
+        "current_seniority": assessment.identity.seniority_current,
+        "transferable_capital": list(assessment.identity.professional_capital),
+        "desired_changes": [assessment.user_choice.desired_change] if assessment.user_choice.desired_change else [],
+        "rejected_functions": list(assessment.user_choice.functions_to_avoid),
+        "constraints": [item.title for item in assessment.constraints if item.confirmed],
+        "location_context": {
+            "country": assessment.context.country_name or assessment.context.residence_country,
+            "city": assessment.context.city,
+            "languages": [item.language for item in assessment.context.current_languages],
+            "work_format": assessment.context.work_format,
+        },
+        "financial_context": {
+            "minimum": asdict(assessment.context.income_minimum) if assessment.context.income_minimum else None,
+            "target": asdict(assessment.context.income_target) if assessment.context.income_target else None,
+            "urgency": assessment.context.income_urgency,
+        },
+        "primary_route": asdict(primary) if primary else {},
+        "alternative_routes": [asdict(route) for route in alternatives],
+        "income_bridge": None,
+        "main_insight": insight,
+        "main_uncertainty": uncertainty,
+        "recommended_experiment": asdict(first_step) if first_step else {},
+        "confirmed_barriers": [item.factor for item in assessment.psychology_factors],
+    }
+
+
+def render_short_conclusion(result: dict[str, Any]) -> str:
+    """Render the first, compact answer without generating another assessment."""
+    primary = result.get("primary_route") or {}
+    alternatives = result.get("alternative_routes") or []
+    experiment = result.get("recommended_experiment") or {}
+    alternative_titles = [str(item.get("title")) for item in alternatives[:2] if item.get("title")]
+    lines = [
+        "Ваше профессиональное ядро",
+        ", ".join(result.get("professional_core") or []),
+        "",
+        f"Основной маршрут: {primary.get('title', '')}",
+        str(primary.get("why_it_fits") or "Маршрут сохраняет подтверждённые функции и допускает проверку до перехода."),
+    ]
+    if alternative_titles:
+        lines.extend(["", f"Альтернативы: {', '.join(alternative_titles)}."])
+    if result.get("main_insight"):
+        lines.extend(["", f"Главный вывод: {result['main_insight']}"])
+    if experiment:
+        lines.extend(["", f"Первый шаг: {experiment.get('action') or experiment.get('title', '')}"])
+    return "\n".join(lines)
+
+
+def start_guide_response(result: dict[str, Any], branch: str | None = None, choice: str | None = None) -> str:
+    """Return one focused guide artifact derived only from the saved result."""
+    primary = result.get("primary_route") or {}
+    alternatives = result.get("alternative_routes") or []
+    titles = [item.get("title") for item in [primary, *alternatives[:2]] if item.get("title")]
+    if branch is None:
+        return "Давайте не будем сейчас строить ещё один план. Выберем одну причину, из-за которой трудно начать."
+    if branch == "choose":
+        if choice is None:
+            return "Сейчас у нас есть три гипотезы:\n" + "\n".join(f"{i}. {title}" for i, title in enumerate(titles, 1)) + "\n\nЧто для вас важнее при выборе?"
+        score_key = {"income": "income_risk", "experience": "experience_match", "speed": "transition_speed"}.get(choice)
+        ranked = [primary, *alternatives]
+        if score_key:
+            ranked.sort(key=lambda route: str((route.get("ranking") or {}).get(score_key)) in {"high", "fast", "low"}, reverse=True)
+        selected = ranked[0] if ranked else primary
+        return f"Приоритетный маршрут: {selected.get('title', '')}.\nВыигрыш: используются подтверждённые функции. Компромисс: требования рынка ещё нужно сверить.\nДействие: {selected.get('market_test', '')}"
+    if branch == "fear":
+        uncertainty = str(result.get("main_uncertainty") or "").casefold()
+        if "смож" in uncertainty or "функц" in uncertainty:
+            action = "Сделайте один пробный кейс по ключевой функции и запросите обратную связь у специалиста."
+        elif "содерж" in uncertainty or "задач" in uncertainty:
+            action = "Напишите одному специалисту: «Какие три задачи занимают большую часть недели в этой роли?»"
+        else:
+            action = f"Разберите пять вакансий «{primary.get('title', '')}» и выпишите повторяющиеся обязательные требования."
+        return "Не нужно принимать окончательное решение. Карьерный маршрут сначала проверяют маленьким экспериментом.\n\n" + action
+    if branch == "vacancies":
+        queries = list(dict.fromkeys(titles))[:5]
+        return "Поисковые запросы:\n- " + "\n- ".join(queries) + "\n\nСохраните пять вакансий и отметьте: ежедневные задачи, язык, размер команды, отрасль, зарплату и обязательный опыт."
+    if branch == "experience":
+        function = (result.get("professional_core") or ["подтверждённую функцию"])[0]
+        return f"Давайте превратим опыт «{function}» в готовый карьерный кейс. Какой заметный результат получила команда после того, как вы выстроили или изменили процесс?"
+    if branch == "energy":
+        if choice is None:
+            return "Сколько времени вы реально готовы выделить сегодня?"
+        actions = {
+            "5": f"Сохраните один запрос «{primary.get('title', '')}». Результат — сохранённый поиск.",
+            "15": f"Найдите одну вакансию «{primary.get('title', '')}» и выпишите три требования.",
+            "30": f"Сравните три вакансии «{primary.get('title', '')}» и подготовьте один мини-кейс.",
+            "later": "Хорошо. Маршрут сохранён. Когда вернётесь, начнём с одного действия, а не со всего отчёта.",
+        }
+        return actions.get(choice, actions["5"])
+    return "Опишите одним предложением, что именно мешает начать; следующим сообщением выберем одно действие."
+
+
+def build_income_bridge(result: dict[str, Any], urgency: str) -> dict[str, Any] | None:
+    """Create a bridge only after the user confirms a horizon of three months or less."""
+    if urgency not in {"month", "1_3"}:
+        return None
+    route = result.get("primary_route") or {}
+    capital = result.get("professional_core") or []
+    return {
+        "offer": f"Искать смежную роль или проект по функции: {(capital or ['операционная координация'])[0]}",
+        "audience": "работодатели и проектные команды выбранного рынка",
+        "evidence": capital[:3],
+        "test_period": "14 дней",
+        "prepare": "один кейс с задачей, действием и измеримым результатом",
+        "demand_signal": "минимум два содержательных ответа или одно интервью",
+        "guardrail": f"проверять параллельно, не отменяя основной маршрут {route.get('title', '')}",
+    }
+
+
+def support_recommendation(result: dict[str, Any]) -> dict[str, str]:
+    """Route support from confirmed assessment fields without diagnosing the user."""
+    barriers = " ".join(result.get("confirmed_barriers") or []).casefold()
+    emotional = ("выгоран", "тревог", "избег", "страх ошиб", "потеря стат")
+    if any(marker in barriers for marker in emotional):
+        return {"format": "psychologist", "reason": (result.get("confirmed_barriers") or [""])[0]}
+    gap = str(result.get("main_uncertainty") or "").casefold()
+    support_need = " ".join([gap, *result.get("desired_changes", []), *result.get("constraints", [])]).casefold()
+    if any(marker in support_need for marker in ("серия действий", "обратн", "сложн", "последовательн", "ошибк ai")):
+        return {"format": "hybrid", "reason": "нужна последовательная работа с обратной связью и проверкой решений"}
+    if any(marker in gap for marker in ("рын", "ваканс", "професс", "уров", "резюме", "требован")):
+        return {"format": "career_expert", "reason": str(result.get("main_uncertainty") or "")}
+    if result.get("recommended_experiment") and result.get("primary_route"):
+        return {"format": "personal_prompt", "reason": "маршрут и следующий проверяемый шаг уже определены"}
+    return {"format": "neutral", "reason": "данных недостаточно для персонального выбора формата"}
+
+
+def support_recommendation_text(result: dict[str, Any]) -> str:
+    recommendation = support_recommendation(result)
+    labels = {"career_expert": "карьерный эксперт", "psychologist": "психологическая поддержка", "personal_prompt": "персональный AI-промт", "hybrid": "человек + нейронка"}
+    if recommendation["format"] == "neutral":
+        return "Выберите формат по своей задаче — данных недостаточно, чтобы выделять один вариант как лучший."
+    return f"Судя по вашему профилю, сейчас полезнее всего: {labels[recommendation['format']]}, потому что {recommendation['reason']}."
+
+
+def human_escalation_reasons(*, user_requests_human: bool = False, ai_failures: int = 0, final_level_decision: bool = False, regulated_transition: bool = False, substantial_commitment: bool = False, crisis_risk: bool = False, recommendations_rejected: bool = False) -> list[str]:
+    """Return explicit escalation reasons; this does not promise an SLA."""
+    checks = [(user_requests_human, "user_requested_human"), (ai_failures >= 2, "two_unhelpful_ai_answers"), (final_level_decision, "final_level_decision"), (regulated_transition, "regulated_transition"), (substantial_commitment, "substantial_time_or_money"), (crisis_risk, "crisis_risk"), (recommendations_rejected, "recommendations_rejected")]
+    return [reason for condition, reason in checks if condition]
+
+
+def personal_ai_prompt(result: dict[str, Any], task: str | None = None, *, short: bool = False) -> str:
+    """Build a portable prompt solely from the validated view-model."""
+    primary = result.get("primary_route") or {}
+    alternatives = [item.get("title") for item in result.get("alternative_routes") or [] if item.get("title")]
+    location = result.get("location_context") or {}
+    finance = result.get("financial_context") or {}
+    experiment = result.get("recommended_experiment") or {}
+    next_task = task or experiment.get("action") or experiment.get("title") or "проверить основной маршрут"
+    profile = (
+        f"Профессиональное ядро: {', '.join(result.get('professional_core') or [])}.\n"
+        f"Подтверждённый уровень: {result.get('current_seniority') or 'не указан'}.\n"
+        f"Подтверждённые функции и капитал: {', '.join(result.get('transferable_capital') or [])}.\n"
+        f"Основной маршрут: {primary.get('title', '')}. Альтернативы: {', '.join(alternatives)}.\n"
+        f"Страна/город: {location.get('country') or ''} {location.get('city') or ''}. Языки: {', '.join(location.get('languages') or [])}.\n"
+        f"Финансовый минимум: {finance.get('minimum') or 'не задан'}.\n"
+        f"Ограничения: {', '.join(result.get('constraints') or [])}. Избегать: {', '.join(result.get('rejected_functions') or [])}.\n"
+        f"Главный пробел: {result.get('main_uncertainty') or ''}."
+    )
+    rules = """1. Не придумывай факты, которых нет в профиле.
+2. Если без ответа нельзя дать безопасную рекомендацию — задай один конкретный вопрос.
+3. Не обнуляй мой опыт и не предлагай смену профессии только из-за усталости от условий.
+4. Не называй меня senior в новой функции без доказательств.
+5. Предлагай одно проверяемое действие без увольнения и отделяй факты от предположений.
+6. Учитывай страну, язык, право на работу и финансовый минимум.
+7. Не заменяй психолога, врача, юриста или карьерного консультанта."""
+    if short:
+        rules = "Не придумывай факты; не обнуляй опыт; отделяй факты от предположений; предложи одно безопасное действие."
+    return f"Ты — мой AI-карьерный помощник, а не живой специалист.\n\nВот мой подтверждённый профиль:\n{profile}\n\nПравила работы со мной:\n{rules}\n\nМоя текущая задача:\n{next_task}\n\nСначала кратко напомни, что ты понял. Затем предложи одно действие на сегодня."
+
+
+def optimized_followup_context(result: dict[str, Any], recent_messages: list[str] | None = None) -> dict[str, Any]:
+    """Bound follow-up context; never forward a Telegram transcript."""
+    return {
+        "professional_core": result.get("professional_core") or [],
+        "selected_route": result.get("primary_route") or {},
+        "main_gap": result.get("main_uncertainty") or "",
+        "constraints": result.get("constraints") or [],
+        "current_experiment": result.get("recommended_experiment") or {},
+        "recent_messages": list(recent_messages or [])[-3:],
+    }
+
+
 def render_telegram_map(assessment: CareerAssessment) -> str:
     recommended = assessment.routes.by_id(assessment.routes.recommended_route_id)
     alternative = next(
@@ -2410,6 +2611,11 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         f"<p><strong>Изменение среды:</strong> {escape(item.environment_change)}</p><p><strong>Инструмент:</strong> {escape(item.tool)}</p></article>"
         for item in assessment.psychology_factors
     )
+    market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if assessment.context.market_data_sources else ""
+    sourced_income = any(item.sources and any(case.amount is not None for case in (item.conservative, item.base, item.optimistic)) for item in assessment.income_forecasts)
+    salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if sourced_income else ""
+    authorization_html = f"<p><strong>Право на работу:</strong> {escape(assessment.context.work_authorization)}</p>" if assessment.context.work_authorization else ""
+    work_format_html = f"<p><strong>Формат:</strong> {escape(assessment.context.work_format)}</p>" if assessment.context.work_format else ""
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Карьерное заключение</title>
@@ -2418,13 +2624,13 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
 <section><h2>1. Короткое человеческое резюме</h2><p>{escape(assessment.identity.core_description)}</p><p>{escape(assessment.conclusions.main_conclusion)}</p></section>
 <section><h2>2. Профессиональная идентичность</h2>{_list_html(assessment.identity.professional_core)}<p><strong>Подтверждённый уровень:</strong> {escape(assessment.identity.seniority_current)}</p><p>{escape(assessment.identity.seniority_notes)}</p><h3>Капитал, который важно сохранить</h3>{_list_html(assessment.identity.professional_capital)}</section>
 <section><h2>3. Что мы услышали</h2>{_list_html(heard or known[:5])}</section>
-<section><h2>4. Контекст страны и рынка</h2><p><strong>Страна проживания:</strong> {escape(residence)}</p><p><strong>Целевой рынок:</strong> {escape(', '.join(targets) or 'не указан')}</p><p><strong>Валюта:</strong> {escape(currency)}</p><p><strong>Языки работы:</strong> {escape(language_text)}</p><p><strong>Право на работу:</strong> {escape(assessment.context.work_authorization or 'неизвестно')}</p><p><strong>Формат:</strong> {escape(assessment.context.work_format or 'неизвестно')}</p><p><strong>Уверенность рыночных данных:</strong> {escape(confidence_labels.get(assessment.context.market_data_confidence.casefold(), assessment.context.market_data_confidence))}</p>{_list_html(assessment.context.market_data_sources or ['Актуальный датированный источник не получен; ниже дан конкретный план проверки вместо выдуманных утверждений.'])}<h3>Анализ по маршрутам</h3>{market_html}</section>
+<section><h2>4. Контекст страны, языка и финансов</h2><p><strong>Страна проживания:</strong> {escape(residence)}</p><p><strong>Целевой рынок:</strong> {escape(', '.join(targets) or residence)}</p><p><strong>Валюта:</strong> {escape(currency)}</p><p><strong>Языки работы:</strong> {escape(language_text)}</p>{authorization_html}{work_format_html}{market_section}</section>
 {_routes_html('5. Рекомендуемый маршрут', [recommended] if recommended else [], evidence)}
 {_routes_html('6. Альтернативные маршруты', [route for route in assessment.routes.all_routes() if route and route.route_id in assessment.routes.alternative_route_ids][:3], evidence)}
 <section><h2>7. Сравнение маршрутов</h2><table><thead><tr><th>Маршрут</th><th>Соответствие опыту</th><th>Сохранение дохода</th><th>Сохранение статуса</th><th>Скорость</th><th>Дообучение</th><th>Доступность на рынке</th><th>Психологическая устойчивость</th><th>Общий риск</th></tr></thead><tbody>{route_rows}</tbody></table></section>
 <section><h2>8. Условия, при которых переход будет устойчивым</h2>{_list_html(constraints or ['Проверять переход без увольнения и крупных расходов.', 'Не трактовать неизвестные семейные, медицинские или миграционные обстоятельства как психологические факты.'])}{f'<h3>Психологические и социальные факторы</h3>{psychology_html}' if psychology_html else ''}</section>
 <section><h2>9. Пробелы и неопределённость</h2><h3>Что известно</h3>{_list_html(known)}<h3>Что предполагается</h3>{_list_html(assumptions or ['Предположения отделены от подтверждённых фактов.'])}<h3>Чего пока не знаем</h3>{_list_html(unanswered or ['Критичных неизвестных не зафиксировано.'])}<h3>Что может изменить рекомендацию</h3>{_list_html(assessment.conclusions.what_may_change_conclusion)}</section>
-<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>
+{salary_section}
 <section><h2>11. Три сценария развития</h2>{scenarios_html}</section>
 <section><h2>12. Что здесь легко не заметить</h2>{insights_html}</section>
 <section><h2>13. Несколько первых шагов</h2>{steps}</section>
