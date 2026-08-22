@@ -6982,13 +6982,32 @@ def _ensure_preliminary_report(report: dict, data: dict) -> dict:
         report = {}
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
     analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    resume = data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {}
+    combined_functions = [
+        *list(analysis.get("confirmed_functions") or analysis.get("functions") or []),
+        *list(resume.get("confirmed_functions") or resume.get("functions") or []),
+        *list(resume.get("skills") or []),
+        *list(resume.get("what_is_good") or []),
+    ]
+    role_titles = _real_route_titles({**analysis, "confirmed_functions": combined_functions})
     hypotheses = [str(item).strip() for item in analysis.get("professional_core_hypotheses") or [] if str(item).strip()]
     current_identity = str(analysis.get("current_identity") or "").strip()
-    main_hypothesis = hypotheses[0] if hypotheses else current_identity or "Маршрут на основе подтверждённых функций"
-    backup_hypothesis = hypotheses[1] if len(hypotheses) > 1 else "Смежная роль с максимальным сохранением опыта"
-    decision.setdefault("recommended_main_path", main_hypothesis)
-    decision.setdefault("backup_path", backup_hypothesis)
+    main_hypothesis = role_titles[0] if role_titles else hypotheses[0] if hypotheses else current_identity or "Маршрут на основе подтверждённых функций"
+    backup_hypothesis = role_titles[1] if len(role_titles) > 1 else hypotheses[1] if len(hypotheses) > 1 else "Смежная роль с максимальным сохранением опыта"
+    additional_hypothesis = role_titles[2] if len(role_titles) > 2 else ""
+    # A generated descriptive sentence is not a route. Recovery must replace
+    # it with a deterministic paid-role title derived from confirmed functions.
+    existing_main = str(decision.get("recommended_main_path") or "").strip()
+    if role_titles or not existing_main:
+        decision["recommended_main_path"] = main_hypothesis
+    decision["backup_path"] = backup_hypothesis
+    if additional_hypothesis:
+        decision["additional_path"] = additional_hypothesis
     report["career_decision"] = decision
+    report.setdefault("route_hypotheses", [
+        {"title": title, "entry_path": "Проверить пять вакансий и собрать один подтверждённый кейс"}
+        for title in role_titles[:3]
+    ])
     report.setdefault("market_analysis", [{"signal": "Рыночная доступность и диапазон дохода требуют проверки по выбранной стране; цифры не оценивались без источника."}])
     report.setdefault("career_recommendations", [f"Проверить гипотезу «{main_hypothesis}» на вакансиях целевого рынка без увольнения."])
     digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
@@ -9881,7 +9900,27 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
             report_generation_status="RETRY_REQUESTED",
         )
         await message.answer("Повторяю сборку заключения. Ваши ответы сохранены.", reply_markup=ReplyKeyboardRemove())
-        await _build_and_send_report(message, state, lang)
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message)).strip()
+        session_id = str(data.get("session_id") or "").strip()
+        if public_user_id and session_id:
+            await _register_session_context(state, message, user_id=public_user_id, session_id=session_id)
+            await finalize_career_flow(public_user_id, session_id, "user_retry")
+        else:
+            # Legacy sessions still get the same exception-safe wrapper behavior.
+            try:
+                await _build_and_send_report(message, state, lang)
+            except Exception as exc:
+                print(f"[report-retry] failed: {type(exc).__name__}: {exc}", flush=True)
+                fallback = _ensure_preliminary_report({}, data)
+                await state.update_data(
+                    final_report=fallback,
+                    final_report_generated=True,
+                    report_already_generated=True,
+                    report_generation_in_progress=False,
+                    report_generation_status="REPORT_READY",
+                )
+                await state.set_state(CareerFlow.REPORT_READY)
+                await message.answer(build_telegram_summary(fallback), reply_markup=report_failure_keyboard())
         return
     if action == REPORT_SHORT_FALLBACK:
         report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}

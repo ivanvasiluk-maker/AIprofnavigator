@@ -8,6 +8,7 @@ from handlers.career import (
     _build_evidence_questions,
     _real_route_titles,
     _resolved_fact_types,
+    _ensure_preliminary_report,
     advance_assessment,
     handle_post_result_actions,
     process_answers_input,
@@ -200,6 +201,30 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         message = SimpleNamespace(answer=AsyncMock(), text=REPORT_SHORT_FALLBACK)
         await handle_post_result_actions(message, state)
         message.answer.assert_awaited_once()
+
+    def test_q_failure_fallback_replaces_descriptive_sentence_with_real_route(self):
+        data = sergey_data(resume_analysis={
+            "confirmed_functions": ["контроль качества", "улучшение процессов", "техническая документация"]
+        })
+        report = {"career_decision": {"recommended_main_path": "Сергей имеет опыт в управлении и контроле качества на производстве."}}
+        fallback = _ensure_preliminary_report(report, data)
+        self.assertEqual(fallback["career_decision"]["recommended_main_path"], "Quality Engineer")
+        self.assertEqual(fallback["career_decision"]["backup_path"], "Process Improvement Specialist")
+
+    async def test_r_retry_uses_exception_safe_finalization_wrapper(self):
+        state = FakeState(sergey_data(final_report={"status": "preliminary"}, final_report_generated=True))
+        message = SimpleNamespace(
+            answer=AsyncMock(),
+            text=REPORT_RETRY,
+            from_user=SimpleNamespace(id=42),
+            chat=SimpleNamespace(id=42),
+        )
+        with patch("handlers.career.finalize_career_flow", new=AsyncMock()) as finalize, \
+             patch("handlers.career._build_and_send_report", new=AsyncMock()) as direct_build:
+            await handle_post_result_actions(message, state)
+        finalize.assert_awaited_once_with("sergey-user", "sergey-session", "user_retry")
+        direct_build.assert_not_awaited()
+        self.assertFalse(state.data["report_generation_in_progress"])
 
 
 if __name__ == "__main__":
