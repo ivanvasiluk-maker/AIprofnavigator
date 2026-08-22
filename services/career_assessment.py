@@ -2269,6 +2269,7 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         "main_insight": insight,
         "main_uncertainty": uncertainty,
         "recommended_experiment": asdict(first_step) if first_step else {},
+        "confirmed_barriers": [item.factor for item in assessment.psychology_factors],
     }
 
 
@@ -2352,6 +2353,79 @@ def build_income_bridge(result: dict[str, Any], urgency: str) -> dict[str, Any] 
         "prepare": "один кейс с задачей, действием и измеримым результатом",
         "demand_signal": "минимум два содержательных ответа или одно интервью",
         "guardrail": f"проверять параллельно, не отменяя основной маршрут {route.get('title', '')}",
+    }
+
+
+def support_recommendation(result: dict[str, Any]) -> dict[str, str]:
+    """Route support from confirmed assessment fields without diagnosing the user."""
+    barriers = " ".join(result.get("confirmed_barriers") or []).casefold()
+    emotional = ("выгоран", "тревог", "избег", "страх ошиб", "потеря стат")
+    if any(marker in barriers for marker in emotional):
+        return {"format": "psychologist", "reason": (result.get("confirmed_barriers") or [""])[0]}
+    gap = str(result.get("main_uncertainty") or "").casefold()
+    support_need = " ".join([gap, *result.get("desired_changes", []), *result.get("constraints", [])]).casefold()
+    if any(marker in support_need for marker in ("серия действий", "обратн", "сложн", "последовательн", "ошибк ai")):
+        return {"format": "hybrid", "reason": "нужна последовательная работа с обратной связью и проверкой решений"}
+    if any(marker in gap for marker in ("рын", "ваканс", "професс", "уров", "резюме", "требован")):
+        return {"format": "career_expert", "reason": str(result.get("main_uncertainty") or "")}
+    if result.get("recommended_experiment") and result.get("primary_route"):
+        return {"format": "personal_prompt", "reason": "маршрут и следующий проверяемый шаг уже определены"}
+    return {"format": "neutral", "reason": "данных недостаточно для персонального выбора формата"}
+
+
+def support_recommendation_text(result: dict[str, Any]) -> str:
+    recommendation = support_recommendation(result)
+    labels = {"career_expert": "карьерный эксперт", "psychologist": "психологическая поддержка", "personal_prompt": "персональный AI-промт", "hybrid": "человек + нейронка"}
+    if recommendation["format"] == "neutral":
+        return "Выберите формат по своей задаче — данных недостаточно, чтобы выделять один вариант как лучший."
+    return f"Судя по вашему профилю, сейчас полезнее всего: {labels[recommendation['format']]}, потому что {recommendation['reason']}."
+
+
+def human_escalation_reasons(*, user_requests_human: bool = False, ai_failures: int = 0, final_level_decision: bool = False, regulated_transition: bool = False, substantial_commitment: bool = False, crisis_risk: bool = False, recommendations_rejected: bool = False) -> list[str]:
+    """Return explicit escalation reasons; this does not promise an SLA."""
+    checks = [(user_requests_human, "user_requested_human"), (ai_failures >= 2, "two_unhelpful_ai_answers"), (final_level_decision, "final_level_decision"), (regulated_transition, "regulated_transition"), (substantial_commitment, "substantial_time_or_money"), (crisis_risk, "crisis_risk"), (recommendations_rejected, "recommendations_rejected")]
+    return [reason for condition, reason in checks if condition]
+
+
+def personal_ai_prompt(result: dict[str, Any], task: str | None = None, *, short: bool = False) -> str:
+    """Build a portable prompt solely from the validated view-model."""
+    primary = result.get("primary_route") or {}
+    alternatives = [item.get("title") for item in result.get("alternative_routes") or [] if item.get("title")]
+    location = result.get("location_context") or {}
+    finance = result.get("financial_context") or {}
+    experiment = result.get("recommended_experiment") or {}
+    next_task = task or experiment.get("action") or experiment.get("title") or "проверить основной маршрут"
+    profile = (
+        f"Профессиональное ядро: {', '.join(result.get('professional_core') or [])}.\n"
+        f"Подтверждённый уровень: {result.get('current_seniority') or 'не указан'}.\n"
+        f"Подтверждённые функции и капитал: {', '.join(result.get('transferable_capital') or [])}.\n"
+        f"Основной маршрут: {primary.get('title', '')}. Альтернативы: {', '.join(alternatives)}.\n"
+        f"Страна/город: {location.get('country') or ''} {location.get('city') or ''}. Языки: {', '.join(location.get('languages') or [])}.\n"
+        f"Финансовый минимум: {finance.get('minimum') or 'не задан'}.\n"
+        f"Ограничения: {', '.join(result.get('constraints') or [])}. Избегать: {', '.join(result.get('rejected_functions') or [])}.\n"
+        f"Главный пробел: {result.get('main_uncertainty') or ''}."
+    )
+    rules = """1. Не придумывай факты, которых нет в профиле.
+2. Если без ответа нельзя дать безопасную рекомендацию — задай один конкретный вопрос.
+3. Не обнуляй мой опыт и не предлагай смену профессии только из-за усталости от условий.
+4. Не называй меня senior в новой функции без доказательств.
+5. Предлагай одно проверяемое действие без увольнения и отделяй факты от предположений.
+6. Учитывай страну, язык, право на работу и финансовый минимум.
+7. Не заменяй психолога, врача, юриста или карьерного консультанта."""
+    if short:
+        rules = "Не придумывай факты; не обнуляй опыт; отделяй факты от предположений; предложи одно безопасное действие."
+    return f"Ты — мой AI-карьерный помощник, а не живой специалист.\n\nВот мой подтверждённый профиль:\n{profile}\n\nПравила работы со мной:\n{rules}\n\nМоя текущая задача:\n{next_task}\n\nСначала кратко напомни, что ты понял. Затем предложи одно действие на сегодня."
+
+
+def optimized_followup_context(result: dict[str, Any], recent_messages: list[str] | None = None) -> dict[str, Any]:
+    """Bound follow-up context; never forward a Telegram transcript."""
+    return {
+        "professional_core": result.get("professional_core") or [],
+        "selected_route": result.get("primary_route") or {},
+        "main_gap": result.get("main_uncertainty") or "",
+        "constraints": result.get("constraints") or [],
+        "current_experiment": result.get("recommended_experiment") or {},
+        "recent_messages": list(recent_messages or [])[-3:],
     }
 
 

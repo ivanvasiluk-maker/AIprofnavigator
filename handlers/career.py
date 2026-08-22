@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Document, FSInputFile, Message, ReplyKeyboardRemove
+from aiogram.types import BufferedInputFile, CallbackQuery, Document, FSInputFile, Message, ReplyKeyboardRemove
 from pypdf import PdfReader
 
 from config import settings
@@ -182,6 +182,12 @@ from keyboards import (
     start_guide_keyboard,
     guide_followup_keyboard,
     income_urgency_keyboard,
+    post_report_support_keyboard,
+    consent_keyboard,
+    prompt_actions_keyboard,
+    prompt_tasks_keyboard,
+    support_detail_keyboard,
+    booking_keyboard,
     selected_step_actions_keyboard,
     assessment_recovery_keyboard,
 )
@@ -215,6 +221,9 @@ from services.career_assessment import (
     start_guide_response,
     validated_assessment_result,
     build_income_bridge,
+    optimized_followup_context,
+    personal_ai_prompt,
+    support_recommendation_text,
     validate_career_assessment,
 )
 from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors, contamination_errors
@@ -7258,6 +7267,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             )
             if Path(html_report_path).is_file():
                 await message.answer_document(FSInputFile(html_report_path), caption=t(lang, "web_report_ready"))
+            await message.answer(
+                "Теперь у вас есть карьерные гипотезы и первый способ их проверить. Дальше можно двигаться самостоятельно или выбрать поддержку.\n\n" + support_recommendation_text(validated_assessment_result(stored_assessment)),
+                reply_markup=post_report_support_keyboard(stored_assessment.assessment_id),
+            )
             await _track_event(
                 message,
                 state,
@@ -7497,6 +7510,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             caption=t(lang, "web_report_ready"),
             reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else None,
         )
+        await message.answer(
+            "Теперь у вас есть карьерные гипотезы и первый способ их проверить. Дальше можно двигаться самостоятельно или выбрать поддержку.\n\n" + support_recommendation_text(validated_assessment_result(assessment)),
+            reply_markup=post_report_support_keyboard(assessment.assessment_id),
+        )
+        await _track_event(message, state, "report_completed", meta={"assessment_id": assessment.assessment_id})
         await _track_event(
             message,
             state,
@@ -7549,12 +7567,14 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
         await state.update_data(validated_assessment_result=result)
     action = parts[2]
     if callback.message and action == "full":
+        await _track_event(callback.message, state, "full_report_opened", meta={"assessment_id": assessment.assessment_id})
         path = str(data.get("html_report_path") or "")
         if path and Path(path).is_file():
             await callback.message.answer_document(FSInputFile(path), caption=t(_user_language(data), "web_report_ready"))
         else:
             await callback.message.answer("Полный отчёт ещё сохраняется. Попробуйте открыть его через несколько секунд.")
     elif callback.message and action == "guide":
+        await _track_event(callback.message, state, "start_guide_clicked", meta={"assessment_id": assessment.assessment_id})
         await state.set_state(CareerFlow.START_GUIDE)
         await callback.message.answer(start_guide_response(result), reply_markup=start_guide_keyboard(assessment.assessment_id))
     elif callback.message and action == "income":
@@ -7611,6 +7631,161 @@ async def handle_income_urgency(callback: CallbackQuery, state: FSMContext) -> N
         ])
     if callback.message:
         await callback.message.answer(text)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("post_support:"))
+async def handle_post_report_support(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    result = data.get("validated_assessment_result")
+    if len(parts) != 3 or not isinstance(result, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    action = parts[2]
+    event = {"career": "career_expert_clicked", "psychology": "psychologist_clicked", "prompt": "personal_prompt_clicked", "hybrid": "hybrid_support_clicked"}.get(action)
+    if event and callback.message:
+        await _track_event(callback.message, state, event, meta={"assessment_id": parts[1]})
+    if not callback.message:
+        await callback.answer()
+        return
+    if action == "career":
+        await callback.message.answer(
+            "Карьерный эксперт поможет проверить рекомендации на реальных вакансиях, выбрать уровень входа и перевести ваш опыт на язык работодателя.\n\n"
+            "Чтобы не тратить встречу на повторный сбор информации, эксперт получит структурированную карту только с вашего согласия.",
+            reply_markup=support_detail_keyboard(parts[1], "career"),
+        )
+    elif action == "psychology":
+        barriers = result.get("confirmed_barriers") or []
+        personal = f"В вашем случае на движение может влиять: {barriers[0]}." if barriers else "Этот вариант может быть полезен, если вы понимаете следующие шаги, но эмоционально не можете к ним приступить."
+        await callback.message.answer(
+            "Иногда направление уже понятно, но начать мешают тревога, выгорание или страх ошибиться. Психолог работает с самим переходом, а не выбирает профессию за вас.\n\n"
+            f"{personal}\n\nЭто не экстренная и не медицинская помощь. При угрозе жизни или остром кризисе обратитесь в местные экстренные службы.",
+            reply_markup=support_detail_keyboard(parts[1], "psychology"),
+        )
+    elif action == "prompt":
+        prompt = personal_ai_prompt(result)
+        await state.update_data(personal_ai_prompt=prompt, followup_context=optimized_followup_context(result))
+        await callback.message.answer("Ответ нейросети — персональный рабочий промт:\n\n" + prompt, reply_markup=prompt_actions_keyboard(parts[1]))
+    elif action == "hybrid":
+        await callback.message.answer(
+            "Можно не оставаться с отчётом один на один. Нейронка отвечает первой на ежедневные небольшие задачи; специалист явно подключается к решениям, где важны контекст, рынок и профессиональное суждение. AI не выдаёт себя за человека.",
+            reply_markup=support_detail_keyboard(parts[1], "hybrid"),
+        )
+    else:
+        await callback.message.answer("Хорошо. Заключение и выбранный маршрут сохранены — продолжайте с первого эксперимента.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("support_detail:"))
+async def handle_support_detail(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 3)
+    if len(parts) != 4 or not isinstance(data.get("validated_assessment_result"), dict) or not callback.message:
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    _, assessment_id, support_type, action = parts
+    recipient = {"career": "career_expert", "psychology": "psychologist", "hybrid": "hybrid_support"}[support_type]
+    if action == "book":
+        await callback.message.answer("Разрешаете передать заключение для этой поддержки?", reply_markup=consent_keyboard(assessment_id, recipient))
+    elif action == "back":
+        await callback.message.answer("Выберите удобный способ продолжения.", reply_markup=post_report_support_keyboard(assessment_id))
+    elif action == "compare":
+        await callback.message.answer(
+            "Формат | Для чего подходит | Что получает человек\n"
+            "Карьерный эксперт | Выбор маршрута и стратегия | Встреча и персональные решения\n"
+            "Психолог | Эмоциональные барьеры перехода | Работа с тревогой, выгоранием или избеганием\n"
+            "Персональный промт | Самостоятельная работа | Настроенный AI-помощник\n"
+            "Человек + нейронка | Последовательный переход | Чат, AI-инструменты и проверка специалистом"
+        )
+    elif support_type == "career":
+        await callback.message.answer("На встрече: сравнение маршрутов, проверка уровня входа, разбор вакансий и план позиционирования. Решения подтверждает специалист.")
+    elif support_type == "psychology":
+        await callback.message.answer("Формат подходит, если следующий шаг понятен, но подтверждённая тревога, выгорание или страх ошибки мешают действовать. Психолог не выбирает профессию за вас.")
+    else:
+        await callback.message.answer("Ответ нейросети помечается отдельно. Комментарий специалиста подключается для стратегии, спорных рекомендаций и окончательных решений; мгновенный ответ не обещается.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("share_consent:"))
+async def handle_assessment_sharing_consent(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 3)
+    if len(parts) != 4:
+        await callback.answer("Некорректное действие", show_alert=True)
+        return
+    _, assessment_id, recipient, scope = parts
+    allowed = scope in {"summary", "full_report"}
+    sharing = {"career_expert": False, "psychologist": False, "hybrid_support": False, "scope": scope if allowed else "none", "consented_at": datetime.now(timezone.utc).isoformat() if allowed else None}
+    if recipient in sharing and allowed:
+        sharing[recipient] = True
+    share_payload = None
+    if allowed:
+        if scope == "full_report":
+            share_payload = data.get("career_assessment")
+        else:
+            result = data.get("validated_assessment_result") or {}
+            share_payload = {key: result.get(key) for key in ("professional_core", "current_seniority", "primary_route", "alternative_routes", "main_uncertainty", "recommended_experiment")}
+    await state.update_data(assessment_sharing=sharing, assessment_share_payload=share_payload)
+    if allowed and callback.message:
+        await _track_event(callback.message, state, "consent_given", action=recipient, meta={"assessment_id": assessment_id, "scope": scope})
+        if recipient == "hybrid_support":
+            await _track_event(callback.message, state, "hybrid_support_started", meta={"assessment_id": assessment_id})
+    url = {"career_expert": settings.specialist_telegram_url, "psychologist": settings.psychologist_booking_url, "hybrid_support": settings.hybrid_support_url}.get(recipient, "")
+    if callback.message:
+        if allowed and url:
+            await _track_event(callback.message, state, "booking_started", action=recipient, meta={"assessment_id": assessment_id})
+            await callback.message.answer("Согласие сохранено. Перейдите к записи; срок ответа зависит от настроенного канала.", reply_markup=booking_keyboard(url, assessment_id, recipient))
+        elif allowed:
+            await callback.message.answer("Согласие сохранено. Ссылка записи пока не настроена; мы не обещаем мгновенное подключение.")
+        else:
+            await callback.message.answer("Данные не переданы. Можно продолжить самостоятельно.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("booking_complete:"))
+async def handle_booking_complete(callback: CallbackQuery, state: FSMContext) -> None:
+    parts = str(callback.data or "").split(":", 2)
+    if len(parts) == 3 and callback.message:
+        await _track_event(callback.message, state, "booking_completed", action=parts[2], meta={"assessment_id": parts[1]})
+        await callback.message.answer("Запись отмечена. Данные будут доступны выбранному специалисту только в согласованном объёме.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("prompt_action:"))
+async def handle_personal_prompt_action(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    result = data.get("validated_assessment_result")
+    if len(parts) != 3 or not isinstance(result, dict):
+        await callback.answer("Промт не найден", show_alert=True)
+        return
+    action = parts[2]
+    prompt = personal_ai_prompt(result, short=action == "short")
+    if callback.message and action == "download":
+        await callback.message.answer_document(BufferedInputFile(prompt.encode("utf-8"), filename="career_ai_prompt.txt"))
+    elif callback.message and action == "task":
+        await callback.message.answer("Выберите одну задачу.", reply_markup=prompt_tasks_keyboard(parts[1]))
+    elif callback.message:
+        await callback.message.answer(prompt)
+    if action == "copy" and callback.message:
+        await _track_event(callback.message, state, "prompt_copied", meta={"assessment_id": parts[1]})
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("prompt_task:"))
+async def handle_personal_prompt_task(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    result = data.get("validated_assessment_result")
+    tasks = {"vacancies": "проанализировать вакансию", "resume": "адаптировать резюме", "interview": "подготовиться к интервью", "learning": "выбрать обучение", "plan": "составить план перехода", "case": "описать карьерный кейс"}
+    if len(parts) != 3 or not isinstance(result, dict) or parts[2] not in tasks:
+        await callback.answer("Задача не найдена", show_alert=True)
+        return
+    prompt = personal_ai_prompt(result, tasks[parts[2]])
+    await state.update_data(personal_ai_prompt=prompt)
+    if callback.message:
+        await callback.message.answer(prompt)
     await callback.answer()
 
 
