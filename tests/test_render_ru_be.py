@@ -2154,14 +2154,14 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage()
 
         with patch("handlers.career._track_event", new=AsyncMock()):
-            with patch("handlers.career._start_barriers_module", new=AsyncMock()) as start_barriers:
+            with patch("handlers.career.advance_assessment", new=AsyncMock(return_value="GENERATE_REPORT")) as advance:
                 await process_answers_input(message, state, "Не знаю, с чего начать")
 
         qa = state.data.get("qa_answers", [])
         self.assertEqual(len(qa), 1)
         self.assertEqual(qa[0].get("signal"), "overwhelm")
         self.assertEqual(qa[0].get("not_equal_to"), "новая карьерная цель")
-        start_barriers.assert_awaited_once()
+        advance.assert_awaited_once()
 
     async def test_priorities_career_switch_collects_reason(self) -> None:
         done_text = "✅ Приоритеты: готово"
@@ -2197,7 +2197,7 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage()
 
         with patch("handlers.career._track_event", new=AsyncMock()):
-            with patch("handlers.career._start_barriers_module", new=AsyncMock()) as start_barriers:
+            with patch("handlers.career.advance_assessment", new=AsyncMock(return_value="GENERATE_REPORT")) as advance:
                 await process_answers_input(message, state, "Сменить профессию")
                 self.assertEqual((state.data.get("pending_choice_reason") or {}).get("choice_label"), "Сменить профессию")
 
@@ -2213,9 +2213,9 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Сменить профессию", qa[0].get("answer", ""))
         self.assertEqual(qa[1].get("question"), "Почему выбрана смена профессии")
         self.assertIn("мало денег", qa[1].get("answer", "").lower())
-        start_barriers.assert_awaited_once()
+        advance.assert_awaited_once()
 
-    async def test_fast_mode_forces_mandatory_diagnostics_phase(self) -> None:
+    async def test_fast_mode_finishes_without_mandatory_diagnostics_phase(self) -> None:
         state = FakeState(
             data={
                 "language": "ru",
@@ -2243,19 +2243,13 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage()
 
         with patch("handlers.career._track_event", new=AsyncMock()):
-            with patch("handlers.career._start_barriers_module", new=AsyncMock()) as start_barriers:
+            with patch("handlers.career.advance_assessment", new=AsyncMock(return_value="GENERATE_REPORT")) as advance:
                 await process_answers_input(message, state, "Ответ")
 
-        self.assertTrue(bool(state.data.get("mandatory_diagnostics_in_progress")))
+        self.assertFalse(bool(state.data.get("mandatory_diagnostics_in_progress")))
         self.assertFalse(bool(state.data.get("mandatory_diagnostics_done")))
-        self.assertEqual(state.data.get("qa_index"), 0)
-        follow_up = (state.data.get("story_analysis") or {}).get("follow_up_questions", [])
-        follow_up_keys = {str(item.get("multi_key") or "") for item in follow_up if isinstance(item, dict)}
-        self.assertIn("psych", follow_up_keys)
-        self.assertIn("integration", follow_up_keys)
-        self.assertIn("energy", follow_up_keys)
-        self.assertIn("priorities", follow_up_keys)
-        start_barriers.assert_not_awaited()
+        self.assertEqual(state.data.get("qa_index"), 1)
+        advance.assert_awaited_once()
 
     async def test_barriers_repeat_choice_from_previous_group_does_not_stall(self) -> None:
         state = FakeState(
