@@ -178,6 +178,10 @@ from keyboards import (
     telegram_link_keyboard,
     think_reminder_keyboard,
     first_step_selection_keyboard,
+    assessment_actions_keyboard,
+    start_guide_keyboard,
+    guide_followup_keyboard,
+    income_urgency_keyboard,
     selected_step_actions_keyboard,
     assessment_recovery_keyboard,
 )
@@ -207,6 +211,10 @@ from services.career_assessment import (
     render_first_step_instruction,
     render_route_comparison,
     render_telegram_map,
+    render_short_conclusion,
+    start_guide_response,
+    validated_assessment_result,
+    build_income_bridge,
     validate_career_assessment,
 )
 from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors, contamination_errors
@@ -7220,8 +7228,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             stored_assessment = None
         if stored_assessment is not None:
             await message.answer(
-                render_telegram_map(stored_assessment),
-                reply_markup=first_step_selection_keyboard(stored_assessment),
+                render_short_conclusion(validated_assessment_result(stored_assessment)),
+                reply_markup=assessment_actions_keyboard(stored_assessment),
             )
             html_report_path = str(data.get("html_report_path") or "").strip()
             if not html_report_path or not Path(html_report_path).is_file():
@@ -7238,20 +7246,18 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                         reply_markup=assessment_recovery_keyboard(),
                     )
                     return
-            if Path(html_report_path).is_file():
-                await message.answer_document(
-                    FSInputFile(html_report_path),
-                    caption=t(lang, "web_report_ready"),
-                )
             await state.set_state(CareerFlow.REPORT_READY)
             await state.update_data(
                 career_assessment=stored_assessment.to_dict(),
+                validated_assessment_result=validated_assessment_result(stored_assessment),
                 final_report=stored_assessment.to_dict(),
                 final_report_generated=True,
                 assessment_id=stored_assessment.assessment_id,
                 report_generation_id=stored_assessment.assessment_id,
                 report_generation_status="ASSESSMENT_REUSED",
             )
+            if Path(html_report_path).is_file():
+                await message.answer_document(FSInputFile(html_report_path), caption=t(lang, "web_report_ready"))
             await _track_event(
                 message,
                 state,
@@ -7449,6 +7455,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     )
     await state.update_data(
         career_assessment=assessment_payload,
+        validated_assessment_result=validated_assessment_result(assessment),
         final_report=assessment_payload,
         final_report_generated=True,
         report_generation_status=generation_status,
@@ -7472,8 +7479,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     )
 
     await message.answer(
-        render_telegram_map(assessment),
-        reply_markup=first_step_selection_keyboard(assessment),
+        render_short_conclusion(validated_assessment_result(assessment)),
+        reply_markup=assessment_actions_keyboard(assessment),
     )
     try:
         save_report_version(assessment_id, public_user_id, assessment_payload, session_id=session_id)
@@ -7525,6 +7532,86 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     await state.set_state(CareerFlow.REPORT_READY)
     await state.update_data(html_report_path=html_report_path, selected_first_step_id=None)
     update_report_files(assessment_id, html_report_path=html_report_path)
+
+
+@router.callback_query(F.data.startswith("assessment_action:"))
+async def assessment_followup_action(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    payload = data.get("career_assessment")
+    if len(parts) != 3 or not isinstance(payload, dict) or parts[1] != str(payload.get("assessment_id") or ""):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    assessment = career_assessment_from_dict(payload)
+    result = data.get("validated_assessment_result")
+    if not isinstance(result, dict):
+        result = validated_assessment_result(assessment)
+        await state.update_data(validated_assessment_result=result)
+    action = parts[2]
+    if callback.message and action == "full":
+        path = str(data.get("html_report_path") or "")
+        if path and Path(path).is_file():
+            await callback.message.answer_document(FSInputFile(path), caption=t(_user_language(data), "web_report_ready"))
+        else:
+            await callback.message.answer("Полный отчёт ещё сохраняется. Попробуйте открыть его через несколько секунд.")
+    elif callback.message and action == "guide":
+        await state.set_state(CareerFlow.START_GUIDE)
+        await callback.message.answer(start_guide_response(result), reply_markup=start_guide_keyboard(assessment.assessment_id))
+    elif callback.message and action == "income":
+        await callback.message.answer("Когда должен появиться дополнительный или новый доход?", reply_markup=income_urgency_keyboard(assessment.assessment_id))
+    elif callback.message and action == "resume":
+        await callback.message.answer("Пришлите резюме или описание одного результата — используем сохранённое профессиональное ядро и маршрут без повторного анализа профиля.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("start_guide:"))
+async def handle_start_guide_branch(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    result = data.get("validated_assessment_result")
+    if len(parts) != 3 or not isinstance(result, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    if callback.message:
+        await callback.message.answer(start_guide_response(result, parts[2]), reply_markup=guide_followup_keyboard(parts[1], parts[2]))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("guide_choice:"))
+async def handle_start_guide_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 3)
+    result = data.get("validated_assessment_result")
+    if len(parts) != 4 or not isinstance(result, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    if callback.message:
+        await callback.message.answer(start_guide_response(result, parts[2], parts[3]))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("income_urgency:"))
+async def handle_income_urgency(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    parts = str(callback.data or "").split(":", 2)
+    result = data.get("validated_assessment_result")
+    if len(parts) != 3 or not isinstance(result, dict):
+        await callback.answer("Заключение не найдено", show_alert=True)
+        return
+    bridge = build_income_bridge(result, parts[2])
+    if bridge is None:
+        text = "Срочный финансовый мост не создаём. Сохраняем основной карьерный маршрут."
+    else:
+        result = {**result, "income_bridge": bridge}
+        await state.update_data(validated_assessment_result=result)
+        text = "\n".join([
+            f"Что искать или предлагать: {bridge['offer']}", f"Кому: {bridge['audience']}",
+            f"Срок проверки: {bridge['test_period']}", f"Подготовить: {bridge['prepare']}",
+            f"Критерий спроса: {bridge['demand_signal']}", f"Защита основного перехода: {bridge['guardrail']}",
+        ])
+    if callback.message:
+        await callback.message.answer(text)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("step_callback:"))

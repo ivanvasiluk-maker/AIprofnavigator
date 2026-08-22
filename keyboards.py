@@ -15,15 +15,41 @@ LANG_BUTTON_TO_CODE = {
 
 def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboardMarkup:
     rows = [
-        [
-            InlineKeyboardButton(
-                text=STEP_BUTTON_LABELS[step.type],
-                callback_data=f"step_callback:{assessment.assessment_id}:{index}",
-            )
-        ]
+        [InlineKeyboardButton(text=STEP_BUTTON_LABELS[step.type], callback_data=f"step_callback:{assessment.assessment_id}:{index}")]
         for index, step in enumerate(assessment.first_steps)
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def assessment_actions_keyboard(assessment: CareerAssessment) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="📄 Полный отчёт", callback_data=f"assessment_action:{assessment.assessment_id}:full")],
+        [InlineKeyboardButton(text="🧭 Не знаю, с чего начать", callback_data=f"assessment_action:{assessment.assessment_id}:guide")],
+        [InlineKeyboardButton(text="💰 Мне срочно нужен доход", callback_data=f"assessment_action:{assessment.assessment_id}:income")],
+        [InlineKeyboardButton(text="🔄 Хочу другие варианты", callback_data=f"show_first_steps:{assessment.assessment_id}")],
+        [InlineKeyboardButton(text="📝 Подготовить резюме", callback_data=f"assessment_action:{assessment.assessment_id}:resume")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def start_guide_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    options = [("Не понимаю, какую профессию выбрать", "choose"), ("Боюсь ошибиться", "fear"), ("Не знаю, где искать вакансии", "vacancies"), ("Не умею описать свой опыт", "experience"), ("Не хватает сил или времени", "energy"), ("Другое", "other")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"start_guide:{assessment_id}:{code}")] for text, code in options])
+
+
+def guide_followup_keyboard(assessment_id: str, branch: str) -> InlineKeyboardMarkup | None:
+    options = {
+        "choose": [("Сохранить доход", "income"), ("Использовать прошлый опыт", "experience"), ("Быстрее перейти", "speed"), ("Меньше стресса", "stress"), ("Больше интереса", "interest"), ("Пока не знаю", "unknown")],
+        "energy": [("5 минут", "5"), ("15 минут", "15"), ("30 минут", "30"), ("Не сегодня", "later")],
+    }.get(branch)
+    if not options:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"guide_choice:{assessment_id}:{branch}:{code}")] for text, code in options])
+
+
+def income_urgency_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    options = [("До месяца", "month"), ("За 1–3 месяца", "1_3"), ("За 3–6 месяцев", "3_6"), ("Срочности нет", "none")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"income_urgency:{assessment_id}:{code}")] for text, code in options])
 
 
 def selected_step_actions_keyboard(assessment: CareerAssessment, step_id: str) -> InlineKeyboardMarkup:
