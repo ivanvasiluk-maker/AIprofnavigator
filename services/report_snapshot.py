@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +32,56 @@ class ReportSnapshot(BaseModel):
 def _texts(value: object) -> list[str]:
     values = value if isinstance(value, list) else [value]
     return [str(item).strip() for item in values if str(item or "").strip()]
+
+
+FUNCTION_ALIASES = (
+    "confirmed_functions", "functions", "professional_functions",
+    "recurring_functions", "tasks", "responsibilities",
+)
+
+
+def normalize_functions(extraction: object, source: str = "unknown") -> list[dict[str, Any]]:
+    """Convert every supported extractor alias to the sole function contract."""
+    payload = extraction if isinstance(extraction, dict) else {"confirmed_functions": extraction}
+    result: list[dict[str, Any]] = []
+    for alias in FUNCTION_ALIASES:
+        raw = payload.get(alias)
+        for item in raw if isinstance(raw, list) else ([raw] if raw else []):
+            row = item if isinstance(item, dict) else {"label": item}
+            label = str(row.get("label") or row.get("name") or row.get("title") or "").strip()
+            if not label:
+                continue
+            function_id = str(row.get("id") or re.sub(r"[^a-zа-яё0-9]+", "_", label.casefold()).strip("_")).strip()
+            result.append({
+                "id": function_id,
+                "label": label,
+                "category": "function",
+                "evidence": _texts(row.get("evidence")),
+                "sources": list(dict.fromkeys(_texts(row.get("sources")) + ([source] if source != "unknown" else []))),
+                "frequency": row.get("frequency") if row.get("frequency") in {"regular", "occasional", "unknown"} else "unknown",
+                "confidence": row.get("confidence") if row.get("confidence") in {"high", "medium", "low"} else "medium",
+            })
+    return result
+
+
+def merge_functions(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Union function evidence; an empty incoming extraction never erases facts."""
+    merged: list[dict[str, Any]] = []
+    for row in (item for group in groups for item in group):
+        match = next((old for old in merged if old["id"] == row["id"] or (
+            old["category"] == row["category"] and
+            SequenceMatcher(None, old["label"].casefold(), row["label"].casefold()).ratio() >= .82
+        )), None)
+        if match is None:
+            merged.append(copy.deepcopy(row))
+            continue
+        match["evidence"] = list(dict.fromkeys(match["evidence"] + row["evidence"]))
+        match["sources"] = list(dict.fromkeys(match["sources"] + row["sources"]))
+        if row["confidence"] == "high" or match["confidence"] == "low":
+            match["confidence"] = row["confidence"]
+        if row["frequency"] == "regular":
+            match["frequency"] = "regular"
+    return merged
 
 
 def _person_name(story_text: str, analysis: dict[str, Any]) -> str | None:
@@ -76,7 +127,12 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
     normalized = canonical.normalized_profile
     story_analysis = copy.deepcopy(data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {})
     resume_analysis = copy.deepcopy(data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {})
-    functions = list(dict.fromkeys(normalized.professional_functions + _texts(story_analysis.get("confirmed_functions")) + _texts(resume_analysis.get("confirmed_functions"))))
+    confirmed_functions = merge_functions(
+        normalize_functions({"confirmed_functions": normalized.professional_functions}, "persisted"),
+        normalize_functions(story_analysis, "story"),
+        normalize_functions(resume_analysis, "resume"),
+    )
+    functions = [row["label"] for row in confirmed_functions]
     evidence = [
         str(fact.normalized_value).strip()
         for fact in canonical.facts
@@ -110,6 +166,7 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
             "country": country,
             "city": city,
             "professional_functions": functions,
+            "confirmed_functions": confirmed_functions,
             "years_experience": normalized.years_experience or (int(experience_match.group(1)) if experience_match else None),
             "team_size": int(re.search(r"(?:команд\w*|подчинени\w*)[^\d]{0,20}(\d+)", story_text, re.I).group(1)) if re.search(r"(?:команд\w*|подчинени\w*)[^\d]{0,20}(\d+)", story_text, re.I) else None,
         },
