@@ -1147,10 +1147,22 @@ def build_deterministic_assessment(
     if not current_roles:
         current_roles = [role for role in concise(values(story_analysis, "professional_core_hypotheses")) if is_valid_occupation_title(role)][:1]
     historical_roles = concise(values(resume_analysis, "job_titles", "positions", "roles"))
-    target_roles = [role for role in concise(
+    selected_route = profile_snapshot.get("selected_route") if isinstance(profile_snapshot.get("selected_route"), dict) else {}
+    selected_route_supported = (
+        len(values(selected_route, "evidence")) >= 2
+        and len(values(selected_route, "confirmed_functions")) >= 2
+    )
+    selected_route_titles = values(selected_route, "title") if selected_route_supported else []
+    explicit_target_roles = (
         values(profile_snapshot, "target_roles")
         + values(story_analysis, "career_hypotheses", "target_roles", "role_hypotheses")
         + values(resume_analysis, "target_roles")
+    )
+    snapshot_hypotheses = values(profile_snapshot, "route_hypotheses") if not explicit_target_roles else []
+    target_roles = [role for role in concise(
+        selected_route_titles
+        + explicit_target_roles
+        + snapshot_hypotheses
     ) if is_valid_occupation_title(role)]
     target_roles = [role for role in target_roles if role not in current_roles]
 
@@ -1566,6 +1578,9 @@ def build_deterministic_assessment(
 
     evaluated = [(candidate, evaluate(candidate), index) for index, candidate in enumerate(candidates)]
     evaluated.sort(key=lambda item: (
+        # A user-selected hypothesis backed by at least two current-assessment
+        # facts is the primary route to verify, rather than a disposable label.
+        not (selected_route_supported and item[0]["title"].casefold() in {title.casefold() for title in selected_route_titles}),
         # An unchanged current occupation is financial support, not the final
         # recommendation, whenever concrete alternative market roles exist.
         bool(item[0]["kind"] == "continuation" and bool(target_roles)),

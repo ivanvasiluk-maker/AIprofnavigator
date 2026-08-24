@@ -25,14 +25,30 @@ CITY_COUNTRIES = {
     "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
     "прага": ("Czechia", "CZ"), "праге": ("Czechia", "CZ"),
     "porto": ("Portugal", "PT"), "порту": ("Portugal", "PT"),
-    "vilnius": ("Lithuania", "LT"), "вильнюс": ("Lithuania", "LT"),
-    "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"),
-    "riga": ("Latvia", "LV"), "рига": ("Latvia", "LV"),
-    "tallinn": ("Estonia", "EE"), "таллин": ("Estonia", "EE"),
+    "vilnius": ("Lithuania", "LT"), "вильнюс": ("Lithuania", "LT"), "вильнюсе": ("Lithuania", "LT"),
+    "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"), "варшаве": ("Poland", "PL"),
+    "riga": ("Latvia", "LV"), "рига": ("Latvia", "LV"), "риге": ("Latvia", "LV"),
+    "tallinn": ("Estonia", "EE"), "таллин": ("Estonia", "EE"), "таллине": ("Estonia", "EE"),
     "valencia": ("Spain", "ES"), "валенсия": ("Spain", "ES"),
     "валенсии": ("Spain", "ES"),
     "krakow": ("Poland", "PL"), "kraków": ("Poland", "PL"),
     "краков": ("Poland", "PL"), "кракове": ("Poland", "PL"),
+    "brno": ("Czechia", "CZ"), "брно": ("Czechia", "CZ"),
+}
+
+CITY_DISPLAY_NAMES = {
+    "tbilisi": "Tbilisi", "тбилиси": "Tbilisi",
+    "kaunas": "Kaunas", "каунас": "Kaunas", "каунасе": "Kaunas",
+    "berlin": "Berlin", "берлин": "Berlin", "берлине": "Berlin",
+    "prague": "Prague", "praha": "Prague", "прага": "Prague", "праге": "Prague",
+    "porto": "Porto", "порту": "Porto",
+    "vilnius": "Vilnius", "вильнюс": "Vilnius", "вильнюсе": "Vilnius",
+    "warsaw": "Warsaw", "варшава": "Warsaw", "варшаве": "Warsaw",
+    "riga": "Riga", "рига": "Riga", "риге": "Riga",
+    "tallinn": "Tallinn", "таллин": "Tallinn", "таллине": "Tallinn",
+    "valencia": "Valencia", "валенсия": "Валенсия", "валенсии": "Валенсия",
+    "krakow": "Krakow", "kraków": "Krakow", "краков": "Краков", "кракове": "Краков",
+    "brno": "Brno", "брно": "Brno",
 }
 
 COUNTRY_CURRENCIES = {
@@ -41,7 +57,7 @@ COUNTRY_CURRENCIES = {
     "Spain": "EUR", "Portugal": "EUR",
 }
 COUNTRY_CODE_CURRENCIES = {
-    "GE": "GEL", "LT": "EUR", "DE": "EUR", "PT": "EUR", "ES": "EUR", "PL": "PLN",
+    "GE": "GEL", "LT": "EUR", "DE": "EUR", "PT": "EUR", "ES": "EUR", "PL": "PLN", "CZ": "CZK",
 }
 
 
@@ -323,6 +339,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         "language": route.get("languages") or data.get("languages") or route.get("current_language_level") or data.get("current_language_level"),
         "format": route.get("work_preferences") or data.get("work_preferences"),
         "constraints": route.get("health_or_schedule_limits") or data.get("care_constraints"),
+        "training_hours": route.get("available_time_for_study") or data.get("learning_hours_week"),
+        "training_budget": route.get("training_budget") or data.get("learning_budget"),
         "relocation": route.get("relocation_and_travel") or route.get("relocation_possible") or data.get("relocation_possible"),
         "change_scale": route.get("career_goal_type") or data.get("career_goal"),
         "preserve": route.get("functions_to_preserve") or data.get("functions_to_preserve"),
@@ -334,13 +352,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         low = text.casefold().replace("ё", "е")
         for city, (country, code) in CITY_COUNTRIES.items():
             if re.search(rf"\b{re.escape(city)}\b", low):
-                display_city = (
-                    "Валенсия" if city in {"валенсия", "валенсии"}
-                    else "Краков" if city in {"краков", "кракове"}
-                    else "Prague" if city in {"prague", "praha", "прага", "праге"}
-                    else "Berlin" if city in {"berlin", "берлин", "берлине"}
-                    else city.title()
-                )
+                display_city = CITY_DISPLAY_NAMES.get(city, city.title())
                 profile.facts.append(_fact(assessment_id, "market_context", {"city": display_city, "country": country, "country_code": code}, message_id, text, .98, created_at or None))
                 break
         if not any(f.source_message_id == message_id and f.fact_type == "market_context" for f in profile.facts):
@@ -426,6 +438,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         add_structured("language", {"display": language_value}, str(language_value or ""))
     add_structured("preferred_format", structured["format"], str(structured["format"] or ""))
     add_structured("constraint", structured["constraints"], str(structured["constraints"] or ""))
+    add_structured("learning_resource", {"kind": "training_hours", "display": structured["training_hours"]}, str(structured["training_hours"] or ""))
+    add_structured("learning_resource", {"kind": "training_budget", "display": structured["training_budget"]}, str(structured["training_budget"] or ""))
     add_structured("market_context", {"relocation": structured["relocation"]}, str(structured["relocation"] or ""))
     add_structured("interest", structured["change_scale"], str(structured["change_scale"] or ""))
     add_structured("professional_function", structured["preserve"], str(structured["preserve"] or ""))
@@ -591,9 +605,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     elif re.search(r"(?:готов\w*\s+к\s+переезд|могу\s+переех|relocat)", low_all):
         relocation_allowed = True
     work_rights_value = profile.latest_value("work_authorization")
+    work_rights_text = str(work_rights_value).casefold()
     work_rights = work_rights_value if isinstance(work_rights_value, bool) else (
-        True if str(work_rights_value).casefold() in {"да", "есть", "true", "authorized"}
-        else False if str(work_rights_value).casefold() in {"нет", "false", "without"} else None
+        False if re.search(r"нет|не име|without", work_rights_text)
+        else True if re.search(r"\b(?:да|есть|true|authorized)\b|прав[оа]\s+на\s+работ", work_rights_text) else None
     )
     experience_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:лет|года|год|years?)\s+(?:опыт|стаж)", low_all)
     hours_match = re.search(r"(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?)\s*(?:час\w*|hours?)\s+(?:в\s+)?недел", low_all)
@@ -601,6 +616,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
     horizon_match = re.search(r"(?:за|на|в течение)\s*(\d+)\s*(месяц\w*|months?)", low_all)
     target_numbers = re.findall(r"\d+(?:[.,]\d+)?", (target_raw or "").replace(" ", ""))
     learning_facts = [f.normalized_value for f in profile.facts_of_type("learning_resource") if isinstance(f.normalized_value, dict)]
+    hours_display = next((str(item.get("display") or "") for item in reversed(learning_facts) if item.get("kind") == "training_hours"), "")
+    budget_display = next((str(item.get("display") or "") for item in reversed(learning_facts) if item.get("kind") == "training_budget"), "")
+    structured_hours_match = re.search(r"\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?", hours_display)
+    structured_budget_match = re.search(r"(\d[\d\s]*).*?\b(EUR|PLN|CZK|KČ)\b", budget_display, re.I)
     budget_currency_token = (budget_match.group(1) or budget_match.group(3) or "") if budget_match else ""
     budget_currency = ({"€": "EUR", "EUR": "EUR", "PLN": "PLN", "ZŁ": "PLN", "CZK": "CZK", "KČ": "CZK"}.get(budget_currency_token.upper()))
     if learning_facts:
@@ -657,8 +676,8 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         country=country, country_code=country_code or None, city=city, local_currency=residence_currency,
         target_market=target_market,
         target_market_formats=[item for item, matched in (
-            ("local", bool(re.search(r"локальн|local", low_all))),
-            ("remote", bool(re.search(r"удален|remote", low_all))),
+            ("local", bool(re.search(r"локальн|local", low_all + " " + " ".join(strings("preferred_format")).casefold()))),
+            ("remote", bool(re.search(r"удален|remote", low_all + " " + " ".join(strings("preferred_format")).casefold()))),
         ) if matched],
         target_market_primary=target_primary, target_market_secondary=target_secondary,
         relocation_allowed=relocation_allowed,
@@ -679,9 +698,9 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         income_period=str(latest_income.get("period") or "month"),
         gross_net=str(latest_income.get("tax_basis") or "").lower() or None,
         schedule_constraints=strings("constraint"),
-        training_hours_per_week=(hours_match.group(1).replace(" ", "") if hours_match and re.search(r"[–-]", hours_match.group(1)) else float(hours_match.group(1).replace(",", ".")) if hours_match else None),
-        training_budget=float(budget_match.group(2).replace(" ", "")) if budget_match else (float(str(learning_facts[-1].get("amount"))) if learning_facts else None),
-        training_budget_currency=budget_currency,
+        training_hours_per_week=(hours_match.group(1).replace(" ", "") if hours_match and re.search(r"[–-]", hours_match.group(1)) else float(hours_match.group(1).replace(",", ".")) if hours_match else structured_hours_match.group().replace(" ", "") if structured_hours_match else None),
+        training_budget=float(budget_match.group(2).replace(" ", "")) if budget_match else float(structured_budget_match.group(1).replace(" ", "")) if structured_budget_match else None,
+        training_budget_currency=budget_currency or (structured_budget_match.group(2).upper().replace("KČ", "CZK") if structured_budget_match else None),
         training_horizon=f"{horizon_match.group(1)} months" if horizon_match else None,
         current_income_fact=current_money, minimum_income_fact=minimum_money, target_income_fact=target_money,
         training_budget_fact=(MoneyFact(amount=float(budget_match.group(2).replace(" ", "")), currency=budget_currency,

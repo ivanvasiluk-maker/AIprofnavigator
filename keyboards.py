@@ -199,6 +199,13 @@ RESULT_UPLOAD_OR_EDIT_RESUME = "📄 Загрузить / доработать �
 RESULT_ANALYZE_MARKET = "🔎 Разобрать рынок и вакансии"
 RESULT_SPECIALIST_EXPLICIT = "👤 Разобрать со специалистом"
 RESULT_GROUP_EXPLICIT = "👥 Найти группу / сообщество"
+REPORT_RETRY = "Повторить заключение"
+REPORT_SHORT_FALLBACK = "Получить краткий результат"
+REPORT_CONTACT_SUPPORT = "Связаться с поддержкой"
+SNAPSHOT_RETRY = "Повторить сборку"
+SNAPSHOT_CHECK_FACTS = "Проверить сохранённые факты"
+SNAPSHOT_SHORT_RESULT = "Получить краткое заключение"
+SNAPSHOT_SUPPORT = "Поддержка"
 CTA_CAREER_CHAT = "💬 Продолжить в карьерном чате"
 CTA_CAREER_CONSULTANT = "👤 Разобрать решение с карьерным консультантом"
 CTA_JOB_SEARCH_SUPPORT = "🎯 Перейти к сопровождению поиска работы"
@@ -344,6 +351,13 @@ ALL_PSYCH_BARRIER_OPTIONS = set(PSYCH_BARRIER_OPTIONS)
 ALL_PSYCH_BARRIER_DONE = {PSYCH_BARRIER_DONE}
 ALL_PSYCH_GROUP_OPTIONS = {BARRIER_GROUP_INTERNAL, BARRIER_GROUP_BEHAVIOR, BARRIER_GROUP_LIFE, BARRIER_GROUP_MORE, PSYCH_SKIP}
 ALL_RESULT_ACTIONS = {
+    SNAPSHOT_RETRY,
+    SNAPSHOT_CHECK_FACTS,
+    SNAPSHOT_SHORT_RESULT,
+    SNAPSHOT_SUPPORT,
+    REPORT_RETRY,
+    REPORT_SHORT_FALLBACK,
+    REPORT_CONTACT_SUPPORT,
     RESULT_OPEN_FULL_REPORT,
     RESULT_SELF_EXPLORE,
     RESULT_DO_STEPS,
@@ -712,6 +726,29 @@ def pdf_fallback_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=PDF_FALLBACK_STEPS)],
             [KeyboardButton(text=PDF_FALLBACK_CLARIFY)],
             [KeyboardButton(text=PDF_FALLBACK_SPECIALIST)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def report_failure_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=REPORT_RETRY)],
+            [KeyboardButton(text=REPORT_SHORT_FALLBACK)],
+            [KeyboardButton(text=REPORT_CONTACT_SUPPORT)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def snapshot_failure_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=SNAPSHOT_RETRY)],
+            [KeyboardButton(text=SNAPSHOT_CHECK_FACTS)],
+            [KeyboardButton(text=SNAPSHOT_SHORT_RESULT)],
+            [KeyboardButton(text=SNAPSHOT_SUPPORT)],
         ],
         resize_keyboard=True,
     )

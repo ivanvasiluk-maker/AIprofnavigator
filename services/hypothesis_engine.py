@@ -229,7 +229,9 @@ def format_conversation_turn(
     if action == "confirm_hypothesis" and turn.hypothesis:
         h = turn.hypothesis
         statement = h.statement.rstrip(".")
-        question = next_question_text or "Это похоже на ваш случай?"
+        if next_question_text:
+            return next_question_text
+        question = "Это похоже на ваш случай?"
         return (
             f"Похоже, {statement.lower()}.\n\n"
             f"Это похоже на ваш случай, или ценность вашей работы была в другом?\n\n"

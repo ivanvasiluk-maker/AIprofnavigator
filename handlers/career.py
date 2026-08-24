@@ -9,10 +9,13 @@ import re
 import tempfile
 import uuid
 import zipfile
+from html import unescape
 from functools import wraps
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+
+import aiohttp
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
@@ -58,6 +61,13 @@ from keyboards import (
     RESULT_ANALYZE_MARKET,
     RESULT_SPECIALIST_EXPLICIT,
     RESULT_GROUP_EXPLICIT,
+    REPORT_RETRY,
+    REPORT_SHORT_FALLBACK,
+    REPORT_CONTACT_SUPPORT,
+    SNAPSHOT_RETRY,
+    SNAPSHOT_CHECK_FACTS,
+    SNAPSHOT_SHORT_RESULT,
+    SNAPSHOT_SUPPORT,
     CTA_CAREER_CHAT,
     CTA_CAREER_CONSULTANT,
     CTA_JOB_SEARCH_SUPPORT,
@@ -156,6 +166,8 @@ from keyboards import (
     extended_diagnostics_keyboard,
     question_options_keyboard,
     result_actions_keyboard,
+    report_failure_keyboard,
+    snapshot_failure_keyboard,
     next_step_cta_keyboard,
     self_exploration_keyboard,
     short_story_keyboard,
@@ -201,6 +213,7 @@ from services.canonical_profile import (
     record_question_answer,
     select_clarifying_question,
 )
+from services.report_snapshot import ReportSnapshot, build_report_snapshot, structured_identity_summary, validate_report_consistency, validate_report_snapshot
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -317,6 +330,117 @@ _CONSTRUCTION_BRIDGE_ROLES = [
 # user_mode, session_id, source_tag, memory_context, interaction_profile (overwritten below).
 SESSION_FSM_CACHE: dict[tuple[str, str], FSMContext] = {}
 SESSION_MESSAGE_CACHE: dict[tuple[str, str], Message] = {}
+
+ASSESSMENT_ASK_ONE_QUESTION = "ASK_ONE_QUESTION"
+ASSESSMENT_GENERATE_REPORT = "GENERATE_REPORT"
+ASSESSMENT_REPORT_READY = "REPORT_READY"
+
+
+def _resolved_fact_types(data: dict[str, object]) -> set[str]:
+    """Resolve facts across every source belonging to the current assessment."""
+    assessment_id = str(data.get("assessment_id") or data.get("report_generation_id") or "pending-assessment")
+    canonical = build_canonical_profile(data, assessment_id=assessment_id)
+    normalized = canonical.normalized_profile
+    resolved: set[str] = set()
+    if normalized.country:
+        resolved.add("country")
+    if normalized.city:
+        resolved.add("city")
+    if normalized.work_rights is not None:
+        resolved.update({"work_authorization", "legal_access"})
+    if normalized.languages:
+        resolved.update({"work_languages", "location_language"})
+    if normalized.minimum_income is not None:
+        resolved.add("minimum_income")
+    if normalized.target_income or normalized.target_income_min is not None:
+        resolved.add("salary_target")
+    if normalized.target_market or normalized.target_market_formats:
+        resolved.update({"target_market", "target_country", "work_format"})
+    if normalized.relocation_allowed is not None:
+        resolved.add("relocation")
+    if normalized.training_hours_per_week is not None:
+        resolved.add("learning_capacity")
+    if normalized.training_budget is not None:
+        resolved.add("training_budget")
+    if normalized.schedule_constraints:
+        resolved.add("work_constraints")
+    return resolved
+
+
+def should_finalize_assessment(data: dict[str, object]) -> bool:
+    """A basic conclusion needs a professional core, not complete market intake."""
+    assessment_id = str(data.get("assessment_id") or data.get("report_generation_id") or "pending-assessment")
+    canonical = build_canonical_profile(data, assessment_id=assessment_id)
+    normalized = canonical.normalized_profile
+    functions = [item for item in normalized.professional_functions if str(item).strip()]
+    analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    if len(functions) < 2:
+        functions = [str(item).strip() for item in analysis.get("confirmed_functions", analysis.get("functions", [])) if str(item).strip()]
+    has_domain = bool(normalized.current_role or analysis.get("current_role") or analysis.get("industry_experience") or analysis.get("experience_snapshot"))
+    has_change = bool(normalized.desired_changes or analysis.get("goals") or analysis.get("target_roles") or analysis.get("desired_changes"))
+    return len(set(functions)) >= 2 and has_domain and has_change
+
+
+async def advance_assessment(message: Message, state: FSMContext, *, trigger: str) -> str:
+    """Choose and execute one of the three legal outcomes of an assessment step."""
+    data = await state.get_data()
+    report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+    if report and bool(data.get("final_report_generated") or data.get("report_already_generated")):
+        await state.set_state(CareerFlow.REPORT_READY)
+        await message.answer("Заключение уже готово.", reply_markup=result_actions_keyboard())
+        return ASSESSMENT_REPORT_READY
+
+    resolved = _resolved_fact_types(data)
+    evidence = _load_evidence_profile(data, data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {})
+    unresolved = [gap for gap in evidence.unresolved_gaps if gap not in resolved]
+    mode = str(data.get("user_mode") or "calm_steps")
+    limit = 1 if mode in {"fast", "quick"} else 5
+    question_count = int(data.get("question_count") or 0)
+    step_completed = trigger in {"psychology_done", "route_selected", "resume_parsed", "questions_completed"}
+    should_generate = should_finalize_assessment(data) or question_count >= limit or step_completed or not unresolved
+    await state.update_data(resolved_fact_types=sorted(resolved), remaining_gaps=unresolved)
+
+    if should_generate:
+        await state.update_data(required_questions_completed=True, clarification_limit_reached=question_count >= limit)
+        await message.answer("Данных достаточно. Формирую карьерное заключение.", reply_markup=ReplyKeyboardRemove())
+        public_user_id = str(data.get("public_user_id") or "").strip()
+        session_id = str(data.get("session_id") or "").strip()
+        if public_user_id and session_id:
+            await _register_session_context(state, message, user_id=public_user_id, session_id=session_id)
+            await _maybe_trigger_career_finalization(message, state, trigger=trigger)
+        else:
+            # Watchdog fallback for recovered/legacy sessions without routing
+            # identifiers: never acknowledge a completed step and then go dark.
+            await _build_and_send_report(message, state, _user_language(data))
+        return ASSESSMENT_GENERATE_REPORT
+
+    evidence.unresolved_gaps = unresolved
+    question = next_question_from_profile(
+        evidence,
+        language=_user_language(data),
+        asked_gap_keys=set(data.get("asked_gap_keys") or []),
+        user_mode=mode,
+    )
+    if not question:
+        # A missing question renderer must not create a fourth, silent outcome.
+        await state.update_data(required_questions_completed=True)
+        await message.answer("Данных достаточно. Формирую карьерное заключение.", reply_markup=ReplyKeyboardRemove())
+        await _build_and_send_report(message, state, _user_language(data))
+        return ASSESSMENT_GENERATE_REPORT
+    gap_key = str(question.get("gap_key") or "").strip()
+    asked_gap_keys = set(data.get("asked_gap_keys") or [])
+    if gap_key:
+        asked_gap_keys.add(gap_key)
+    question_count += 1
+    await state.update_data(
+        story_analysis={**(data.get("story_analysis") or {}), "follow_up_questions": [question]},
+        qa_index=0,
+        question_count=question_count,
+        asked_gap_keys=sorted(asked_gap_keys),
+    )
+    await state.set_state(CareerFlow.INTERVIEW)
+    await message.answer(str(question.get("question") or "Уточните один важный факт."), reply_markup=_route_specific_reply_markup(question))
+    return ASSESSMENT_ASK_ONE_QUESTION
 
 
 async def _register_session_context(state: FSMContext, message: Message | None = None, *, user_id: str | None = None, session_id: str | None = None) -> None:
@@ -486,7 +610,10 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
                          "Уверенность: низкая. Диапазон требует рыночной проверки.\n\n"
                          "Первые шаги: 1) пять вакансий; 2) один кейс; 3) один разговор со специалистом.")
         if message is not None:
-            await message.answer(fallback_text)
+            await message.answer(
+                "Не удалось завершить сборку отчёта с первой попытки. Ваши ответы сохранены."
+            )
+            await message.answer(fallback_text, reply_markup=report_failure_keyboard())
         await state.update_data(
             final_report=payload, short_report_sent=True, final_report_generated=True,
             report_already_generated=True, report_generation_status="REPORT_READY",
@@ -522,6 +649,11 @@ _STORY_RESET_FIELDS: dict[str, object] = {
     "answers_text": "",
     "interview_context": {},
     "asked_question_signatures": [],
+    "question_count": 0,
+    "resolved_fact_types": [],
+    "remaining_gaps": [],
+    "psychology_step": "optional",
+    "completed_steps": 0,
     "evidence_profile": {},
     "conversation_hypotheses": [],
     "preliminary_offer_shown": False,
@@ -1573,54 +1705,6 @@ def _route_specific_reply_markup(gap_row: dict[str, object]):
     return input_method_keyboard()
 
 
-async def _maybe_start_route_specific_clarification(
-    message: Message,
-    state: FSMContext,
-    lang: str,
-    selected_route: str,
-) -> bool:
-    data = await state.get_data()
-    if bool(data.get("awaiting_route_specific_questions")):
-        return True
-
-    from services.interview_policy import get_route_specific_gaps  # noqa: PLC0415
-
-    raw_ep = data.get("evidence_profile")
-    if isinstance(raw_ep, dict):
-        try:
-            profile = CareerEvidenceProfile.model_validate(raw_ep)
-        except Exception:
-            profile = build_evidence_profile_from_analysis(data.get("story_analysis") or {})
-    else:
-        profile = build_evidence_profile_from_analysis(data.get("story_analysis") or {})
-
-    gaps = get_route_specific_gaps(selected_route, profile)
-    if not gaps:
-        return False
-
-    gap_rows = [gap.model_dump() for gap in gaps]
-    first = gap_rows[0]
-    await state.update_data(
-        awaiting_route_specific_questions=True,
-        route_specific_gaps=gap_rows,
-        route_specific_index=0,
-        route_specific_answers=[],
-        route_specific_selected_route=selected_route,
-    )
-    await _track_event(
-        message,
-        state,
-        "route_specific_clarification_started",
-        meta={"route": selected_route, "count": len(gap_rows)},
-    )
-    await message.answer(
-        "Хорошо, выбрали маршрут. Уточню только важные детали именно для него.",
-        reply_markup=_route_specific_reply_markup(first),
-    )
-    await message.answer(str(first.get("prompt") or ""), reply_markup=_route_specific_reply_markup(first))
-    return True
-
-
 def _cancel_reminder(chat_id: int) -> None:
     task = _REMINDER_TASKS.pop(chat_id, None)
     if task and not task.done():
@@ -2464,7 +2548,9 @@ async def _ask_next_interview_question(
     lang: str,
     user_mode: str,
 ) -> bool:
-    if context.questions_asked_count >= 5:
+    question_limit = 1 if user_mode in {"fast", "quick"} else 5
+    question_count = int(data.get("question_count") or 0)
+    if question_count >= question_limit:
         context.current_action = "show_preliminary_map"
         await _save_interview_context(state, context)
         return False
@@ -2504,6 +2590,8 @@ async def _ask_next_interview_question(
     decision_change = _decision_that_may_change(row)
     await state.update_data(qa_index=next_index)
     await message.answer(hypothesis_text or text, reply_markup=_question_reply_markup(analysis, next_index))
+    question_count += 1
+    await state.update_data(question_count=question_count)
 
     turn_action = str(turn_meta.get("action") or "").strip()
     if turn_action == "confirm_hypothesis":
@@ -2555,7 +2643,7 @@ async def _ask_next_interview_question(
 
 def _build_evidence_questions(profile: CareerEvidenceProfile, lang: str, user_mode: str) -> list[dict[str, object]]:
     mode_key = str(user_mode or "calm_steps")
-    soft_cap = {"fast": 3, "calm_steps": 5, "deep_route": 5, "support": 5}.get(mode_key, 5)
+    soft_cap = {"fast": 1, "quick": 1, "calm_steps": 5, "deep_route": 5, "support": 5}.get(mode_key, 5)
 
     questions: list[dict[str, object]] = []
     asked_gap_keys: set[str] = set()
@@ -2748,20 +2836,8 @@ def _generate_preliminary_map(
             change_parts.append(f"уйти от: {stmt}")
     lines.append(f"\nЧто вы, вероятно, хотите изменить:\n{'; '.join(change_parts) if change_parts else 'уточняется'}")
 
-    # Two realistic directions — derive from hypotheses or functions
-    hypotheses = (story_analysis.get("professional_core_hypotheses") or [])
-    directions: list[str] = []
-    for h in hypotheses[:2]:
-        text = str(h or "").strip()
-        if text:
-            directions.append(text)
-    if len(directions) < 2 and funcs:
-        for f in funcs:
-            name = str(getattr(f, "function_name", "") or "").strip()
-            if name and name not in " ".join(directions):
-                directions.append(f"Роли в направлении: {name}")
-            if len(directions) >= 2:
-                break
+    # A route is a paid role title, never a sentence describing the person.
+    directions = _real_route_titles(story_analysis)
     route1 = directions[0] if directions else "Маршрут 1"
     route2 = directions[1] if len(directions) > 1 else "Маршрут 2"
     lines.append(f"\nДва реалистичных направления:\n1. {route1}\n2. {route2}")
@@ -2779,6 +2855,36 @@ def _generate_preliminary_map(
 
     lines.append("\nКакой вариант разберём глубже?\n\nЭто не окончательный отчёт.")
     return "\n".join(lines), route1, route2
+
+
+def _real_route_titles(analysis: dict[str, object]) -> list[str]:
+    explicit: list[str] = []
+    for key in ("target_roles", "career_hypotheses", "role_hypotheses"):
+        raw = analysis.get(key)
+        values = raw if isinstance(raw, list) else [raw]
+        for value in values:
+            title = str(value or "").strip()
+            if title and len(title.split()) <= 8 and not any(token in title.casefold() for token in ("имеет опыт", "хочет перейти", "ищет новое", "текущая профессиональная")):
+                explicit.append(title)
+    if explicit:
+        return list(dict.fromkeys(explicit))[:3]
+
+    blob = " ".join(
+        str(item)
+        for key in ("confirmed_functions", "functions", "skills", "experience_snapshot")
+        for item in (analysis.get(key) if isinstance(analysis.get(key), list) else [analysis.get(key)])
+        if item
+    ).casefold()
+    inferred: list[str] = []
+    if any(token in blob for token in ("качест", "quality", "дефект")):
+        inferred.append("Quality Engineer")
+    if any(token in blob for token in ("процесс", "улучш", "continuous improvement")):
+        inferred.append("Process Improvement Specialist")
+    if any(token in blob for token in ("документ", "documentation", "quality system")):
+        inferred.append("Quality Systems / Documentation Specialist")
+    if any(token in blob for token in ("обуч", "настав", "trainer")):
+        inferred.append("Manufacturing Trainer")
+    return inferred[:3]
 
 
 def _question_semantic_intent(question_text: str) -> str:
@@ -2897,6 +3003,72 @@ def _extract_pdf_text(raw_bytes: bytes) -> str:
         pages = [(page.extract_text() or "") for page in reader.pages]
         return " ".join(" ".join(pages).split())
     except Exception:
+        return ""
+
+
+_LINKEDIN_PROFILE_RE = re.compile(r"https://(?:[a-z0-9-]+\.)?linkedin\.com/in/[^\s?#]+", re.IGNORECASE)
+
+
+def _is_linkedin_host(hostname: str) -> bool:
+    host = (hostname or "").lower().rstrip(".")
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+def _linkedin_profile_url(text: str) -> str:
+    """Return a safe public LinkedIn profile URL found in a user message."""
+    match = _LINKEDIN_PROFILE_RE.search(text or "")
+    if not match:
+        return ""
+    candidate = match.group(0).rstrip(".,;:!?)]}>")
+    parsed = urlparse(candidate)
+    if parsed.scheme != "https" or not _is_linkedin_host(parsed.hostname or ""):
+        return ""
+    return candidate
+
+
+def _linkedin_html_to_text(html: str, profile_url: str) -> str:
+    """Extract only visible/public profile metadata from a LinkedIn HTML page."""
+    useful: list[str] = []
+    for pattern in (
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)',
+        r"<title[^>]*>(.*?)</title>",
+    ):
+        for value in re.findall(pattern, html, flags=re.IGNORECASE | re.DOTALL):
+            cleaned = " ".join(unescape(re.sub(r"<[^>]+>", " ", value)).split())
+            if cleaned and cleaned not in useful:
+                useful.append(cleaned)
+    text = "\n".join(useful)
+    if len(text) < 60:
+        return ""
+    return f"Источник резюме: {profile_url}\n{text[:12000]}"
+
+
+async def _download_linkedin_profile_text(profile_url: str) -> str:
+    """Read a public LinkedIn page without following redirects outside LinkedIn."""
+    timeout = aiohttp.ClientTimeout(total=12, connect=5)
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; NextYouCareerBot/1.0)"}
+    try:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.get(profile_url, allow_redirects=False) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    redirect = str(response.headers.get("Location") or "")
+                    parsed = urlparse(redirect)
+                    if parsed.scheme != "https" or not _is_linkedin_host(parsed.hostname or ""):
+                        return ""
+                    async with session.get(redirect, allow_redirects=False) as redirected:
+                        if redirected.status != 200:
+                            return ""
+                        raw = await redirected.content.read(512_001)
+                elif response.status == 200:
+                    raw = await response.content.read(512_001)
+                else:
+                    return ""
+        if len(raw) > 512_000:
+            return ""
+        return _linkedin_html_to_text(raw.decode("utf-8", errors="ignore"), profile_url)
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
         return ""
 
 
@@ -6505,55 +6677,13 @@ async def _advance_barrier_group(message: Message, state: FSMContext) -> bool:
 
 
 async def _maybe_offer_extended_diagnostics(message: Message, state: FSMContext, lang: str) -> bool:
-    data = await state.get_data()
-    user_mode = str(data.get("user_mode") or "calm_steps")
-    if user_mode != "fast":
-        return False
-    if bool(data.get("mandatory_diagnostics_done")):
-        return False
-    if bool(data.get("mandatory_diagnostics_in_progress")):
-        return True
-
-    analysis_ext = dict(data.get("story_analysis") or {})
-    analysis_ext["follow_up_questions"] = _mandatory_psych_social_questions()
-    await state.update_data(
-        story_analysis=analysis_ext,
-        qa_index=0,
-        awaiting_extended_diagnostics_choice=False,
-        mandatory_diagnostics_in_progress=True,
-        mandatory_diagnostics_done=False,
-        extended_diagnostics_done=True,
-    )
-    await _track_event(message, state, "extended_diag_forced_start", meta={"stage": "post_fast_questions"})
-    await message.answer(t(lang, "extended_diag_started"))
-    data_fresh = await state.get_data()
-    context = _build_interview_context(data_fresh, analysis_ext)
-    await _save_interview_context(state, context)
-    asked = await _ask_next_interview_question(
-        message,
-        state,
-        data_fresh,
-        analysis_ext,
-        context,
-        qa_index=0,
-        lang=lang,
-        user_mode=user_mode,
-    )
-    if not asked:
-        await _start_barriers_module(message, state, lang)
-    return True
+    # Diagnostics start only from the explicit EXTENDED_DIAG_YES branch in
+    # process_answers_input; a completed assessment step never starts them.
+    return False
 
 
 async def _advance_after_questions(message: Message, state: FSMContext, lang: str) -> None:
-    data = await state.get_data()
-    if bool(data.get("mandatory_diagnostics_in_progress")):
-        await state.update_data(mandatory_diagnostics_in_progress=False, mandatory_diagnostics_done=True)
-        await _track_event(message, state, "extended_diag_forced_completed", meta={"stage": "post_fast_questions"})
-        await _start_barriers_module(message, state, lang)
-        return
-    if await _maybe_offer_extended_diagnostics(message, state, lang):
-        return
-    await _start_barriers_module(message, state, lang)
+    await advance_assessment(message, state, trigger="questions_completed")
 
 
 async def _start_questions_module(message: Message, state: FSMContext, lang: str) -> None:
@@ -6573,7 +6703,7 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     analysis = dict(analysis_raw)
     analysis["follow_up_questions"] = questions
     questions = analysis.get("follow_up_questions", []) if isinstance(analysis, dict) else []
-    # Mandatory requirement: barrier analysis must run in every mode.
+    # Psychology/barrier data is optional and never part of report readiness.
     quick_report_after_questions = False
 
     await state.update_data(
@@ -6630,7 +6760,7 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
             _resume_debug_log(message, "questions_empty_after_resume")
         await message.answer(t(lang, "questions_empty"))
         await state.update_data(answers_text=t(lang, "resume_continue_without"))
-        await _start_barriers_module(message, state, lang)
+        await advance_assessment(message, state, trigger="questions_completed")
         return
 
     await state.set_state(CareerFlow.INTERVIEW)
@@ -6669,7 +6799,7 @@ async def _start_questions_module(message: Message, state: FSMContext, lang: str
     )
     if not asked:
         await state.update_data(answers_text=t(lang, "resume_continue_without"))
-        await _start_barriers_module(message, state, lang)
+        await advance_assessment(message, state, trigger="questions_completed")
         return
 
     first_question = questions[0] if questions and isinstance(questions[0], dict) else {}
@@ -6858,13 +6988,32 @@ def _ensure_preliminary_report(report: dict, data: dict) -> dict:
         report = {}
     decision = report.get("career_decision") if isinstance(report.get("career_decision"), dict) else {}
     analysis = data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {}
+    resume = data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {}
+    combined_functions = [
+        *list(analysis.get("confirmed_functions") or analysis.get("functions") or []),
+        *list(resume.get("confirmed_functions") or resume.get("functions") or []),
+        *list(resume.get("skills") or []),
+        *list(resume.get("what_is_good") or []),
+    ]
+    role_titles = _real_route_titles({**analysis, "confirmed_functions": combined_functions})
     hypotheses = [str(item).strip() for item in analysis.get("professional_core_hypotheses") or [] if str(item).strip()]
     current_identity = str(analysis.get("current_identity") or "").strip()
-    main_hypothesis = hypotheses[0] if hypotheses else current_identity or "Маршрут на основе подтверждённых функций"
-    backup_hypothesis = hypotheses[1] if len(hypotheses) > 1 else "Смежная роль с максимальным сохранением опыта"
-    decision.setdefault("recommended_main_path", main_hypothesis)
-    decision.setdefault("backup_path", backup_hypothesis)
+    main_hypothesis = role_titles[0] if role_titles else hypotheses[0] if hypotheses else current_identity or "Маршрут на основе подтверждённых функций"
+    backup_hypothesis = role_titles[1] if len(role_titles) > 1 else hypotheses[1] if len(hypotheses) > 1 else "Смежная роль с максимальным сохранением опыта"
+    additional_hypothesis = role_titles[2] if len(role_titles) > 2 else ""
+    # A generated descriptive sentence is not a route. Recovery must replace
+    # it with a deterministic paid-role title derived from confirmed functions.
+    existing_main = str(decision.get("recommended_main_path") or "").strip()
+    if role_titles or not existing_main:
+        decision["recommended_main_path"] = main_hypothesis
+    decision["backup_path"] = backup_hypothesis
+    if additional_hypothesis:
+        decision["additional_path"] = additional_hypothesis
     report["career_decision"] = decision
+    report.setdefault("route_hypotheses", [
+        {"title": title, "entry_path": "Проверить пять вакансий и собрать один подтверждённый кейс"}
+        for title in role_titles[:3]
+    ])
     report.setdefault("market_analysis", [{"signal": "Рыночная доступность и диапазон дохода требуют проверки по выбранной стране; цифры не оценивались без источника."}])
     report.setdefault("career_recommendations", [f"Проверить гипотезу «{main_hypothesis}» на вакансиях целевого рынка без увольнения."])
     digital_human = report.get("digital_human") if isinstance(report.get("digital_human"), dict) else {}
@@ -6878,6 +7027,59 @@ def _ensure_preliminary_report(report: dict, data: dict) -> dict:
     action_plan["today"] = today
     report["action_plan"] = action_plan
     return report
+
+
+async def _prepare_report_snapshot(message: Message, state: FSMContext, data: dict) -> tuple[object, dict] | None:
+    """Merge, validate and freeze the sole input allowed into report generation."""
+    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    data = {**data, "assessment_id": assessment_id}
+    report_snapshot = build_report_snapshot(data)
+    snapshot_errors = validate_report_snapshot(report_snapshot, str(data.get("story_text") or ""))
+    if snapshot_errors:
+        fresh_data = {**(await state.get_data()), "assessment_id": assessment_id}
+        report_snapshot = build_report_snapshot(fresh_data)
+        snapshot_errors = validate_report_snapshot(report_snapshot, str(fresh_data.get("story_text") or ""))
+    if snapshot_errors:
+        await state.update_data(
+            report_snapshot=report_snapshot.model_dump(mode="json"),
+            report_snapshot_errors=snapshot_errors,
+            report_generation_in_progress=False,
+            report_generation_status="SNAPSHOT_INVALID",
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await message.answer(
+            "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return None
+    frozen = report_snapshot.model_dump(mode="json")
+    facts = copy.deepcopy(frozen["facts"])
+    generator_snapshot = {
+        **facts,
+        "assessment_id": frozen["assessment_id"],
+        "public_user_id": frozen["user_id"],
+        "profile_version": frozen["profile_version"],
+        "user_mode": frozen["mode"],
+        "person_name": frozen["person_name"],
+        "country_name": facts.get("country"),
+        "target_countries": [facts.get("country")] if facts.get("country") else [],
+        "currency": facts.get("currency") or facts.get("income_currency"),
+        "resume_loaded": bool(frozen["resume"].get("loaded")),
+        "selected_route": copy.deepcopy(frozen["routes"].get("selected") or {}),
+        "route_hypotheses": copy.deepcopy(frozen["routes"].get("hypotheses") or []),
+        "target_roles": [
+            str(row.get("title") or "").strip()
+            for row in (frozen["routes"].get("hypotheses") or [])
+            if isinstance(row, dict) and str(row.get("title") or "").strip()
+        ],
+        "constraints": list(frozen["constraints"]),
+        "market_context": copy.deepcopy(frozen["market_context"]),
+        "story_analysis": copy.deepcopy(frozen["story"].get("analysis") or {}),
+        "resume_analysis": copy.deepcopy(frozen["resume"].get("analysis") or {}),
+        "ready_for_report": True,
+    }
+    await state.update_data(report_snapshot=frozen, report_snapshot_errors=[])
+    return report_snapshot, generator_snapshot
 
 
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
@@ -6990,9 +7192,13 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         route_context_block = _route_context_section_text({str(key): str(value) for key, value in route_context.items()})
         if route_context_block:
             answers_text = (answers_text + "\n\nМинимальные данные для маршрута:\n" + route_context_block).strip()
-    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    prepared = await _prepare_report_snapshot(message, state, data)
+    if prepared is None:
+        return
+    report_snapshot, snapshot = prepared
+    frozen = report_snapshot.model_dump(mode="json")
+    assessment_id = str(frozen["assessment_id"])
     data = {**data, "assessment_id": assessment_id}
-    snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
         snapshot["missing_fields"] = missing_fields
@@ -7272,7 +7478,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
 
     assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     data = {**data, "assessment_id": assessment_id}
-    snapshot = _build_profile_snapshot(data)
+    prepared = await _prepare_report_snapshot(message, state, data)
+    if prepared is None:
+        return
+    report_snapshot, snapshot = prepared
+    frozen = report_snapshot.model_dump(mode="json")
     _runtime_debug_log(
         "career_generation_started",
         assessment_id=assessment_id,
@@ -7348,8 +7558,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 assessment_id=assessment_id,
                 session_id=session_id,
                 profile_version=profile_version,
-                story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-                resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+                story_analysis=copy.deepcopy(frozen["story"].get("analysis") or {}),
+                resume_analysis=copy.deepcopy(frozen["resume"].get("analysis") or {}),
                 language=lang,
             ),
             timeout=settings.career_assessment_timeout_seconds,
@@ -7362,8 +7572,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         generation_error = type(exc).__name__
         assessment = build_deterministic_assessment(
             snapshot,
-            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+            copy.deepcopy(frozen["story"].get("analysis") or {}),
+            copy.deepcopy(frozen["resume"].get("analysis") or {}),
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7416,8 +7626,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     if not validation.valid:
         assessment = build_deterministic_assessment(
             snapshot,
-            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+            copy.deepcopy(frozen["story"].get("analysis") or {}),
+            copy.deepcopy(frozen["resume"].get("analysis") or {}),
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7432,12 +7642,32 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     assessment.metadata.update(runtime_meta)
     assessment.metadata["generator_version"] = CAREER_PIPELINE_VERSION
     assessment.metadata["renderer_version"] = CAREER_TELEGRAM_RENDERER_VERSION
+    assessment.metadata["person_name"] = frozen["person_name"]
+    assessment.metadata["report_mode"] = frozen["mode"]
+    assessment.metadata["resume_loaded"] = bool(frozen["resume"].get("loaded"))
+    assessment.metadata["report_snapshot_assessment_id"] = frozen["assessment_id"]
+    assessment.metadata["selected_route"] = copy.deepcopy(frozen["routes"].get("selected") or {})
+    assessment.identity.core_description = structured_identity_summary(report_snapshot)
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
     generation_status = {
         "repair": "ASSESSMENT_REPAIRED",
         "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
     }.get(recovered_by, "ASSESSMENT_READY")
     assessment_payload = assessment.to_dict()
+    consistency_failures = validate_report_consistency(report_snapshot, assessment_payload)
+    if consistency_failures:
+        await state.update_data(
+            report_snapshot=frozen,
+            report_snapshot_errors=consistency_failures,
+            report_generation_in_progress=False,
+            report_generation_status="SNAPSHOT_INCONSISTENT",
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await message.answer(
+            "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return
     _runtime_debug_log(
         "career_generation_finished",
         assessment_id=assessment_id,
@@ -7913,6 +8143,12 @@ async def process_story_input(message: Message, state: FSMContext, text: str) ->
         promised_question_count=q_count,
         awaiting_story_correction=False,
         evidence_profile=evidence_profile.model_dump(),
+        resolved_fact_types=sorted(_resolved_fact_types({
+            **data,
+            "assessment_id": assessment_id,
+            "story_text": clean,
+            "story_analysis": analysis,
+        })),
     )
     await state.set_state(CareerFlow.CONFIRMING_STORY)
     await message.answer(_story_confirmation_text(analysis, q_count), reply_markup=story_confirmation_keyboard())
@@ -8410,7 +8646,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 options.append(done_text)
 
             if clean == done_text:
-                if not selected_values:
+                if not selected_values and multi_key != "psych":
                     await message.answer(t(lang, "multi_select_empty"), reply_markup=_question_reply_markup(analysis, qa_index))
                     return
                 if multi_key == "priorities":
@@ -8494,6 +8730,16 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     update_payload["selected_career_priorities"] = selected_values[:4]
                 await state.update_data(**update_payload)
                 await _sync_interview_context_after_answer(state, data, evidence_payload, answer_blob)
+                if multi_key == "psych":
+                    completed_steps = int(data.get("completed_steps") or 0) + 1
+                    await state.update_data(
+                        psychology_step="completed",
+                        completed_steps=completed_steps,
+                        mandatory_diagnostics_in_progress=False,
+                        mandatory_diagnostics_done=True,
+                    )
+                    await advance_assessment(message, state, trigger="psychology_done")
+                    return
                 if is_ready:
                     merged_answers = _merge_answers_text(qa_answers)
                     await state.update_data(answers_text=merged_answers)
@@ -8520,6 +8766,7 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                     )
                     if asked:
                         return
+                    await advance_assessment(message, state, trigger="questions_completed")
                     return
 
                 merged_answers = _merge_answers_text(qa_answers)
@@ -8737,12 +8984,19 @@ async def handle_resume_text(message: Message, state: FSMContext) -> None:
     lang = _user_language(await state.get_data())
     resume_text = (message.text or "").strip()
     if resume_text in ALL_RESUME_UPLOAD:
-        await message.answer(t(lang, "resume_upload_prompt"), reply_markup=resume_wait_keyboard())
+        await message.answer("Жду файл, текст резюме или публичную ссылку LinkedIn.", reply_markup=resume_wait_keyboard())
         return
     if resume_text in ALL_RESUME_SKIP:
         await state.update_data(resume_analysis={})
         await _start_questions_module(message, state, lang)
         return
+    linkedin_url = _linkedin_profile_url(resume_text)
+    if linkedin_url:
+        await message.answer(t(lang, "linkedin_resume_processing"))
+        resume_text = await _download_linkedin_profile_text(linkedin_url)
+        if not resume_text:
+            await message.answer(t(lang, "linkedin_resume_unavailable"), reply_markup=resume_wait_keyboard())
+            return
     if not resume_text or len(resume_text) < 60:
         await message.answer(t(lang, "resume_missing_payload"), reply_markup=resume_wait_keyboard())
         return
@@ -8757,6 +9011,8 @@ async def handle_resume_text(message: Message, state: FSMContext) -> None:
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
+        resume_parse_status="completed",
+        resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
         message,
@@ -8764,8 +9020,15 @@ async def handle_resume_text(message: Message, state: FSMContext) -> None:
         good=len(resume_analysis.get("what_is_good", [])),
         missing=len(resume_analysis.get("what_is_missing", [])),
     )
-    await message.answer(format_resume_analysis(resume_analysis, lang))
-    await _start_questions_module(message, state, lang)
+    data_after_resume = await state.get_data()
+    if str(data_after_resume.get("user_mode") or "") in {"fast", "quick"}:
+        strengths = [str(item).strip() for item in resume_analysis.get("what_is_good", []) if str(item).strip()][:4]
+        summary = ", ".join(strengths) or "профессиональный опыт и ключевые функции"
+        await message.answer(f"Резюме обработано. Я учёл: {summary}.")
+        await advance_assessment(message, state, trigger="resume_parsed")
+    else:
+        await message.answer(format_resume_analysis(resume_analysis, lang))
+        await _start_questions_module(message, state, lang)
 
 
 @router.message(CareerFlow.waiting_for_resume, F.text.in_(ALL_RESUME_SKIP))
@@ -8809,6 +9072,8 @@ async def handle_resume_document(message: Message, state: FSMContext) -> None:
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
+        resume_parse_status="completed",
+        resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
         message,
@@ -8816,8 +9081,15 @@ async def handle_resume_document(message: Message, state: FSMContext) -> None:
         good=len(resume_analysis.get("what_is_good", [])),
         missing=len(resume_analysis.get("what_is_missing", [])),
     )
-    await message.answer(format_resume_analysis(resume_analysis, lang))
-    await _start_questions_module(message, state, lang)
+    data_after_resume = await state.get_data()
+    if str(data_after_resume.get("user_mode") or "") in {"fast", "quick"}:
+        strengths = [str(item).strip() for item in resume_analysis.get("what_is_good", []) if str(item).strip()][:4]
+        summary = ", ".join(strengths) or "профессиональный опыт и ключевые функции"
+        await message.answer(f"Резюме обработано. Я учёл: {summary}.")
+        await advance_assessment(message, state, trigger="resume_parsed")
+    else:
+        await message.answer(format_resume_analysis(resume_analysis, lang))
+        await _start_questions_module(message, state, lang)
 
 
 async def _save_barrier_choice(message: Message, state: FSMContext, choice: str) -> None:
@@ -8861,7 +9133,10 @@ async def complete_barriers(message: Message, state: FSMContext) -> None:
     # All normal interview paths end here.  Go through the finalization wrapper
     # so an unexpected provider, persistence, or renderer exception still gives
     # the user a deterministic short conclusion instead of a silent dead end.
-    await finalize_career_flow(public_user_id, session_id, "barriers_completed")
+    if public_user_id and session_id:
+        await finalize_career_flow(public_user_id, session_id, "barriers_completed")
+    else:
+        await _build_and_send_report(message, state, lang)
 
 
 @router.message(CareerFlow.ROUTE_CONTEXT, F.text)
@@ -9565,8 +9840,6 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
             meta={"selected_route": selected_route or "", "report_regenerated": True, "new_report_generation_id": new_report_generation_id},
         )
         await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
-        if await _maybe_start_route_specific_clarification(message, state, lang, selected_route or action):
-            return
         await _send_final_map_bundle(message, state, lang, report)
         return
 
@@ -9603,8 +9876,6 @@ async def handle_route_selection_actions(message: Message, state: FSMContext) ->
         meta={"selected_route": selected_route or "", "report_regenerated": True, "new_report_generation_id": new_report_generation_id},
     )
     await message.answer(t(lang, "route_choice_saved", choice=selected_route or action), reply_markup=route_choice_keyboard())
-    if await _maybe_start_route_specific_clarification(message, state, lang, selected_route or action):
-        return
     await _send_final_map_bundle(message, state, lang, report)
 
 
@@ -9709,6 +9980,88 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     data = await state.get_data()
     lang = _user_language(data)
     action = (message.text or "").strip()
+    if action in {REPORT_RETRY, SNAPSHOT_RETRY}:
+        await state.update_data(
+            final_report={},
+            final_report_generated=False,
+            report_already_generated=False,
+            report_generation_in_progress=False,
+            report_generation_status="RETRY_REQUESTED",
+        )
+        await message.answer("Повторяю сборку заключения. Ваши ответы сохранены.", reply_markup=ReplyKeyboardRemove())
+        public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message)).strip()
+        session_id = str(data.get("session_id") or "").strip()
+        if public_user_id and session_id:
+            await _register_session_context(state, message, user_id=public_user_id, session_id=session_id)
+            await finalize_career_flow(public_user_id, session_id, "user_retry")
+        else:
+            # Legacy sessions still get the same exception-safe wrapper behavior.
+            try:
+                await _build_and_send_report(message, state, lang)
+            except Exception as exc:
+                print(f"[report-retry] failed: {type(exc).__name__}: {exc}", flush=True)
+                fallback = _ensure_preliminary_report({}, data)
+                await state.update_data(
+                    final_report=fallback,
+                    final_report_generated=True,
+                    report_already_generated=True,
+                    report_generation_in_progress=False,
+                    report_generation_status="REPORT_READY",
+                )
+                await state.set_state(CareerFlow.REPORT_READY)
+                await message.answer(build_telegram_summary(fallback), reply_markup=report_failure_keyboard())
+        return
+    if action == SNAPSHOT_CHECK_FACTS:
+        report_snapshot = data.get("report_snapshot") if isinstance(data.get("report_snapshot"), dict) else {}
+        facts = report_snapshot.get("facts") if isinstance(report_snapshot.get("facts"), dict) else {}
+        functions = [str(item) for item in facts.get("professional_functions", []) if str(item).strip()]
+        languages = facts.get("languages") if isinstance(facts.get("languages"), dict) else {}
+        lines = [
+            f"Имя: {report_snapshot.get('person_name') or 'не найдено'}",
+            f"Страна: {facts.get('country') or 'не найдена'}",
+            f"Город: {facts.get('city') or 'не найден'}",
+            f"Функции: {', '.join(functions) if functions else 'не найдены'}",
+            f"Языки: {', '.join(f'{key} {value}' for key, value in languages.items()) if languages else 'не найдены'}",
+            f"Резюме обработано: {'да' if (report_snapshot.get('resume') or {}).get('loaded') else 'нет'}",
+        ]
+        await message.answer("\n".join(lines), reply_markup=snapshot_failure_keyboard())
+        return
+    if action == SNAPSHOT_SHORT_RESULT:
+        raw_snapshot = data.get("report_snapshot") if isinstance(data.get("report_snapshot"), dict) else {}
+        try:
+            report_snapshot = ReportSnapshot.model_validate(raw_snapshot)
+        except Exception:
+            await message.answer(
+                "Сохранённых подтверждённых фактов пока недостаточно даже для краткого заключения.",
+                reply_markup=snapshot_failure_keyboard(),
+            )
+            return
+        functions = [str(item) for item in report_snapshot.facts.get("professional_functions", []) if str(item).strip()]
+        selected = report_snapshot.routes.get("selected") if isinstance(report_snapshot.routes.get("selected"), dict) else {}
+        if len(functions) < 2:
+            await message.answer(
+                "Сохранённых подтверждённых фактов пока недостаточно даже для краткого заключения.",
+                reply_markup=snapshot_failure_keyboard(),
+            )
+            return
+        route = str(selected.get("title") or "проверить смежную роль по подтверждённым функциям")
+        await message.answer(
+            f"{structured_identity_summary(report_snapshot)}\n\n"
+            f"Проверяемый маршрут: {route}.\n"
+            "Первый шаг: сравнить пять актуальных вакансий и отметить совпадающие функции, язык и ограничения.",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return
+    if action == REPORT_SHORT_FALLBACK:
+        report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
+        fallback = report or _ensure_preliminary_report({}, data)
+        await message.answer(build_telegram_summary(fallback), reply_markup=result_actions_keyboard())
+        return
+    if action in {REPORT_CONTACT_SUPPORT, SNAPSHOT_SUPPORT}:
+        request_id = _ensure_public_id(data, message)
+        await _notify_specialist_request_owner(message, state, "report_generation_support")
+        await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=result_actions_keyboard())
+        return
     if not data.get("final_report_generated") and action != RESULT_OPEN_FULL_REPORT:
         await message.answer(t(lang, "generation_lock_message"))
         return
@@ -9740,22 +10093,13 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     if action == RESULT_OPEN_FULL_REPORT:
         html_path = _resolve_html_report_path(data)
         if not html_path:
-            report = data.get("final_report") or {}
-            if isinstance(report, dict) and report:
-                user_name = " ".join(
-                    part
-                    for part in [
-                        (message.from_user.first_name if message.from_user else "") or "",
-                        (message.from_user.last_name if message.from_user else "") or "",
-                    ]
-                    if part
-                ).strip()
+            assessment_payload = data.get("career_assessment") if isinstance(data.get("career_assessment"), dict) else {}
+            if assessment_payload:
                 try:
-                    regenerated = generate_html_report_file(
-                        report,
-                        output_dir=settings.report_output_dir,
-                        user_name=user_name,
-                        profile_version=str(data.get("report_generation_id") or "").strip(),
+                    assessment = career_assessment_from_dict(assessment_payload)
+                    regenerated = generate_assessment_html_file(
+                        assessment,
+                        settings.report_output_dir,
                     )
                     html_path = _normalize_report_path(str(regenerated))
                     report_generation_id = str(data.get("report_generation_id") or "").strip()
@@ -9764,6 +10108,14 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                         update_report_files(report_generation_id, html_report_path=html_path)
                 except Exception:
                     html_path = ""
+            elif isinstance(data.get("final_report"), dict) and data.get("final_report"):
+                # Never turn a legacy fallback dict into the concatenated
+                # 15-block + detailed HTML contract.
+                await message.answer(
+                    "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+                    reply_markup=snapshot_failure_keyboard(),
+                )
+                return
 
         if html_path and Path(html_path).exists():
             html_url = _report_public_url(Path(html_path))
@@ -10297,6 +10649,13 @@ async def handle_cv_review_text(message: Message, state: FSMContext) -> None:
         await state.set_state(CareerFlow.FINAL_READY)
         await message.answer(t(lang, "post_result_hint"), reply_markup=result_actions_keyboard())
         return
+    linkedin_url = _linkedin_profile_url(resume_text)
+    if linkedin_url:
+        await message.answer(t(lang, "linkedin_resume_processing"))
+        resume_text = await _download_linkedin_profile_text(linkedin_url)
+        if not resume_text:
+            await message.answer(t(lang, "linkedin_resume_unavailable"), reply_markup=resume_wait_keyboard())
+            return
     if len(resume_text) < 60:
         await message.answer(t(lang, "resume_missing_payload"), reply_markup=resume_wait_keyboard())
         return
