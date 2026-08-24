@@ -213,7 +213,7 @@ from services.canonical_profile import (
     record_question_answer,
     select_clarifying_question,
 )
-from services.report_snapshot import ReportSnapshot, build_report_snapshot, structured_identity_summary, validate_report_consistency, validate_report_snapshot
+from services.report_snapshot import ReportSnapshot, build_report_snapshot, merge_functions, normalize_functions, structured_identity_summary, validate_report_consistency, validate_report_snapshot
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -503,7 +503,7 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
         if message is not None:
             await message.answer("Уже собираю заключение, подождите немного.")
         return
-    if bool(data.get("short_report_sent")) and not bool(data.get("html_report_generated")):
+    if data.get("report_status") == "short_validated" and not bool(data.get("html_report_generated")):
         if message is not None:
             await message.answer("Краткое заключение уже отправлено. Формирую подробный документ.")
     await state.update_data(
@@ -531,7 +531,7 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
             if report and bool(fresh_data.get("final_report_generated")):
                 generation_status = str(fresh_data.get("report_generation_status") or "REPORT_READY")
                 await state.update_data(
-                    short_report_sent=True,
+                    short_report_sent=fresh_data.get("report_status") == "short_validated",
                     report_already_generated=True,
                     report_generation_in_progress=False,
                     report_generation_status=generation_status,
@@ -541,10 +541,16 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
             payload = _ensure_preliminary_report({}, data)
             decision = payload.get("career_decision") or {}
             route = str(decision.get("recommended_main_path") or "Маршрут на основе подтверждённых функций")
+            fallback_functions = normalize_functions(data.get("story_analysis") or {}, "story")
+            fallback_functions += normalize_functions(data.get("resume_analysis") or {}, "resume")
+            route_line = (
+                f"Основной маршрут: {route}."
+                if len(merge_functions(fallback_functions)) >= 2
+                else f"Выбранная гипотеза для проверки: {route}."
+            )
             fallback_text = (
                 "Предварительное карьерное заключение\n\n"
-                f"Основной маршрут: {route}.\n"
-                "Уверенность: низкая — критичные неизвестные явно сохранены.\n\n"
+                f"{route_line}\n\n"
                 "Первые шаги:\n"
                 f"1. Найти пять вакансий «{route}» на выбранном рынке.\n"
                 "2. Упаковать один подтверждённый кейс из прошлого опыта.\n"
@@ -554,8 +560,9 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
             if message is not None:
                 await message.answer(fallback_text)
             await state.update_data(
-                final_report=payload, final_report_generated=True, short_report_sent=True,
+                final_report=payload, final_report_generated=True, short_report_sent=False,
                 report_already_generated=True, report_generation_status="REPORT_READY",
+                report_status="fallback_sent",
                 html_report_generated=False, report_generation_in_progress=False,
                 final_report_validated_after_rebuild=True,
             )
@@ -568,6 +575,7 @@ async def finalize_career_flow(user_id: str, session_id: str, trigger: str) -> N
         await state.update_data(
             final_report=report,
             short_report_sent=True,
+            report_status="short_validated",
             report_generation_status="SHORT_REPORT_SENT",
             report_already_generated=True,
             final_report_generated=True,
@@ -8979,6 +8987,29 @@ async def ask_resume_upload(message: Message, state: FSMContext) -> None:
     await message.answer(t(lang, "resume_upload_prompt"), reply_markup=resume_wait_keyboard())
 
 
+async def _persist_resume_facts(state: FSMContext, resume_text: str, analysis: dict) -> None:
+    """Publish completed only after normalized structured facts are in FSM storage."""
+    data = await state.get_data()
+    assessment_id = str(data.get("assessment_id") or "").strip()
+    candidate = {**data, "resume_analysis": analysis, "resume_raw_text": resume_text}
+    try:
+        canonical = build_canonical_profile(candidate, assessment_id=assessment_id)
+        extracted_count = len(normalize_functions(analysis, "resume"))
+        confirmed_count = len(canonical.normalized_profile.professional_functions)
+        if extracted_count and not confirmed_count:
+            raise ValueError("resume contains tasks but confirmed_functions is empty")
+    except Exception:
+        await state.update_data(resume_parse_status="normalization_failed", resume_processed=False)
+        raise
+    await state.update_data(
+        resume_analysis=analysis,
+        resume_raw_text=resume_text,
+        canonical_profile=canonical.model_dump(mode="json"),
+        resume_parse_status="completed",
+        resume_processed=True,
+    )
+
+
 @router.message(CareerFlow.waiting_for_resume, F.text)
 async def handle_resume_text(message: Message, state: FSMContext) -> None:
     lang = _user_language(await state.get_data())
@@ -9005,13 +9036,13 @@ async def handle_resume_text(message: Message, state: FSMContext) -> None:
     await state.set_state(CareerFlow.RESUME_ANALYZING)
     await message.answer(t(lang, "resume_analysis_processing"))
     resume_analysis = await ai_client.analyze_resume(resume_text, lang)
+    await _persist_resume_facts(state, resume_text, resume_analysis)
     await state.update_data(
         resume_analysis=resume_analysis,
         cv_uploaded=True,
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
-        resume_parse_status="completed",
         resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
@@ -9066,13 +9097,13 @@ async def handle_resume_document(message: Message, state: FSMContext) -> None:
     await state.set_state(CareerFlow.RESUME_ANALYZING)
     await message.answer(t(lang, "resume_analysis_processing"))
     resume_analysis = await ai_client.analyze_resume(resume_text, lang)
+    await _persist_resume_facts(state, resume_text, resume_analysis)
     await state.update_data(
         resume_analysis=resume_analysis,
         cv_uploaded=True,
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
-        resume_parse_status="completed",
         resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
@@ -9981,12 +10012,31 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     lang = _user_language(data)
     action = (message.text or "").strip()
     if action in {REPORT_RETRY, SNAPSHOT_RETRY}:
+        retry_count = int(data.get("report_retry_count") or 0)
+        if retry_count >= 2:
+            diagnostic_id = str(data.get("diagnostic_id") or uuid.uuid4().hex[:12])
+            await state.update_data(diagnostic_id=diagnostic_id, report_generation_status="RETRY_EXHAUSTED")
+            await message.answer(f"Повторная обработка не помогла. Проверьте сохранённые факты или обратитесь в поддержку. Diagnostic ID: {diagnostic_id}", reply_markup=snapshot_failure_keyboard())
+            return
+        # A retry repairs the inputs; rerendering the same invalid frozen
+        # snapshot can never restore facts lost during normalization.
+        story_text = str(data.get("story_text") or "").strip()
+        resume_text = str(data.get("resume_raw_text") or "").strip()
+        if story_text:
+            data["story_analysis"] = await ai_client.analyze_story(story_text, lang)
+            await state.update_data(story_analysis=data["story_analysis"])
+        if resume_text:
+            data["resume_analysis"] = await ai_client.analyze_resume(resume_text, lang)
+            await _persist_resume_facts(state, resume_text, data["resume_analysis"])
         await state.update_data(
             final_report={},
             final_report_generated=False,
             report_already_generated=False,
             report_generation_in_progress=False,
             report_generation_status="RETRY_REQUESTED",
+            report_retry_count=retry_count + 1,
+            report_snapshot=None,
+            report_snapshot_errors=[],
         )
         await message.answer("Повторяю сборку заключения. Ваши ответы сохранены.", reply_markup=ReplyKeyboardRemove())
         public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message)).strip()

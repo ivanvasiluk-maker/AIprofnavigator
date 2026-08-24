@@ -448,9 +448,9 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
 
     classified_fields: dict[FactType, tuple[str, ...]] = {
         "profession": ("current_identity", "current_role", "profession", "job_titles", "positions", "roles"),
-        "professional_function": ("confirmed_functions", "functions"),
+        "professional_function": ("confirmed_functions", "functions", "professional_functions", "recurring_functions", "tasks", "responsibilities"),
         "skill": ("skills", "transferable_skills"),
-        "responsibility": ("responsibilities", "tasks"),
+        "responsibility": (),
         "achievement": ("achievements", "measurable_results"),
         "education": ("education",), "certification": ("certifications", "licenses"),
         "work_condition": ("work_conditions",), "constraint": ("constraints",),
@@ -465,7 +465,10 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                 raw = analysis.get(key)
                 values = raw if isinstance(raw, list) else [raw]
                 for value in values:
-                    text = str(value or "").strip()
+                    text = str(
+                        (value.get("label") or value.get("name") or value.get("title") or "")
+                        if isinstance(value, dict) else (value or "")
+                    ).strip()
                     if text:
                         profile.facts.append(_fact(assessment_id, fact_type, text, f"{analysis_name}:{key}", text, .85))
         for key in ("target_roles", "career_hypotheses", "role_hypotheses"):
