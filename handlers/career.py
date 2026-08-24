@@ -64,6 +64,10 @@ from keyboards import (
     REPORT_RETRY,
     REPORT_SHORT_FALLBACK,
     REPORT_CONTACT_SUPPORT,
+    SNAPSHOT_RETRY,
+    SNAPSHOT_CHECK_FACTS,
+    SNAPSHOT_SHORT_RESULT,
+    SNAPSHOT_SUPPORT,
     CTA_CAREER_CHAT,
     CTA_CAREER_CONSULTANT,
     CTA_JOB_SEARCH_SUPPORT,
@@ -163,6 +167,7 @@ from keyboards import (
     question_options_keyboard,
     result_actions_keyboard,
     report_failure_keyboard,
+    snapshot_failure_keyboard,
     next_step_cta_keyboard,
     self_exploration_keyboard,
     short_story_keyboard,
@@ -208,6 +213,7 @@ from services.canonical_profile import (
     record_question_answer,
     select_clarifying_question,
 )
+from services.report_snapshot import ReportSnapshot, build_report_snapshot, structured_identity_summary, validate_report_consistency, validate_report_snapshot
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -7023,6 +7029,59 @@ def _ensure_preliminary_report(report: dict, data: dict) -> dict:
     return report
 
 
+async def _prepare_report_snapshot(message: Message, state: FSMContext, data: dict) -> tuple[object, dict] | None:
+    """Merge, validate and freeze the sole input allowed into report generation."""
+    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    data = {**data, "assessment_id": assessment_id}
+    report_snapshot = build_report_snapshot(data)
+    snapshot_errors = validate_report_snapshot(report_snapshot, str(data.get("story_text") or ""))
+    if snapshot_errors:
+        fresh_data = {**(await state.get_data()), "assessment_id": assessment_id}
+        report_snapshot = build_report_snapshot(fresh_data)
+        snapshot_errors = validate_report_snapshot(report_snapshot, str(fresh_data.get("story_text") or ""))
+    if snapshot_errors:
+        await state.update_data(
+            report_snapshot=report_snapshot.model_dump(mode="json"),
+            report_snapshot_errors=snapshot_errors,
+            report_generation_in_progress=False,
+            report_generation_status="SNAPSHOT_INVALID",
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await message.answer(
+            "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return None
+    frozen = report_snapshot.model_dump(mode="json")
+    facts = copy.deepcopy(frozen["facts"])
+    generator_snapshot = {
+        **facts,
+        "assessment_id": frozen["assessment_id"],
+        "public_user_id": frozen["user_id"],
+        "profile_version": frozen["profile_version"],
+        "user_mode": frozen["mode"],
+        "person_name": frozen["person_name"],
+        "country_name": facts.get("country"),
+        "target_countries": [facts.get("country")] if facts.get("country") else [],
+        "currency": facts.get("currency") or facts.get("income_currency"),
+        "resume_loaded": bool(frozen["resume"].get("loaded")),
+        "selected_route": copy.deepcopy(frozen["routes"].get("selected") or {}),
+        "route_hypotheses": copy.deepcopy(frozen["routes"].get("hypotheses") or []),
+        "target_roles": [
+            str(row.get("title") or "").strip()
+            for row in (frozen["routes"].get("hypotheses") or [])
+            if isinstance(row, dict) and str(row.get("title") or "").strip()
+        ],
+        "constraints": list(frozen["constraints"]),
+        "market_context": copy.deepcopy(frozen["market_context"]),
+        "story_analysis": copy.deepcopy(frozen["story"].get("analysis") or {}),
+        "resume_analysis": copy.deepcopy(frozen["resume"].get("analysis") or {}),
+        "ready_for_report": True,
+    }
+    await state.update_data(report_snapshot=frozen, report_snapshot_errors=[])
+    return report_snapshot, generator_snapshot
+
+
 async def _build_and_send_report(message: Message, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
 
@@ -7133,9 +7192,13 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
         route_context_block = _route_context_section_text({str(key): str(value) for key, value in route_context.items()})
         if route_context_block:
             answers_text = (answers_text + "\n\nМинимальные данные для маршрута:\n" + route_context_block).strip()
-    assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
+    prepared = await _prepare_report_snapshot(message, state, data)
+    if prepared is None:
+        return
+    report_snapshot, snapshot = prepared
+    frozen = report_snapshot.model_dump(mode="json")
+    assessment_id = str(frozen["assessment_id"])
     data = {**data, "assessment_id": assessment_id}
-    snapshot = _build_profile_snapshot(data)
     if not _snapshot_is_ready_for_report(snapshot):
         missing_fields = _route_context_missing(data)
         snapshot["missing_fields"] = missing_fields
@@ -7415,7 +7478,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
 
     assessment_id = str(data.get("assessment_id") or uuid.uuid4().hex[:16])
     data = {**data, "assessment_id": assessment_id}
-    snapshot = _build_profile_snapshot(data)
+    prepared = await _prepare_report_snapshot(message, state, data)
+    if prepared is None:
+        return
+    report_snapshot, snapshot = prepared
+    frozen = report_snapshot.model_dump(mode="json")
     _runtime_debug_log(
         "career_generation_started",
         assessment_id=assessment_id,
@@ -7491,8 +7558,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 assessment_id=assessment_id,
                 session_id=session_id,
                 profile_version=profile_version,
-                story_analysis=data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-                resume_analysis=data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+                story_analysis=copy.deepcopy(frozen["story"].get("analysis") or {}),
+                resume_analysis=copy.deepcopy(frozen["resume"].get("analysis") or {}),
                 language=lang,
             ),
             timeout=settings.career_assessment_timeout_seconds,
@@ -7505,8 +7572,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         generation_error = type(exc).__name__
         assessment = build_deterministic_assessment(
             snapshot,
-            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+            copy.deepcopy(frozen["story"].get("analysis") or {}),
+            copy.deepcopy(frozen["resume"].get("analysis") or {}),
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7559,8 +7626,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     if not validation.valid:
         assessment = build_deterministic_assessment(
             snapshot,
-            data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {},
-            data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {},
+            copy.deepcopy(frozen["story"].get("analysis") or {}),
+            copy.deepcopy(frozen["resume"].get("analysis") or {}),
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
@@ -7575,12 +7642,32 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     assessment.metadata.update(runtime_meta)
     assessment.metadata["generator_version"] = CAREER_PIPELINE_VERSION
     assessment.metadata["renderer_version"] = CAREER_TELEGRAM_RENDERER_VERSION
+    assessment.metadata["person_name"] = frozen["person_name"]
+    assessment.metadata["report_mode"] = frozen["mode"]
+    assessment.metadata["resume_loaded"] = bool(frozen["resume"].get("loaded"))
+    assessment.metadata["report_snapshot_assessment_id"] = frozen["assessment_id"]
+    assessment.metadata["selected_route"] = copy.deepcopy(frozen["routes"].get("selected") or {})
+    assessment.identity.core_description = structured_identity_summary(report_snapshot)
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
     generation_status = {
         "repair": "ASSESSMENT_REPAIRED",
         "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
     }.get(recovered_by, "ASSESSMENT_READY")
     assessment_payload = assessment.to_dict()
+    consistency_failures = validate_report_consistency(report_snapshot, assessment_payload)
+    if consistency_failures:
+        await state.update_data(
+            report_snapshot=frozen,
+            report_snapshot_errors=consistency_failures,
+            report_generation_in_progress=False,
+            report_generation_status="SNAPSHOT_INCONSISTENT",
+        )
+        await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+        await message.answer(
+            "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return
     _runtime_debug_log(
         "career_generation_finished",
         assessment_id=assessment_id,
@@ -8924,6 +9011,7 @@ async def handle_resume_text(message: Message, state: FSMContext) -> None:
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
+        resume_parse_status="completed",
         resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
@@ -8984,6 +9072,7 @@ async def handle_resume_document(message: Message, state: FSMContext) -> None:
         cv_summary=resume_analysis.get("what_is_good", []),
         cv_gaps=resume_analysis.get("what_is_missing", []),
         cv_strengths=resume_analysis.get("what_is_good", []),
+        resume_parse_status="completed",
         resolved_fact_types=sorted(_resolved_fact_types({**(await state.get_data()), "resume_analysis": resume_analysis})),
     )
     _resume_debug_log(
@@ -9891,7 +9980,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     data = await state.get_data()
     lang = _user_language(data)
     action = (message.text or "").strip()
-    if action == REPORT_RETRY:
+    if action in {REPORT_RETRY, SNAPSHOT_RETRY}:
         await state.update_data(
             final_report={},
             final_report_generated=False,
@@ -9922,12 +10011,53 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                 await state.set_state(CareerFlow.REPORT_READY)
                 await message.answer(build_telegram_summary(fallback), reply_markup=report_failure_keyboard())
         return
+    if action == SNAPSHOT_CHECK_FACTS:
+        report_snapshot = data.get("report_snapshot") if isinstance(data.get("report_snapshot"), dict) else {}
+        facts = report_snapshot.get("facts") if isinstance(report_snapshot.get("facts"), dict) else {}
+        functions = [str(item) for item in facts.get("professional_functions", []) if str(item).strip()]
+        languages = facts.get("languages") if isinstance(facts.get("languages"), dict) else {}
+        lines = [
+            f"Имя: {report_snapshot.get('person_name') or 'не найдено'}",
+            f"Страна: {facts.get('country') or 'не найдена'}",
+            f"Город: {facts.get('city') or 'не найден'}",
+            f"Функции: {', '.join(functions) if functions else 'не найдены'}",
+            f"Языки: {', '.join(f'{key} {value}' for key, value in languages.items()) if languages else 'не найдены'}",
+            f"Резюме обработано: {'да' if (report_snapshot.get('resume') or {}).get('loaded') else 'нет'}",
+        ]
+        await message.answer("\n".join(lines), reply_markup=snapshot_failure_keyboard())
+        return
+    if action == SNAPSHOT_SHORT_RESULT:
+        raw_snapshot = data.get("report_snapshot") if isinstance(data.get("report_snapshot"), dict) else {}
+        try:
+            report_snapshot = ReportSnapshot.model_validate(raw_snapshot)
+        except Exception:
+            await message.answer(
+                "Сохранённых подтверждённых фактов пока недостаточно даже для краткого заключения.",
+                reply_markup=snapshot_failure_keyboard(),
+            )
+            return
+        functions = [str(item) for item in report_snapshot.facts.get("professional_functions", []) if str(item).strip()]
+        selected = report_snapshot.routes.get("selected") if isinstance(report_snapshot.routes.get("selected"), dict) else {}
+        if len(functions) < 2:
+            await message.answer(
+                "Сохранённых подтверждённых фактов пока недостаточно даже для краткого заключения.",
+                reply_markup=snapshot_failure_keyboard(),
+            )
+            return
+        route = str(selected.get("title") or "проверить смежную роль по подтверждённым функциям")
+        await message.answer(
+            f"{structured_identity_summary(report_snapshot)}\n\n"
+            f"Проверяемый маршрут: {route}.\n"
+            "Первый шаг: сравнить пять актуальных вакансий и отметить совпадающие функции, язык и ограничения.",
+            reply_markup=snapshot_failure_keyboard(),
+        )
+        return
     if action == REPORT_SHORT_FALLBACK:
         report = data.get("final_report") if isinstance(data.get("final_report"), dict) else {}
         fallback = report or _ensure_preliminary_report({}, data)
         await message.answer(build_telegram_summary(fallback), reply_markup=result_actions_keyboard())
         return
-    if action == REPORT_CONTACT_SUPPORT:
+    if action in {REPORT_CONTACT_SUPPORT, SNAPSHOT_SUPPORT}:
         request_id = _ensure_public_id(data, message)
         await _notify_specialist_request_owner(message, state, "report_generation_support")
         await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=result_actions_keyboard())
@@ -9963,22 +10093,13 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
     if action == RESULT_OPEN_FULL_REPORT:
         html_path = _resolve_html_report_path(data)
         if not html_path:
-            report = data.get("final_report") or {}
-            if isinstance(report, dict) and report:
-                user_name = " ".join(
-                    part
-                    for part in [
-                        (message.from_user.first_name if message.from_user else "") or "",
-                        (message.from_user.last_name if message.from_user else "") or "",
-                    ]
-                    if part
-                ).strip()
+            assessment_payload = data.get("career_assessment") if isinstance(data.get("career_assessment"), dict) else {}
+            if assessment_payload:
                 try:
-                    regenerated = generate_html_report_file(
-                        report,
-                        output_dir=settings.report_output_dir,
-                        user_name=user_name,
-                        profile_version=str(data.get("report_generation_id") or "").strip(),
+                    assessment = career_assessment_from_dict(assessment_payload)
+                    regenerated = generate_assessment_html_file(
+                        assessment,
+                        settings.report_output_dir,
                     )
                     html_path = _normalize_report_path(str(regenerated))
                     report_generation_id = str(data.get("report_generation_id") or "").strip()
@@ -9987,6 +10108,14 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
                         update_report_files(report_generation_id, html_report_path=html_path)
                 except Exception:
                     html_path = ""
+            elif isinstance(data.get("final_report"), dict) and data.get("final_report"):
+                # Never turn a legacy fallback dict into the concatenated
+                # 15-block + detailed HTML contract.
+                await message.answer(
+                    "Я сохранил вашу историю, но не смог корректно собрать её в отчёт. Не буду показывать пустой шаблон",
+                    reply_markup=snapshot_failure_keyboard(),
+                )
+                return
 
         if html_path and Path(html_path).exists():
             html_url = _report_public_url(Path(html_path))

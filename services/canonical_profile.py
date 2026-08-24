@@ -25,15 +25,30 @@ CITY_COUNTRIES = {
     "prague": ("Czechia", "CZ"), "praha": ("Czechia", "CZ"),
     "прага": ("Czechia", "CZ"), "праге": ("Czechia", "CZ"),
     "porto": ("Portugal", "PT"), "порту": ("Portugal", "PT"),
-    "vilnius": ("Lithuania", "LT"), "вильнюс": ("Lithuania", "LT"),
-    "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"),
-    "riga": ("Latvia", "LV"), "рига": ("Latvia", "LV"),
-    "tallinn": ("Estonia", "EE"), "таллин": ("Estonia", "EE"),
+    "vilnius": ("Lithuania", "LT"), "вильнюс": ("Lithuania", "LT"), "вильнюсе": ("Lithuania", "LT"),
+    "warsaw": ("Poland", "PL"), "варшава": ("Poland", "PL"), "варшаве": ("Poland", "PL"),
+    "riga": ("Latvia", "LV"), "рига": ("Latvia", "LV"), "риге": ("Latvia", "LV"),
+    "tallinn": ("Estonia", "EE"), "таллин": ("Estonia", "EE"), "таллине": ("Estonia", "EE"),
     "valencia": ("Spain", "ES"), "валенсия": ("Spain", "ES"),
     "валенсии": ("Spain", "ES"),
     "krakow": ("Poland", "PL"), "kraków": ("Poland", "PL"),
     "краков": ("Poland", "PL"), "кракове": ("Poland", "PL"),
     "brno": ("Czechia", "CZ"), "брно": ("Czechia", "CZ"),
+}
+
+CITY_DISPLAY_NAMES = {
+    "tbilisi": "Tbilisi", "тбилиси": "Tbilisi",
+    "kaunas": "Kaunas", "каунас": "Kaunas", "каунасе": "Kaunas",
+    "berlin": "Berlin", "берлин": "Berlin", "берлине": "Berlin",
+    "prague": "Prague", "praha": "Prague", "прага": "Prague", "праге": "Prague",
+    "porto": "Porto", "порту": "Porto",
+    "vilnius": "Vilnius", "вильнюс": "Vilnius", "вильнюсе": "Vilnius",
+    "warsaw": "Warsaw", "варшава": "Warsaw", "варшаве": "Warsaw",
+    "riga": "Riga", "рига": "Riga", "риге": "Riga",
+    "tallinn": "Tallinn", "таллин": "Tallinn", "таллине": "Tallinn",
+    "valencia": "Valencia", "валенсия": "Валенсия", "валенсии": "Валенсия",
+    "krakow": "Krakow", "kraków": "Krakow", "краков": "Краков", "кракове": "Краков",
+    "brno": "Brno", "брно": "Brno",
 }
 
 COUNTRY_CURRENCIES = {
@@ -337,13 +352,7 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
         low = text.casefold().replace("ё", "е")
         for city, (country, code) in CITY_COUNTRIES.items():
             if re.search(rf"\b{re.escape(city)}\b", low):
-                display_city = (
-                    "Валенсия" if city in {"валенсия", "валенсии"}
-                    else "Краков" if city in {"краков", "кракове"}
-                    else "Prague" if city in {"prague", "praha", "прага", "праге"}
-                    else "Berlin" if city in {"berlin", "берлин", "берлине"}
-                    else city.title()
-                )
+                display_city = CITY_DISPLAY_NAMES.get(city, city.title())
                 profile.facts.append(_fact(assessment_id, "market_context", {"city": display_city, "country": country, "country_code": code}, message_id, text, .98, created_at or None))
                 break
         if not any(f.source_message_id == message_id and f.fact_type == "market_context" for f in profile.facts):
