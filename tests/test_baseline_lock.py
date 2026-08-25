@@ -9,7 +9,7 @@ BASELINE_LOCK_PATH = ROOT / "tests" / "career_profiles" / "baseline" / "baseline
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest().upper()
 
 
 class BaselineLockTests(unittest.TestCase):
