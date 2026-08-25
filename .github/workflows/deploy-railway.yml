@@ -39,8 +39,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Railway CLI
+        run: bash <(curl -fsSL https://railway.com/install.sh) -y
+
       - name: Deploy to Railway
-        uses: railwayapp/cli-action@v1
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          command: up --service AIprofnavigator
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: ~/.railway/bin/railway up --service AIprofnavigator
