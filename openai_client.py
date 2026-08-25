@@ -1,7 +1,9 @@
 import asyncio
 import copy
 import json
+import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,65 @@ from services.career_assessment import (
 )
 from services.runtime_isolation import assert_expected_profiles_not_loaded
 
+
+logger = logging.getLogger(__name__)
+
+
+def _assessment_schema_property(name: str) -> dict[str, Any]:
+    return copy.deepcopy(CAREER_ASSESSMENT_SCHEMA["properties"][name])
+
+
+STAGED_PROFILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "context": _assessment_schema_property("context"),
+        "identity": _assessment_schema_property("identity"),
+        "evidence": _assessment_schema_property("evidence"),
+        "user_choice": _assessment_schema_property("user_choice"),
+        "constraints": _assessment_schema_property("constraints"),
+        "questions": _assessment_schema_property("questions"),
+    },
+    "required": ["context", "identity", "evidence", "user_choice", "constraints", "questions"],
+    "additionalProperties": False,
+}
+
+STAGED_ROUTES_SCHEMA = {
+    "type": "object",
+    "properties": {"routes": _assessment_schema_property("routes")},
+    "required": ["routes"],
+    "additionalProperties": False,
+}
+
+STAGED_MARKET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "market_analysis": _assessment_schema_property("market_analysis"),
+        "income_forecasts": _assessment_schema_property("income_forecasts"),
+    },
+    "required": ["market_analysis", "income_forecasts"],
+    "additionalProperties": False,
+}
+
+STAGED_CONCLUSION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scenarios": _assessment_schema_property("scenarios"),
+        "personal_insights": _assessment_schema_property("personal_insights"),
+        "psychology_factors": _assessment_schema_property("psychology_factors"),
+        "conclusions": _assessment_schema_property("conclusions"),
+        "first_steps": _assessment_schema_property("first_steps"),
+        "selected_first_step_id": _assessment_schema_property("selected_first_step_id"),
+    },
+    "required": [
+        "scenarios",
+        "personal_insights",
+        "psychology_factors",
+        "conclusions",
+        "first_steps",
+        "selected_first_step_id",
+    ],
+    "additionalProperties": False,
+}
 
 CONSTRUCTION_ESTIMATION_DOMAIN = "construction_engineering_cost_estimation"
 CONSTRUCTION_ESTIMATION_ROLES = [
@@ -954,7 +1015,12 @@ class CareerOpenAIClient:
         self.model = model
         self.transcribe_model = transcribe_model
         self.api_key = api_key
-        self.client = OpenAI(api_key=api_key, timeout=45.0, max_retries=1) if api_key else None
+        self.json_call_timeout_seconds = settings.openai_json_call_timeout_seconds
+        self.client = OpenAI(
+            api_key=api_key,
+            timeout=settings.openai_http_timeout_seconds,
+            max_retries=settings.openai_max_retries,
+        ) if api_key else None
 
     def _ensure_client(self) -> OpenAI:
         if self.client is None:
@@ -964,6 +1030,7 @@ class CareerOpenAIClient:
     def _chat(self, user_prompt: str, schema: dict[str, Any], language: str = "ru") -> str:
         language = "be" if (language or "ru") == "be" else "ru"
         client = self._ensure_client()
+        started = time.perf_counter()
         response = client.chat.completions.create(
             model=self.model,
             temperature=0.2,
@@ -987,6 +1054,7 @@ class CareerOpenAIClient:
             ],
         )
         content = response.choices[0].message.content
+        self._last_chat_seconds = time.perf_counter() - started
         if isinstance(content, str):
             return content
         return ""
@@ -1001,14 +1069,19 @@ class CareerOpenAIClient:
         try:
             raw_text = await asyncio.wait_for(
                 asyncio.to_thread(self._chat, prompt, schema, language),
-                timeout=55.0,
+                timeout=self.json_call_timeout_seconds,
             )
             return json.loads(raw_text)
-        except asyncio.TimeoutError:
-            print("[openai] request timed out; using fallback response", flush=True)
-            return copy.deepcopy(fallback)
-        except Exception:
-            return copy.deepcopy(fallback)
+        except asyncio.TimeoutError as exc:
+            logger.warning("openai_json_fallback error_type=%s error=%s", type(exc).__name__, exc)
+            result = copy.deepcopy(fallback)
+            result["_fallback_reason"] = "TimeoutError"
+            return result
+        except Exception as exc:
+            logger.warning("openai_json_fallback error_type=%s error=%s", type(exc).__name__, exc)
+            result = copy.deepcopy(fallback)
+            result["_fallback_reason"] = type(exc).__name__
+            return result
 
     def _lang_instruction(self, language: str) -> str:
         if (language or "ru") == "be":
@@ -1202,188 +1275,230 @@ route_changed=false. Дай один следующий измеримый ша�
                 "confidence": profile_snapshot.get("market_data_confidence") or "low",
             },
         }
-        prompt = """Собери единый CareerAssessment только по canonical_profile из входного ProfileSnapshot.
-
-Это единственный аналитический вызов. Он должен определить профессиональное ядро, вторичные функции,
-текущий и переходный seniority, доказательства, выбор пользователя, ограничения, маршруты, вопросы,
-обязательные выводы и 3-5 разных первых шагов.
-
-Правила:
-- используй только canonical_profile.facts текущего assessment; запрещено повторно извлекать факты отдельно из story_analysis/resume_analysis;
-- сначала создай 8-12 разных карьерных моделей (экспертная, координация, обучение, смежная роль, производитель, B2B, консалтинг, самостоятельная и гибридная модели), затем выбери основной и 2-4 альтернативных маршрута;
-- новая профессия с переобучением допустима только при явном желании пользователя;
-- route.title обязан быть реальным рыночным названием роли: условия труда, количество выездов, симптомы, ограничения, нежелательные задачи и отдельные действия запрещены;
-- основной маршрут не должен сохранять главные нежелательные задачи; текущая работа допустима только как временная финансовая опора с явным объяснением;
-- формируй самостоятельное заключение из фактов пользователя, не пытайся воспроизводить готовый образец;
-- сначала выдели функции, переносимые навыки и отраслевой опыт, затем создай широкий список ролей и отфильтруй его по рынку; не выбирай из фиксированного списка и не копируй профессии из примеров;
-- context.residence_country и context.target_countries не смешивай; preferred_currency определяй по целевому рынку (Литва=EUR, Польша=PLN);
-- если страна известна, анализируй именно её рынок; каждое рыночное утверждение указывает страну, дату, источник и уверенность;
-- если актуального источника нет, не придумывай цифры: назови отсутствующие данные и конкретный способ проверки;
-- прогноз дохода не смешивает gross/net, месяц/год, зарплату/выручку и разные рынки;
-- market_analysis заполни отдельно для каждого выбранного route_id: спрос, реальные названия, работодатели/клиенты, задачи, требования, язык, допуски, договоры, формат, конкуренция, развитие и влияние ИИ; без источника формулируй только план проверки;
-- income_forecasts заполни для каждого route_id тремя сценариями; числовой amount допустим только со страной, валютой, периодом, gross/net, датой и источником; иначе amount=null и дай конкретный verification_plan;
-- scenarios содержат ровно safe, main и ambitious и различаются моделью занятости, риском, горизонтом и действиями; каждое поле сценария должно быть содержательным;
-- personal_insights содержит минимум три вывода, каждый связывает минимум два evidence_id и даёт отдельное practical_consequence;
-- psychology_factors добавляй только по явным психологическим/социальным фактам; миграцию, язык, деньги, лицензии и физические ограничения не психологизируй;
-- для каждого маршрута выбери отдельный entry_path и сделай уникальными why_it_fits, missing, risks, market_test и disconfirming_conditions;
-- для каждого маршрута отдельно заполни transferable_functions, new_functions и typical_tasks; typical_tasks описывает целевую роль, а не копирует текущие задачи;
-- evidence_ids каждого маршрута должны ссылаться минимум на два факта только текущего assessment_id и смыслово объяснять именно этот переход;
-- assessment_id каждого evidence дословно равен fixed_identity.assessment_id;
-- cross-domain маршрут допустим только при явном мосте из минимум двух transferable_functions; иначе не включай его;
-- каждый существенный route claim помести в evidence_claims с непустыми evidence_fact_ids; claim без фактов запрещён;
-- психологические и социальные условия выводи только из явно сообщённых фактов, без диагнозов;
-- основной маршрут обязан ссылаться минимум на два evidence_id;
-- primary_routes обязательны;
-- transition_routes добавляй только для доказанного карьерного моста;
-- quick_income_routes добавляй только при приоритете быстрого дохода;
-- emergency_routes добавляй только при подтверждённой срочности;
-- не создавай пустые маршруты и название «Возможный маршрут»;
-- не предлагай административную работу, документооборот, психологию, бизнес или обнуление опыта без прямых доказательств и выбора пользователя;
-- не добавляй SWOT или неподтверждённый миграционный вывод;
-- прямой отказ пользователя от функции или профессии имеет приоритет над похожестью прошлого опыта;
-- переносимый профессиональный капитал не обязывает продолжать прежнюю профессию;
-- оценивай текущий seniority и уровень входа в новую функцию отдельно; не переноси и не обнуляй уровень автоматически;
-- перерыв, миграция, новый стек, язык или отсутствие локального допуска сами по себе не уничтожают профессиональный уровень;
-- для регулируемой деятельности разделяй квалификацию и законное право практиковать;
-- титулы owner, lead и manager проверяй по функциям, масштабу и ответственности, а не по названию;
-- недовольство условиями, people management, on-call или выгорание не считай автоматическим отказом от профессии;
-- практическую квалифицированную профессию не направляй в офис как универсальный карьерный рост;
-- при разрозненном опыте допустимо честно указать отсутствие устойчивого экспертного ядра;
-- не присваивай регулируемую профессию, клиническую компетентность или инженерный статус без подтверждения;
-- вопросы должны включать только неизвестные, способные изменить решение;
-- first_steps должны иметь 3-5 разных type, быть конкретными и не требовать увольнения;
-- learning допустим только для конкретного доказанного пробела;
-- country_code и валюты дословно перенеси из ProfileSnapshot;
-- значения assessment_id, session_id и profile_version дословно перенеси из fixed_identity;
-- selected_first_step_id верни null.
-
-ВХОД:
-""" + json.dumps(
-            {
-                "fixed_identity": fixed_identity,
-                "profile_snapshot": model_profile,
-            },
-            ensure_ascii=False,
-        )
-        payload = await self._run_json(prompt, {}, CAREER_ASSESSMENT_SCHEMA, language)
-        assessment = career_assessment_from_dict(payload)
-        validation = validate_career_assessment(
-            assessment,
-            snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
-            snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
-        )
-        identity_matches = (
-            assessment.assessment_id == assessment_id
-            and assessment.session_id == session_id
-            and assessment.profile_version == profile_version
-        )
-        diagnostics: dict[str, Any] = {
-            "assessment_id": assessment_id,
-            "profile_version": profile_version,
-            "raw_model_output": copy.deepcopy(payload),
-            "parsed_before_repair": assessment.to_dict(),
-            "validation_before_repair": validation.to_dict(),
-            "generation_stopped_at": validation.errors[0].field_path if validation.errors else None,
-            "repair_started": False,
-            "repair_attempts": [],
-        }
-        if validation.valid and identity_matches:
-            assessment.metadata.update(diagnostics)
-            assessment.metadata["recovered_by"] = "initial_generation"
-            return assessment
-
-        if not identity_matches:
-            diagnostics["identity_error"] = {
-                "expected": fixed_identity,
-                "actual": {
-                    "assessment_id": assessment.assessment_id,
-                    "session_id": assessment.session_id,
-                    "profile_version": assessment.profile_version,
-                },
-            }
-        diagnostics["repair_started"] = True
-        current_assessment = assessment
-        current_validation = validation
-        for attempt in range(1, 2):
-            repair_prompt = """Исправь CareerAssessment по точным ошибкам валидации.
-
-Правила repair:
-- используй только canonical_profile.facts из ProfileSnapshot;
-- не добавляй новые факты и не меняй подтверждённые факты;
-- исправь только поля, перечисленные в validation_errors;
-- сохрани assessment_id, session_id и profile_version из fixed_identity дословно;
-- professional_core содержит только краткие названия ролей или функций;
-- каждый route.title называет конкретную роль;
-- market_research step обязан ссылаться на related_route_id и дословно использовать title этого route;
-- верни полный CareerAssessment, selected_first_step_id=null.
-
-ДАННЫЕ:
-""" + json.dumps(
-                {
-                    "fixed_identity": fixed_identity,
-                    "original_assessment": payload,
-                    "assessment_to_repair": current_assessment.to_dict(),
-                    "validation_errors": [issue.to_dict() for issue in current_validation.errors],
-                    "profile_snapshot": model_profile,
-                },
-                ensure_ascii=False,
-            )
-            repaired_payload = await self._run_json(repair_prompt, {}, CAREER_ASSESSMENT_SCHEMA, language)
-            repaired = career_assessment_from_dict(repaired_payload)
-            repaired_validation = validate_career_assessment(
-                repaired,
-                snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
-                snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
-            )
-            repaired_identity_matches = (
-                repaired.assessment_id == assessment_id
-                and repaired.session_id == session_id
-                and repaired.profile_version == profile_version
-            )
-            diagnostics["repair_attempts"].append(
-                {
-                    "attempt": attempt,
-                    "raw_output": copy.deepcopy(repaired_payload),
-                    "parsed_assessment": repaired.to_dict(),
-                    "validation": repaired_validation.to_dict(),
-                    "identity_matches": repaired_identity_matches,
-                }
-            )
-            if repaired_validation.valid and repaired_identity_matches:
-                repaired.metadata.update(diagnostics)
-                repaired.metadata["recovered_by"] = "repair"
-                repaired.metadata["successful_repair_attempt"] = attempt
-                return repaired
-            current_assessment = repaired
-            current_validation = repaired_validation
-
-        fallback = build_deterministic_assessment(
+        baseline = build_deterministic_assessment(
             profile_snapshot,
             story_analysis or {},
             resume_analysis or {},
             assessment_id=assessment_id,
             session_id=session_id,
             profile_version=profile_version,
+            fallback_reason="staged_generation_baseline",
         )
-        # Invalid model bodies may themselves contain facts from another
-        # assessment. Never persist them inside fallback diagnostics.
-        fallback.metadata.update({
+        assembled_payload = baseline.to_dict()
+        generation_seconds = 0.0
+        model_call_count = 0
+        repair_attempt_count = 0
+        stage_fallbacks: list[str] = []
+        stage_results: dict[str, Any] = {}
+        diagnostics: dict[str, Any] = {
             "assessment_id": assessment_id,
             "profile_version": profile_version,
-            "repair_attempt_count": len(diagnostics.get("repair_attempts") or []),
-        })
-        fallback.metadata.update(
-            {
-                "recovered_by": "deterministic_fallback",
-                "fallback_reason": "One repair attempt did not produce a valid CareerAssessment",
-                "fallback_validation": validate_career_assessment(
-                    fallback,
-                    snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
-                    snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
-                ).to_dict(),
+            "generation_mode": "staged",
+            "stage_order": ["profile_identity", "routes", "market_income", "conclusions_steps"],
+            "stage_results": stage_results,
+            "stage_fallbacks": stage_fallbacks,
+            "generation_seconds": generation_seconds,
+            "model_call_count": model_call_count,
+            "repair_attempt_count": repair_attempt_count,
+            "validation_error_codes": [],
+            "repair_started": False,
+            "repair_attempts": [],
+        }
+
+        def identity_matches(value: CareerAssessment) -> bool:
+            return (
+                value.assessment_id == assessment_id
+                and value.session_id == session_id
+                and value.profile_version == profile_version
+            )
+
+        def validate_payload(payload: dict[str, Any]) -> tuple[CareerAssessment, Any]:
+            candidate = career_assessment_from_dict(payload)
+            validation_result = validate_career_assessment(
+                candidate,
+                snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+                snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+            )
+            return candidate, validation_result
+
+        def apply_stage(payload: dict[str, Any], stage_payload: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+            merged = copy.deepcopy(payload)
+            for key in keys:
+                if key in stage_payload:
+                    merged[key] = copy.deepcopy(stage_payload[key])
+            merged["assessment_id"] = assessment_id
+            merged["session_id"] = session_id
+            merged["profile_version"] = profile_version
+            merged["status"] = "preliminary"
+            merged["selected_first_step_id"] = None
+            return merged
+
+        def stage_validation_dict(validation_result: Any, stage_keys: list[str]) -> dict[str, Any]:
+            prefixes = tuple(f"{key}." for key in stage_keys)
+            errors = [
+                issue
+                for issue in validation_result.errors
+                if issue.field_path in stage_keys or issue.field_path.startswith(prefixes)
+            ]
+            warnings = [
+                issue
+                for issue in validation_result.warnings
+                if issue.field_path in stage_keys or issue.field_path.startswith(prefixes)
+            ]
+            return {
+                "valid": not errors,
+                "errors": [issue.to_dict() for issue in errors],
+                "warnings": [issue.to_dict() for issue in warnings],
             }
-        )
-        return fallback
+
+        stage_specs = [
+            (
+                "profile_identity",
+                STAGED_PROFILE_SCHEMA,
+                ["context", "identity", "evidence", "user_choice", "constraints", "questions"],
+                "Определи только профиль, идентичность, доказательства, выбор пользователя, ограничения и вопросы.",
+            ),
+            (
+                "routes",
+                STAGED_ROUTES_SCHEMA,
+                ["routes"],
+                "Собери только 3-5 разных маршрутов. Используй evidence_id из уже собранного профиля.",
+            ),
+            (
+                "market_income",
+                STAGED_MARKET_SCHEMA,
+                ["market_analysis", "income_forecasts"],
+                "Собери только рынок и доход для каждого выбранного route_id. Без источников не придумывай цифры.",
+            ),
+            (
+                "conclusions_steps",
+                STAGED_CONCLUSION_SCHEMA,
+                ["scenarios", "personal_insights", "psychology_factors", "conclusions", "first_steps", "selected_first_step_id"],
+                "Собери только сценарии, выводы, первые шаги и психологические факторы по явным фактам.",
+            ),
+        ]
+
+        for stage_name, schema, keys, instruction in stage_specs:
+            stage_prompt = instruction + "\n\nПравила этапа:\n" + "\n".join(
+                [
+                    "- используй только canonical_profile.facts текущего assessment;",
+                    "- не добавляй факты из примеров или прошлых сессий;",
+                    "- сохраняй route_id/evidence_id из входа, если ссылаешься на них;",
+                    "- не выдавай неподтверждённые психологические утверждения как факт;",
+                    "- верни только JSON по схеме этого этапа.",
+                ]
+            ) + "\n\nВХОД:\n" + json.dumps(
+                {
+                    "fixed_identity": fixed_identity,
+                    "profile_snapshot": model_profile,
+                    "assembled_assessment": assembled_payload,
+                    "stage": stage_name,
+                },
+                ensure_ascii=False,
+            )
+            started = time.perf_counter()
+            stage_payload = await self._run_json(stage_prompt, {}, schema, language)
+            generation_seconds += time.perf_counter() - started
+            model_call_count += 1
+            diagnostics["generation_seconds"] = generation_seconds
+            diagnostics["model_call_count"] = model_call_count
+            if not stage_payload or stage_payload.get("_fallback_reason"):
+                stage_fallbacks.append(stage_name)
+                stage_results[stage_name] = {"status": "fallback", "reason": stage_payload.get("_fallback_reason") if isinstance(stage_payload, dict) else "empty"}
+                continue
+
+            candidate_payload = apply_stage(assembled_payload, stage_payload, keys)
+            candidate, validation = validate_payload(candidate_payload)
+            stage_validation = stage_validation_dict(validation, keys)
+            if stage_validation["valid"] and identity_matches(candidate):
+                assembled_payload = candidate.to_dict()
+                stage_results[stage_name] = {"status": "accepted"}
+                continue
+
+            diagnostics.setdefault("parsed_before_repair", copy.deepcopy(stage_payload))
+            diagnostics.setdefault("validation_before_repair", stage_validation)
+            diagnostics["repair_started"] = True
+            repair_attempt_count += 1
+            diagnostics["repair_attempt_count"] = repair_attempt_count
+            repair_prompt = """Исправь только текущий этап CareerAssessment.
+
+Используй validation_errors как список точечных правок. Верни JSON только по stage_schema,
+не переписывай остальные блоки и не добавляй факты вне ProfileSnapshot.
+
+ДАННЫЕ:
+""" + json.dumps(
+                {
+                    "stage": stage_name,
+                    "stage_output": stage_payload,
+                    "assembled_assessment": candidate_payload,
+                    "validation_errors": stage_validation["errors"],
+                    "profile_snapshot": model_profile,
+                    "fixed_identity": fixed_identity,
+                },
+                ensure_ascii=False,
+            )
+            started = time.perf_counter()
+            repaired_payload = await self._run_json(repair_prompt, {}, schema, language)
+            generation_seconds += time.perf_counter() - started
+            model_call_count += 1
+            diagnostics["generation_seconds"] = generation_seconds
+            diagnostics["model_call_count"] = model_call_count
+            if repaired_payload and not repaired_payload.get("_fallback_reason"):
+                repaired_candidate_payload = apply_stage(assembled_payload, repaired_payload, keys)
+                repaired_candidate, repaired_validation = validate_payload(repaired_candidate_payload)
+                repaired_stage_validation = stage_validation_dict(repaired_validation, keys)
+                diagnostics["repair_attempts"].append({
+                    "stage": stage_name,
+                    "validation": repaired_stage_validation,
+                    "identity_matches": identity_matches(repaired_candidate),
+                })
+                if repaired_stage_validation["valid"] and identity_matches(repaired_candidate):
+                    assembled_payload = repaired_candidate.to_dict()
+                    stage_results[stage_name] = {
+                        "status": "repaired",
+                        "validation": stage_validation,
+                    }
+                    continue
+
+            stage_fallbacks.append(stage_name)
+            stage_results[stage_name] = {
+                "status": "fallback",
+                "validation": stage_validation,
+            }
+            diagnostics["validation_error_codes"] = list(dict.fromkeys(
+                [*diagnostics.get("validation_error_codes", []), *(issue["code"] for issue in stage_validation["errors"])]
+            ))
+
+        assessment, validation = validate_payload(assembled_payload)
+        if not validation.valid or not identity_matches(assessment):
+            assessment = baseline
+            stage_fallbacks.append("final_assembly")
+            validation = validate_career_assessment(
+                assessment,
+                snapshot_country_code=str(profile_snapshot.get("country_code") or "") or None,
+                snapshot_currency=str(profile_snapshot.get("currency") or "") or None,
+            )
+        diagnostics["validation_error_codes"] = list(dict.fromkeys(
+            [*diagnostics.get("validation_error_codes", []), *(issue.code for issue in validation.errors)]
+        ))
+        diagnostics["stage_fallbacks"] = stage_fallbacks
+        diagnostics["stage_results"] = stage_results
+        assessment.metadata.update(diagnostics)
+        repaired_stages = [
+            stage_name
+            for stage_name, result in stage_results.items()
+            if isinstance(result, dict) and result.get("status") == "repaired"
+        ]
+        if stage_fallbacks:
+            assessment.metadata["recovered_by"] = "deterministic_fallback"
+        elif repaired_stages:
+            assessment.metadata["recovered_by"] = "repair"
+            assessment.metadata["successful_repair_attempt"] = repair_attempt_count
+        else:
+            assessment.metadata["recovered_by"] = "initial_generation"
+        if stage_fallbacks:
+            assessment.metadata["fallback_reason"] = "staged blocks used deterministic fallback: " + ", ".join(stage_fallbacks)
+        return assessment
 
     async def build_report(
         self,

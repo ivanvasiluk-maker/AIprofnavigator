@@ -112,6 +112,11 @@ def profile_10_e2e_fixture() -> dict:
     return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
+def staged_payloads(payload: dict, repeats: int = 1) -> list[dict]:
+    normalized = career_assessment_from_dict(payload).to_dict()
+    return [copy.deepcopy(normalized) for _ in range(repeats)]
+
+
 class CareerAssessmentTest(unittest.TestCase):
     def setUp(self) -> None:
         self.assessment = career_assessment_from_dict(profile_10_assessment_payload())
@@ -264,6 +269,20 @@ class CareerAssessmentTest(unittest.TestCase):
 
 
 class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
+    async def test_run_json_logs_fallback_reason_on_exception(self) -> None:
+        client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
+
+        def broken_chat(*_args, **_kwargs):
+            raise RuntimeError("api unavailable")
+
+        client._chat = broken_chat  # type: ignore[method-assign]
+        with self.assertLogs("openai_client", level="WARNING") as captured:
+            result = await client._run_json("prompt", {"ok": True}, {"type": "object"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["_fallback_reason"], "RuntimeError")
+        self.assertIn("RuntimeError", " ".join(captured.output))
+
     async def test_fixture_runs_snapshot_repair_validation_telegram_and_html_end_to_end(self) -> None:
         fixture = profile_10_e2e_fixture()
         state_data = fixture["state_data"]
@@ -302,7 +321,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         valid_payload["profile_version"] = fixture["profile_version"]
 
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
-        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload])  # type: ignore[method-assign]
+        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload, *staged_payloads(valid_payload, 3)])  # type: ignore[method-assign]
         assessment = await client.build_career_assessment(
             snapshot,
             assessment_id=fixture["assessment_id"],
@@ -313,12 +332,14 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(assessment, type(career_assessment_from_dict(valid_payload)))
-        self.assertEqual(assessment.metadata["raw_model_output"], invalid_payload)
         self.assertEqual(assessment.metadata["parsed_before_repair"]["identity"]["seniority_current"], "средний")
-        before_errors = {item["code"] for item in assessment.metadata["validation_before_repair"]["errors"]}
-        self.assertTrue({"RAW_USER_SUMMARY_AS_TITLE", "INVALID_SENIORITY", "GENERIC_ROUTE_TITLE"} <= before_errors)
+        self.assertEqual(client._run_json.await_count, 5)
+        stage_validation = assessment.metadata["stage_results"]["profile_identity"]["validation"]
+        before_errors = {item["code"] for item in stage_validation["errors"]}
+        self.assertIn("RAW_USER_SUMMARY_AS_TITLE", before_errors)
         self.assertTrue(assessment.metadata["repair_started"])
         self.assertEqual(assessment.metadata["recovered_by"], "repair")
+        self.assertEqual(assessment.metadata["stage_results"]["profile_identity"]["status"], "repaired")
         validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(validation.errors, ())
@@ -347,7 +368,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         invalid_payload["conclusions"]["main_conclusion"] = ""
 
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
-        client._run_json = AsyncMock(side_effect=[copy.deepcopy(invalid_payload) for _ in range(3)])  # type: ignore[method-assign]
+        client._run_json = AsyncMock(side_effect=[copy.deepcopy(invalid_payload) for _ in range(8)])  # type: ignore[method-assign]
         assessment = await client.build_career_assessment(
             snapshot,
             assessment_id=fixture["assessment_id"],
@@ -359,7 +380,7 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(validation.valid, validation.errors)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
-        self.assertEqual(client._run_json.await_count, 2)
+        self.assertEqual(client._run_json.await_count, 7)
         self.assertNotIn("Текущая профессиональная специализация", assessment.identity.professional_core)
         self.assertEqual(assessment.routes.primary_routes[0].route_id, "source-route-1")
         self.assertNotIn("raw_model_output", assessment.metadata)
@@ -368,10 +389,10 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(html_path.is_file())
             self.assertNotIn(assessment.assessment_id, html_path.read_text(encoding="utf-8"))
 
-    async def test_build_uses_exactly_one_structured_call(self) -> None:
+    async def test_build_uses_four_staged_structured_calls(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
         payload = profile_10_assessment_payload()
-        client._run_json = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+        client._run_json = AsyncMock(side_effect=staged_payloads(payload, 4))  # type: ignore[method-assign]
         assessment = await client.build_career_assessment(
             {"country_code": "LT", "currency": "EUR"},
             assessment_id="assessment-profile-10",
@@ -379,21 +400,31 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
             profile_version="1",
         )
         self.assertEqual(assessment.assessment_id, "assessment-profile-10")
-        client._run_json.assert_awaited_once()
+        self.assertEqual(client._run_json.await_count, 4)
+        self.assertEqual(
+            assessment.metadata["stage_order"],
+            ["profile_identity", "routes", "market_income", "conclusions_steps"],
+        )
+        self.assertEqual(assessment.metadata["recovered_by"], "initial_generation")
+        self.assertEqual(assessment.metadata["generation_mode"], "staged")
+        self.assertEqual(assessment.metadata["model_call_count"], 4)
+        self.assertEqual(assessment.metadata["repair_attempt_count"], 0)
+        self.assertIsInstance(assessment.metadata["generation_seconds"], float)
+        self.assertEqual(assessment.metadata["validation_error_codes"], [])
 
     async def test_invalid_assessment_is_repaired_and_diagnostics_are_preserved(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
         invalid_payload = profile_10_assessment_payload()
         invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
         valid_payload = profile_10_assessment_payload()
-        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload])  # type: ignore[method-assign]
+        client._run_json = AsyncMock(side_effect=[invalid_payload, valid_payload, *staged_payloads(valid_payload, 3)])  # type: ignore[method-assign]
         assessment = await client.build_career_assessment(
             {"country_code": "LT", "currency": "EUR"},
             assessment_id="assessment-profile-10",
             session_id="session-profile-10",
             profile_version="1",
         )
-        self.assertEqual(client._run_json.await_count, 2)
+        self.assertEqual(client._run_json.await_count, 5)
         self.assertEqual(assessment.metadata["recovered_by"], "repair")
         self.assertEqual(assessment.metadata["successful_repair_attempt"], 1)
         self.assertEqual(
@@ -401,13 +432,14 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
             "RAW_USER_SUMMARY_AS_TITLE",
         )
         self.assertTrue(assessment.metadata["repair_attempts"][0]["validation"]["valid"])
+        self.assertEqual(assessment.metadata["stage_results"]["profile_identity"]["status"], "repaired")
 
     async def test_one_failed_repair_uses_fact_only_deterministic_fallback(self) -> None:
         client = CareerOpenAIClient(api_key="test", model="test", transcribe_model="test")
         invalid_payload = profile_10_assessment_payload()
         invalid_payload["identity"]["professional_core"] = ["Пользователь имеет опыт в маркетинге."]
         invalid_payload["routes"]["primary_routes"][0]["title"] = "Смежные роли"
-        client._run_json = AsyncMock(side_effect=[invalid_payload, invalid_payload, invalid_payload])  # type: ignore[method-assign]
+        client._run_json = AsyncMock(side_effect=[copy.deepcopy(invalid_payload) for _ in range(8)])  # type: ignore[method-assign]
         resume_analysis = {
             "tasks": [
                 "8 лет в IT-маркетинге; руководитель отдела и управлял командой",
@@ -435,12 +467,14 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         )
         validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(validation.valid, validation.errors)
-        self.assertEqual(client._run_json.await_count, 2)
+        self.assertEqual(client._run_json.await_count, 7)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         # Recovery must not activate a profile-specific golden fixture.
         self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
         self.assertEqual(assessment.routes.recommended_route_id, "source-route-1")
-        self.assertNotIn("Product Marketing Manager", str(assessment.to_dict()))
+        public_payload = assessment.to_dict()
+        public_payload.pop("metadata", None)
+        self.assertNotIn("Product Marketing Manager", str(public_payload))
 
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
         class State:

@@ -4,6 +4,7 @@ import asyncio
 import copy
 import io
 import json
+import logging
 import os
 import re
 import tempfile
@@ -238,6 +239,39 @@ from utils.reporting import build_telegram_summary, ensure_next_step_guidance, g
 from utils.reporting import generate_assessment_html_file, generate_html_report_file, generate_pdf_from_html_file_with_error
 
 router = Router()
+logger = logging.getLogger(__name__)
+
+
+async def _fail_report_generation(
+    message: Message,
+    state: FSMContext,
+    *,
+    error: BaseException,
+    stage: str,
+    assessment_id: str = "",
+    profile_version: str = "",
+    meta: dict | None = None,
+) -> None:
+    logger.exception("report_generation_failed stage=%s", stage, exc_info=error)
+    event_meta = {
+        "error": type(error).__name__,
+        "stage": stage,
+        **({"assessment_id": assessment_id} if assessment_id else {}),
+        **({"profile_version": profile_version} if profile_version else {}),
+        **(meta or {}),
+    }
+    await _track_event(message, state, "report_generation_failed", meta=event_meta)
+    await state.update_data(
+        report_generation_status="REPORT_GENERATION_FAILED",
+        report_generation_error=type(error).__name__,
+        report_generation_stage=stage,
+        report_generation_in_progress=False,
+    )
+    await state.set_state(CareerFlow.REPORT_GENERATION_FAILED)
+    await message.answer(
+        "Не получилось собрать заключение. Ваши ответы сохранены, нажмите «Повторить».",
+        reply_markup=assessment_recovery_keyboard(),
+    )
 _REMINDER_TASKS: dict[int, asyncio.Task] = {}
 _PDF_TASKS: dict[int, asyncio.Task] = {}
 _PDF_READY_BY_CHAT: dict[int, str] = {}
@@ -2383,10 +2417,42 @@ def _slugify(value: str) -> str:
 
 def _merge_answers_text(qa_answers: list[dict]) -> str:
     return "\n".join(
-        f"{idx + 1}. {row.get('question', '-')}: {row.get('answer', '-')}"
+        f"{idx + 1}. {row.get('question', '-')}: {'пропущено' if row.get('skipped') else row.get('answer', '-')}"
         for idx, row in enumerate(qa_answers)
         if isinstance(row, dict)
     )
+
+
+def _plain_button_text(value: str) -> str:
+    text = str(value or "").strip().casefold().replace("ё", "е")
+    text = re.sub(r"^[^\wа-я]+", "", text, flags=re.I).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _service_button_texts(questions: list, current: dict | None = None) -> set[str]:
+    values = {
+        "готово",
+        "далее",
+        "пропустить",
+        "отметил(а), что мешает",
+        "поддержка выбрана",
+        _plain_button_text(QUESTION_ADD_TEXT),
+        _plain_button_text(ANSWER_SKIP),
+        _plain_button_text(ANSWER_KEEP),
+        _plain_button_text(ANSWER_CONTEXT_YES),
+        _plain_button_text(ANSWER_CONTEXT_NO),
+    }
+    for row in [*(questions or []), current or {}]:
+        if isinstance(row, dict) and row.get("done_text"):
+            values.add(_plain_button_text(str(row.get("done_text") or "")))
+    return {item for item in values if item}
+
+
+def _is_service_button_text(value: str, questions: list, current: dict | None = None) -> bool:
+    normalized = _plain_button_text(value)
+    if normalized in _service_button_texts(questions, current):
+        return True
+    return normalized.endswith("готово") or normalized.endswith("пропустить")
 
 
 def _load_evidence_profile(data: dict, analysis: dict | None = None) -> CareerEvidenceProfile:
@@ -7558,7 +7624,12 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         meta={**runtime_meta, "assessment_id": assessment_id, "profile_version": profile_version},
     )
 
+    async def _send_generation_progress_once() -> None:
+        await asyncio.sleep(45)
+        await message.answer("Ещё собираю, осталось меньше минуты")
+
     generation_error = ""
+    progress_task = asyncio.create_task(_send_generation_progress_once())
     try:
         assessment = await asyncio.wait_for(
             ai_client.build_career_assessment(
@@ -7578,14 +7649,26 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         # "Собираю вашу карту".  A deterministic assessment is a complete,
         # renderable result, so continue through the normal HTML delivery path.
         generation_error = type(exc).__name__
-        assessment = build_deterministic_assessment(
-            snapshot,
-            copy.deepcopy(frozen["story"].get("analysis") or {}),
-            copy.deepcopy(frozen["resume"].get("analysis") or {}),
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-        )
+        try:
+            assessment = build_deterministic_assessment(
+                snapshot,
+                copy.deepcopy(frozen["story"].get("analysis") or {}),
+                copy.deepcopy(frozen["resume"].get("analysis") or {}),
+                assessment_id=assessment_id,
+                session_id=session_id,
+                profile_version=profile_version,
+            )
+        except Exception as fallback_exc:
+            await _fail_report_generation(
+                message,
+                state,
+                error=fallback_exc,
+                stage="deterministic_fallback_after_model_error",
+                assessment_id=assessment_id,
+                profile_version=profile_version,
+                meta={**runtime_meta, "initial_error": generation_error},
+            )
+            return
         assessment.metadata["recovered_by"] = "deterministic_fallback"
         assessment.metadata["generation_error"] = generation_error
         await _track_event(
@@ -7597,8 +7680,16 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 "assessment_id": assessment_id,
                 "profile_version": profile_version,
                 "error": generation_error,
+                "recovered_by": "deterministic_fallback",
+                "generation_seconds": 0,
+                "model_call_count": 0,
+                "repair_attempt_count": 0,
+                "validation_error_codes": [],
+                "timed_out": generation_error == "TimeoutError",
             },
         )
+    finally:
+        progress_task.cancel()
 
     consistency_failures = [
         *consistency_errors(assessment.to_dict(), integrity_audit),
@@ -7608,14 +7699,26 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         # build_career_assessment already performs its model repair pass.  A
         # remaining contradiction is therefore reduced to a source-only map;
         # never reuse a stored or previous conclusion here.
-        assessment = build_deterministic_assessment(
-            snapshot,
-            {},
-            {},
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-        )
+        try:
+            assessment = build_deterministic_assessment(
+                snapshot,
+                {},
+                {},
+                assessment_id=assessment_id,
+                session_id=session_id,
+                profile_version=profile_version,
+            )
+        except Exception as fallback_exc:
+            await _fail_report_generation(
+                message,
+                state,
+                error=fallback_exc,
+                stage="source_only_fallback",
+                assessment_id=assessment_id,
+                profile_version=profile_version,
+                meta={**runtime_meta, "consistency_errors": consistency_failures},
+            )
+            return
         assessment.metadata.update({
             "integrity_repair": "source_only_fallback",
             "consistency_errors": consistency_failures,
@@ -7632,14 +7735,26 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
         snapshot_currency=str(snapshot.get("currency") or "") or None,
     )
     if not validation.valid:
-        assessment = build_deterministic_assessment(
-            snapshot,
-            copy.deepcopy(frozen["story"].get("analysis") or {}),
-            copy.deepcopy(frozen["resume"].get("analysis") or {}),
-            assessment_id=assessment_id,
-            session_id=session_id,
-            profile_version=profile_version,
-        )
+        try:
+            assessment = build_deterministic_assessment(
+                snapshot,
+                copy.deepcopy(frozen["story"].get("analysis") or {}),
+                copy.deepcopy(frozen["resume"].get("analysis") or {}),
+                assessment_id=assessment_id,
+                session_id=session_id,
+                profile_version=profile_version,
+            )
+        except Exception as fallback_exc:
+            await _fail_report_generation(
+                message,
+                state,
+                error=fallback_exc,
+                stage="deterministic_fallback_after_validation_error",
+                assessment_id=assessment_id,
+                profile_version=profile_version,
+                meta={**runtime_meta, "validation_errors": validation.to_dict().get("errors", [])},
+            )
+            return
         validation = validate_career_assessment(
             assessment,
             snapshot_country_code=str(snapshot.get("country_code") or "") or None,
@@ -7657,6 +7772,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     assessment.metadata["selected_route"] = copy.deepcopy(frozen["routes"].get("selected") or {})
     assessment.identity.core_description = structured_identity_summary(report_snapshot)
     recovered_by = str(diagnostics.get("recovered_by") or "initial_generation")
+    generation_seconds = float(diagnostics.get("generation_seconds") or 0)
+    model_call_count = int(diagnostics.get("model_call_count") or 0)
+    repair_attempt_count = int(diagnostics.get("repair_attempt_count") or 0)
+    validation_error_codes = list(diagnostics.get("validation_error_codes") or [])
     generation_status = {
         "repair": "ASSESSMENT_REPAIRED",
         "deterministic_fallback": "ASSESSMENT_FALLBACK_READY",
@@ -7711,6 +7830,11 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             "assessment_id": assessment_id,
             "profile_version": profile_version,
             "recovered_by": recovered_by,
+            "generation_seconds": generation_seconds,
+            "model_call_count": model_call_count,
+            "repair_attempt_count": repair_attempt_count,
+            "validation_error_codes": validation_error_codes,
+            "timed_out": generation_error == "TimeoutError",
             "validation": validation.to_dict(),
             "diagnostics": diagnostics,
         },
@@ -8556,6 +8680,19 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
             await message.answer(t(lang, "answer_add_prompt"), reply_markup=input_method_keyboard())
             return
 
+        if (
+            _is_service_button_text(clean, questions, current if isinstance(current, dict) else None)
+            and clean.lower() not in current_options_low
+        ):
+            await _track_event(
+                message,
+                state,
+                "service_button_ignored_as_answer",
+                meta={"question_index": qa_index + 1, "question_id": current_q_id, "text": _plain_button_text(clean)},
+            )
+            await message.answer(_question_prompt(analysis, qa_index, lang), reply_markup=_question_reply_markup(analysis, qa_index))
+            return
+
         # Reject stale button answers from previous questions and require explicit confirmation.
         if clean.lower() not in current_options_low and _is_known_previous_button(questions, qa_index, clean):
             completed_multi = data.get("recent_completed_multi") if isinstance(data.get("recent_completed_multi"), dict) else {}
@@ -8840,11 +8977,11 @@ async def process_answers_input(message: Message, state: FSMContext, text: str) 
                 await message.answer(intro, reply_markup=question_options_keyboard(simpler_opts))
                 return
             # No options — mark gap unknown and advance
-            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": "не уточнено"})
+            qa_answers.append({"question": question_text, "question_id": current_q_id, "answer": None, "skipped": True})
             qa_index += 1
-            evidence_payload, is_ready = _update_evidence_after_answer(data, current, "не уточнено")
+            evidence_payload, is_ready = _update_evidence_after_answer(data, current, "")
             await state.update_data(qa_answers=qa_answers, qa_index=qa_index, evidence_profile=evidence_payload)
-            await _sync_interview_context_after_answer(state, data, evidence_payload, "не уточнено")
+            await _sync_interview_context_after_answer(state, data, evidence_payload, "")
             await message.answer(intro)
             if is_ready or qa_index >= len(questions):
                 merged = _merge_answers_text(qa_answers)

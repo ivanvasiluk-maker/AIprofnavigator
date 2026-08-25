@@ -7,6 +7,7 @@ import sys
 from contextlib import suppress
 
 from aiogram import BaseMiddleware, Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 
 from config import settings
@@ -113,6 +114,14 @@ class SessionCheckpointMiddleware(BaseMiddleware):
         return result
 
 
+def build_fsm_storage():
+    if settings.redis_url:
+        from aiogram.fsm.storage.redis import RedisStorage
+
+        return RedisStorage.from_url(settings.redis_url)
+    return MemoryStorage()
+
+
 async def main() -> None:
     settings.validate()
 
@@ -147,7 +156,7 @@ async def main() -> None:
     )
 
     bot = Bot(token=settings.bot_token)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=build_fsm_storage())
 
     dp.update.outer_middleware(DedupMiddleware())
     dp.update.outer_middleware(SessionCheckpointMiddleware())

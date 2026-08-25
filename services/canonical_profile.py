@@ -37,7 +37,7 @@ CITY_COUNTRIES = {
 }
 
 CITY_DISPLAY_NAMES = {
-    "tbilisi": "Tbilisi", "тбилиси": "Tbilisi",
+    "tbilisi": "Тбилиси", "тбилиси": "Тбилиси",
     "kaunas": "Kaunas", "каунас": "Kaunas", "каунасе": "Kaunas",
     "berlin": "Berlin", "берлин": "Berlin", "берлине": "Berlin",
     "prague": "Prague", "praha": "Prague", "прага": "Prague", "праге": "Prague",

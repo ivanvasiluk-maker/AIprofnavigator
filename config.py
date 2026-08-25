@@ -14,8 +14,17 @@ class Settings:
         self.openai_transcribe_model = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
         self.career_assessment_timeout_seconds = max(
             5.0,
-            float(os.getenv("CAREER_ASSESSMENT_TIMEOUT_SECONDS", "40")),
+            float(os.getenv("CAREER_ASSESSMENT_TIMEOUT_SECONDS", "180")),
         )
+        self.openai_http_timeout_seconds = max(
+            5.0,
+            float(os.getenv("OPENAI_HTTP_TIMEOUT_SECONDS", "60")),
+        )
+        self.openai_json_call_timeout_seconds = max(
+            5.0,
+            float(os.getenv("OPENAI_JSON_CALL_TIMEOUT_SECONDS", "70")),
+        )
+        self.openai_max_retries = max(0, int(os.getenv("OPENAI_MAX_RETRIES", "2")))
         self.report_output_dir = os.getenv("REPORT_OUTPUT_DIR", "reports")
         self.report_base_url = os.getenv("REPORT_BASE_URL", "http://localhost:8000/reports")
         self.report_pdf_engine = os.getenv("REPORT_PDF_ENGINE", "auto")
@@ -28,6 +37,7 @@ class Settings:
         self.specialist_notify_chat_id = os.getenv("SPECIALIST_NOTIFY_CHAT_ID", "").strip()
         self.support_group_telegram_url = os.getenv("SUPPORT_GROUP_TELEGRAM_URL", "").strip()
         self.app_db_path = os.getenv("APP_DB_PATH", "reports/app_data.sqlite3").strip()
+        self.redis_url = os.getenv("REDIS_URL", "").strip()
         self.environment = os.getenv("ENVIRONMENT", "development").strip().lower()
         self.legacy_career_report_enabled = os.getenv("LEGACY_CAREER_REPORT_ENABLED", "false").strip().lower() in {
             "1",
@@ -41,6 +51,11 @@ class Settings:
             missing.append("BOT_TOKEN")
         if not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
+        if self.career_assessment_timeout_seconds <= 2 * self.openai_json_call_timeout_seconds:
+            raise ValueError(
+                "CAREER_ASSESSMENT_TIMEOUT_SECONDS must be greater than "
+                "2 * OPENAI_JSON_CALL_TIMEOUT_SECONDS so generation and repair can finish"
+            )
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"Missing required environment variables: {joined}")

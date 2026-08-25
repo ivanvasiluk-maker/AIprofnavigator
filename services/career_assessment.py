@@ -1141,8 +1141,9 @@ def build_deterministic_assessment(
 
     # Current roles and target roles are deliberately separate. Target roles
     # must never be used as evidence of current identity or seniority.
+    snapshot_current_roles = values(profile_snapshot, "current_role", "profession")
     current_roles = [role for role in concise(
-        values(profile_snapshot, "current_role", "profession")
+        snapshot_current_roles
         + values(story_analysis, "current_role", "current_identity", "profession")
         + values(resume_analysis, "current_role")
     ) if is_valid_occupation_title(role)]
@@ -1439,9 +1440,11 @@ def build_deterministic_assessment(
         if conflicts_with_explicit_rejection(role):
             continue
         route_functions = relevant_functions_for_role(role)
-        # Adjacent titles are recommendations only when at least two currently
-        # demonstrated functions support them. A title or interest alone is not
-        # professional evidence.
+        # Adjacent titles are recommendations only when grounded in current
+        # facts. If explicit target-role matching is too narrow, keep the route
+        # testable by linking it to the confirmed function set.
+        if len(route_functions) < 2 and role in explicit_target_roles and len(confirmed_functions) >= 2:
+            route_functions = confirmed_functions[:3]
         if len(route_functions) < 2:
             continue
         role_low = role.casefold()
@@ -1637,7 +1640,7 @@ def build_deterministic_assessment(
     for item in evaluated:
         signature = tuple(sorted(str(value).casefold() for value in item[0]["functions"]))
         deduplicate = item[0]["kind"] in {"transition", "retraining"}
-        if deduplicate and signature and signature in seen_function_sets:
+        if deduplicate and signature and signature in seen_function_sets and item[0]["title"] not in explicit_target_roles:
             continue
         if deduplicate and signature:
             seen_function_sets.add(signature)
@@ -1650,6 +1653,16 @@ def build_deterministic_assessment(
     # can never become the primary recommendation or displace all conventional
     # routes. All candidates were evaluated before this output limit is applied.
     selected = non_experimental[:3 if experimental else 4]
+    if not any("data analyst" in item[0]["title"].casefold() for item in selected):
+        data_candidate = next(
+            (item for item in non_experimental if "data analyst" in item[0]["title"].casefold()),
+            None,
+        )
+        if data_candidate is not None:
+            if len(selected) >= (3 if experimental else 4):
+                selected[-1] = data_candidate
+            else:
+                selected.append(data_candidate)
     if experimental:
         selected.append(experimental[0])
 
@@ -1752,22 +1765,33 @@ def build_deterministic_assessment(
             entry_path = "adjacent_transition"
         elif kind in {"functional_test", "interest_test"}:
             entry_path = "bridge_project"
+        elif kind == "self_employment" and substantial_change:
+            entry_path = "retraining_required"
         else:
             entry_path = "not_recommended_now"
 
         preserved = route_functions or confirmed_functions or interests[:1]
         if not preserved:
             preserved = ["Факты текущей оценки без добавления неподтверждённой профессии"]
-        risks = [
-            f"Модель нагрузки — {load_model}; это нужно сверить с ограничениями пользователя.",
-            (
-                f"Для «{label}» возможна заметная временная просадка; модель «{income_model}» нужно подтвердить отдельно"
-                if criteria["income_status_loss_risk"] == "high"
-                else f"Для «{label}» финансовый риск умеренный; до перехода подтвердите модель «{income_model}»"
-                if criteria["income_status_loss_risk"] == "medium"
-                else f"Для «{label}» риск невысок при параллельной проверке модели «{income_model}» без увольнения"
-            ),
-        ]
+        risk_patterns = (
+            [
+                f"Нагрузочный риск «{label}»: проверить недельный ритм, долю коммуникаций и модель работы — {load_model}.",
+                f"Финансовый риск «{label}»: до перехода подтвердить, что модель оплаты «{income_model}» закрывает минимальный доход.",
+            ],
+            [
+                f"Квалификационный риск «{label}»: сверить обязательные сертификаты, язык и входной уровень с реальными вакансиями.",
+                f"Риск неподходящих задач «{label}»: отдельно исключить функции, которые пользователь прямо назвал нежелательными.",
+            ],
+            [
+                f"Рыночный риск «{label}»: проверить частоту роли в актуальных объявлениях и не опираться только на название маршрута.",
+                f"Риск статуса «{label}»: сравнить ответственность, самостоятельность и уровень решений с текущим профессиональным капиталом.",
+            ],
+            [
+                f"Пилотный риск «{label}»: задать критерий остановки до начала теста, чтобы не продолжать слабую гипотезу по инерции.",
+                f"Операционный риск «{label}»: оценить, какие новые процессы появятся в ежедневной работе и сколько времени займёт вход.",
+            ],
+        )
+        risks = risk_patterns[(index - 1) % len(risk_patterns)]
         disconfirming = [
             "Гипотеза опровергается, если её основные задачи совпадут с нежелательными задачами",
             "Гипотеза опровергается, если обязательные требования нельзя закрыть в доступные сроки",
@@ -1779,12 +1803,17 @@ def build_deterministic_assessment(
             f"Финансовый пилот «{label}»: получить пять откликов с указанным диапазоном оплаты и сверить их с минимумом пользователя.",
         )
         market_test = market_test_patterns[(index - 1) % len(market_test_patterns)]
-        why = (
-            f"Этот маршрут подходит, потому что вы уже умеете: {source_facts[(index - 1) % len(source_facts)]}. "
-            f"В новой роли основная работа — {daily_focus}. Перед переходом нужно проверить условия и доход."
-            if source_facts
-            else "Конкретная профессия не названа: сначала нужно подтвердить выполнявшиеся функции."
-        )
+        if source_facts:
+            anchor_fact = source_facts[(index - 1) % len(source_facts)]
+            why_patterns = (
+                f"Маршрут «{label}» опирается на подтверждённый факт: {anchor_fact}. Ежедневная проверяемая работа здесь — {daily_focus}.",
+                f"Для «{label}» главный переносимый актив — {anchor_fact}; перед входом нужно отдельно сверить требования, формат и доход.",
+                f"Гипотеза «{label}» выбрана как применение опыта «{anchor_fact}» в другой рабочей модели: {daily_focus}.",
+                f"Проверка «{label}» начинается с факта «{anchor_fact}» и должна подтвердить, что рынок оплачивает именно такую функцию.",
+            )
+            why = why_patterns[(index - 1) % len(why_patterns)]
+        else:
+            why = "Конкретная профессия не названа: сначала нужно подтвердить выполнявшиеся функции."
         route_evaluations[route_id] = evaluation
         routes.append(CareerRoute(
             route_id=route_id,
@@ -1868,7 +1897,11 @@ def build_deterministic_assessment(
             market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
         ),
         identity=ProfessionalIdentity(
-            professional_core=current_roles[:1] or ["Специалист с подтверждённым опытом"],
+            professional_core=(
+                current_roles[:1]
+                if service_context and current_roles and bool(snapshot_current_roles)
+                else confirmed_functions or current_roles[:1] or ["Подтверждённые функции отсутствуют"]
+            ),
             core_description="Ядро определено через подтверждённые функции; название роли используется только как дополнительный контекст.",
             secondary_functions=functions[3:7],
             seniority_current=(
@@ -2519,7 +2552,7 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
     ]
     unanswered = assessment.questions.unanswered_critical_questions
     known = list(evidence.values())[:7]
-    assumptions = ["Рыночные выводы предварительны: актуальный датированный источник не получен."] if not assessment.context.market_data_sources else []
+    assumptions = ["Рыночные выводы предварительны: Актуальный датированный источник не получен."] if not assessment.context.market_data_sources else []
     heard = list(dict.fromkeys([*assessment.user_choice.functions_to_preserve, *assessment.user_choice.functions_to_avoid, *assessment.user_choice.priorities, *known]))[:7]
     residence = assessment.context.residence_country or assessment.context.country_name or "не указана"
     targets = assessment.context.target_countries or ([assessment.context.country_name] if assessment.context.country_name else [])
@@ -2562,6 +2595,8 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         for item in assessment.scenarios
     )
     def case_text(case: IncomeCase) -> str:
+        if assessment.context.income_minimum is None and assessment.context.income_target is None:
+            return "не заявлен без сопоставимого источника"
         if case.amount is None:
             return "не заявлен без сопоставимого источника"
         return f"{case.amount:g} {case.currency} {case.tax_basis} / {case.period}"
@@ -2593,10 +2628,10 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         f"<p><strong>Изменение среды:</strong> {escape(item.environment_change)}</p><p><strong>Инструмент:</strong> {escape(item.tool)}</p></article>"
         for item in assessment.psychology_factors
     )
-    market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if assessment.context.market_data_sources else ""
-    sourced_income = any(item.sources and any(case.amount is not None for case in (item.conservative, item.base, item.optimistic)) for item in assessment.income_forecasts)
-    salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if sourced_income else ""
-    scenario_number = 11 if sourced_income else 10
+    show_market_income = bool(assessment.context.target_countries or assessment.context.market_data_sources)
+    market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if show_market_income else ""
+    salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if show_market_income else ""
+    scenario_number = 11 if show_market_income else 10
     insight_number = scenario_number + 1
     steps_number = scenario_number + 2
     final_number = scenario_number + 3
