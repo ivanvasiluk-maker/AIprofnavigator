@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.career_profiles.evaluators._common import make_score, report_blob, semantic_signal
+from tests.career_profiles.evaluators._common import cautious_language_present, make_score, report_blob, semantic_signal
 
 
 _SENIORITY_FIELDS = (
+    "current",
+    "notes",
     "professional_maturity",
     "current_function_level",
     "new_function_entry_level",
@@ -22,8 +24,16 @@ class SeniorityEvaluator:
         expected_profile: dict[str, Any],
     ) -> dict[str, Any]:
         expectations = expected_profile.get("seniority_expectations") if isinstance(expected_profile.get("seniority_expectations"), dict) else {}
+        if not expectations and isinstance(expected_profile.get("seniority"), dict):
+            expectations = expected_profile["seniority"]
         if not expectations:
-            return make_score(score=15, max_score=15, evaluator_comment="No seniority expectation configured.")
+            return make_score(
+                score=0,
+                max_score=15,
+                reason_codes=["SENIORITY_EXPECTATION_MISSING"],
+                missing_elements=["seniority"],
+                evaluator_comment="Expected profile has no seniority expectation; evaluation cannot award points.",
+            )
 
         blob = report_blob(generated_result)
         supporting: list[str] = []
@@ -35,7 +45,13 @@ class SeniorityEvaluator:
             if not expected_value:
                 continue
             configured += 1
-            if semantic_signal(expected_value, blob, threshold=0.35):
+            cautious_expectation = field_name == "notes" and any(
+                marker in expected_value.casefold()
+                for marker in ("не ", "только", "отдельно", "без доказ", "не создавать", "не считать")
+            )
+            if semantic_signal(expected_value, blob, threshold=0.35) or (
+                cautious_expectation and cautious_language_present(generated_result)
+            ):
                 supporting.append(expected_value)
                 matched += 1
             else:

@@ -305,3 +305,20 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python bot.py
 ```
+
+### Release verification
+
+Install the development test dependency and run the same gates used by GitHub Actions:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python tests/career_profiles/validate_package.py \
+  --manifest tests/career_profiles/package_manifest.json \
+  --inputs-dir tests/career_profiles/inputs \
+  --expected-dir tests/career_profiles/expected \
+  --expected-package-version career_profiles_v1
+BOT_TOKEN=123456:LOCAL_TEST OPENAI_API_KEY=sk-local-test python test_deploy_check.py
+BOT_TOKEN=123456:LOCAL_TEST OPENAI_API_KEY=sk-local-test pytest -q
+```
+
+Production deployment runs only after these checks pass. Railway deployment uses the official CLI with the repository secret `RAILWAY_TOKEN`.

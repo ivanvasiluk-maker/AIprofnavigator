@@ -9,6 +9,7 @@ from tests.career_profiles.fixtures.change_governance import ChangeProposal, val
 from tests.career_profiles.fixtures.regression_matrix import build_regression_matrix, evaluate_regression_acceptance
 from tests.career_profiles.validate_package import (
     EXPECTED_DATA_IN_INPUT,
+    PACKAGE_COMPLETE,
     PACKAGE_INCOMPLETE,
     PACKAGE_VERSION_MISMATCH,
     validate_test_package,
@@ -55,16 +56,16 @@ def _payload(profile_id: str, *, passed: bool, total_score: int, critical_codes:
 
 
 class PackageValidatorTests(unittest.TestCase):
-    def test_repository_package_currently_incomplete(self) -> None:
+    def test_repository_package_is_complete(self) -> None:
         report = validate_test_package(
             manifest_path=CAREER_PROFILES_DIR / "package_manifest.json",
             inputs_dir=CAREER_PROFILES_DIR / "inputs",
             expected_dir=CAREER_PROFILES_DIR / "expected",
             expected_package_version="career_profiles_v1",
         )
-        self.assertEqual(report["status"], PACKAGE_INCOMPLETE)
-        self.assertIn(PACKAGE_INCOMPLETE, report["statuses"])
-        self.assertFalse(report["baseline_ready"])
+        self.assertEqual(report["status"], PACKAGE_COMPLETE)
+        self.assertEqual(report["statuses"], [PACKAGE_COMPLETE])
+        self.assertTrue(report["baseline_ready"])
 
     def test_validator_detects_expected_fields_inside_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

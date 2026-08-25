@@ -20,8 +20,10 @@ def test_short_and_full_use_one_assessment_result():
     full = render_assessment_html(assessment)
     assert view["primary_route"]["title"] in short and view["primary_route"]["title"] in full
     assert all(item in short and item in full for item in view["professional_core"])
-    assert "Анализ по маршрутам" not in full
-    assert "Прогноз зарплаты или дохода" not in full
+    assert "Анализ по маршрутам" in full
+    assert "Актуальный датированный источник не получен" in full
+    assert "Прогноз зарплаты или дохода" in full
+    assert "не заявлен без сопоставимого источника" in full
 
 
 def test_start_guide_asks_one_question_instead_of_rendering_report():

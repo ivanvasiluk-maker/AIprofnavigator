@@ -1,0 +1,24 @@
+{
+  "profile_id": "profile_09_senior_developer",
+  "language": "ru",
+  "fixture_notice": "Полностью вымышленный обезличенный сценарий для проверки программной логики. Не содержит данных реального человека.",
+  "title": "Синтетический профиль senior backend-разработчика без people management",
+  "story": "Десять лет разрабатываю backend и распределённые системы, участвую в продуктовых решениях и архитектуре. Последние годы совмещал код с people management, переработками и on-call, из-за чего сильно выгорел. Из IT уходить не хочу. Хочу вернуться в senior individual contributor роль, без управления людьми и постоянных дежурств, возможно в AI-enabled продукте.",
+  "story_analysis": {
+    "current_role": "Senior Backend Engineer",
+    "confirmed_functions": [
+      "разрабатывает backend-системы",
+      "проектирует распределённую архитектуру",
+      "принимает продуктовые технические решения",
+      "ведёт сложные инженерные задачи"
+    ],
+    "functions_to_avoid": ["people management", "постоянный on-call", "систематические переработки"],
+    "target_roles": ["Senior Individual Contributor", "Senior Product Engineer", "Developer Tools Engineer", "Founding Engineer без people management"]
+  },
+  "answers": "Главное — остаться в инженерной профессии, сменить условия и убрать people management. Новый стек не должен автоматически снижать уровень. Нужно проверить риск стартапа, продуктовую долю и минимальный доход.",
+  "resume_analysis": {
+    "experience": ["10 лет backend и distributed systems"],
+    "skills": ["backend", "distributed systems", "software architecture", "product engineering"]
+  },
+  "selected_career_priorities": ["senior IC", "без people management", "без постоянного on-call"]
+}

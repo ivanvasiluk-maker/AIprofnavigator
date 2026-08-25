@@ -18,7 +18,13 @@ class ProfessionalCoreEvaluator:
             if str(item).strip()
         ]
         if not expected_core:
-            return make_score(score=15, max_score=15, evaluator_comment="No professional core expectation configured.")
+            return make_score(
+                score=0,
+                max_score=15,
+                reason_codes=["PROFESSIONAL_CORE_EXPECTATION_MISSING"],
+                missing_elements=["professional_core"],
+                evaluator_comment="Expected profile has no professional-core expectation; evaluation cannot award points.",
+            )
 
         actual_fragments = evidence_fragments(generated_result)
         supporting: list[str] = []

@@ -19,7 +19,8 @@ class UncertaintyEvaluator:
         blocks = route_blocks(generated_result)
         has_disproof = any(bool(block.get("what_may_disprove_this_route")) for block in blocks)
         facts_only = generated_result.get("facts_only") if isinstance(generated_result.get("facts_only"), dict) else {}
-        has_unknowns = bool(facts_only.get("unknowns"))
+        questions = generated_result.get("questions") if isinstance(generated_result.get("questions"), dict) else {}
+        has_unknowns = bool(facts_only.get("unknowns") or questions.get("unanswered_critical_questions"))
         cautious = cautious_language_present(generated_result)
 
         supporting: list[str] = []

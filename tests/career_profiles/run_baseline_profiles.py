@@ -14,7 +14,7 @@ from config import settings
 from openai_client import CareerOpenAIClient
 from tests.career_profiles.evaluators.baseline_evaluator import BaselineCareerEvaluator
 from tests.career_profiles.fixtures.baseline_runner import run_baseline_profiles
-from tests.career_profiles.fixtures.generator_boundary import OpenAICareerGenerator
+from tests.career_profiles.fixtures.generator_boundary import DeterministicCareerGenerator, OpenAICareerGenerator
 
 
 BASE_DIR = ROOT / "tests" / "career_profiles"
@@ -23,7 +23,7 @@ BASE_DIR = ROOT / "tests" / "career_profiles"
 async def _main() -> int:
     parser = argparse.ArgumentParser(description="Run isolated baseline career profiles")
     parser.add_argument("--run-id", default="", help="Immutable run identifier; if omitted, a new one is generated")
-    parser.add_argument("--required-count", type=int, default=9, help="Expected number of input profiles")
+    parser.add_argument("--required-count", type=int, default=10, help="Expected number of input profiles")
     parser.add_argument("--inputs-dir", default=str(BASE_DIR / "inputs"), help="Directory with input profile JSON files")
     parser.add_argument("--expected-dir", default=str(BASE_DIR / "expected"), help="Directory with expected profile JSON files")
     parser.add_argument("--results-dir", default=str(BASE_DIR / "results"), help="Directory for generated and evaluation outputs")
@@ -58,16 +58,33 @@ async def _main() -> int:
     parser.add_argument("--git-commit", default="unknown", help="Git commit used for the run")
     parser.add_argument("--prompt-version", default="unknown", help="Prompt version hash or label")
     parser.add_argument("--environment", default="local", help="Execution environment label")
+    parser.add_argument(
+        "--generator",
+        choices=("deterministic", "openai"),
+        default="deterministic",
+        help="Use the reproducible active fallback in CI or the live OpenAI path explicitly",
+    )
     args = parser.parse_args()
 
     from tests.career_profiles.fixtures.baseline_runner import generate_run_id
 
-    client = CareerOpenAIClient(
-        api_key=settings.openai_api_key,
-        model=settings.openai_model,
-        transcribe_model=settings.openai_transcribe_model,
-    )
-    generator = OpenAICareerGenerator(client)
+    if args.generator == "openai":
+        client = CareerOpenAIClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            transcribe_model=settings.openai_transcribe_model,
+        )
+        generator = OpenAICareerGenerator(client)
+        model = settings.openai_model
+        model_parameters = {
+            "temperature": 0.2,
+            "response_format": "json_schema.strict",
+            "transcribe_model": settings.openai_transcribe_model,
+        }
+    else:
+        generator = DeterministicCareerGenerator()
+        model = "deterministic-active-pipeline"
+        model_parameters = {"fallback_reason": "baseline_active_pipeline"}
     evaluator = BaselineCareerEvaluator()
 
     summary = await run_baseline_profiles(
@@ -82,12 +99,8 @@ async def _main() -> int:
         application_version=str(args.application_version or "manual"),
         git_commit=str(args.git_commit or "unknown"),
         prompt_version=str(args.prompt_version or "unknown"),
-        model=settings.openai_model,
-        model_parameters={
-            "temperature": 0.2,
-            "response_format": "json_schema.strict",
-            "transcribe_model": settings.openai_transcribe_model,
-        },
+        model=model,
+        model_parameters=model_parameters,
         environment=str(args.environment or "local"),
         package_manifest_path=Path(args.package_manifest) if str(args.package_manifest or "").strip() else None,
         enforce_package_integrity=not bool(args.skip_package_integrity_check),
@@ -97,7 +110,7 @@ async def _main() -> int:
         enforce_regression_gate=bool(args.enforce_regression_gate),
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if summary.get("baseline_complete") else 2
 
 
 if __name__ == "__main__":

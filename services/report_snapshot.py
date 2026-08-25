@@ -20,6 +20,7 @@ class ReportSnapshot(BaseModel):
     profile_version: str
     mode: str
     person_name: str | None = None
+    canonical_profile: dict[str, Any] = Field(default_factory=dict)
     story: dict[str, Any] = Field(default_factory=dict)
     resume: dict[str, Any] = Field(default_factory=dict)
     facts: dict[str, Any] = Field(default_factory=dict)
@@ -89,8 +90,6 @@ def _person_name(story_text: str, analysis: dict[str, Any]) -> str | None:
     if explicit:
         return explicit.split()[0]
     match = re.search(r"меня\s+зовут\s+([А-ЯЁA-Z][а-яёa-z]+)", story_text, re.I)
-    if not match:
-        match = re.search(r"(?:^|[.!?]\s+)я[\s,—-]+([А-ЯЁA-Z][а-яёa-z]+)", story_text, re.I)
     return match.group(1).title() if match else None
 
 
@@ -126,6 +125,8 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
     # Resume parsing may return a partial payload. Preserve already confirmed
     # assessment facts instead of letting that partial payload shadow them.
     merged_data = copy.deepcopy(data)
+    if not merged_data.get("desired_changes") and data.get("selected_career_priorities"):
+        merged_data["desired_changes"] = copy.deepcopy(data.get("selected_career_priorities"))
     assessment_values = [
         value for key in ("assessment", "assessment_data", "profile_snapshot", "report_snapshot")
         if isinstance((value := data.get(key)), dict)
@@ -135,6 +136,13 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
             merged_data[key] = next((row.get(key) for row in assessment_values if row.get(key) not in (None, "")), None)
     canonical: CanonicalProfile = build_canonical_profile(merged_data, assessment_id=assessment_id)
     normalized = canonical.normalized_profile
+    desired_changes = list(dict.fromkeys(
+        _texts(normalized.desired_changes) + _texts(data.get("selected_career_priorities"))
+    ))
+    # The active deterministic and OpenAI paths intentionally consume the
+    # canonical profile. Preserve explicit priorities inside that authority,
+    # not only in convenience fields surrounding it.
+    normalized.desired_changes = desired_changes
     story_analysis = copy.deepcopy(data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {})
     resume_analysis = copy.deepcopy(data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {})
     confirmed_functions = merge_functions(
@@ -169,6 +177,7 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
         profile_version=str(data.get("profile_version") or assessment_id),
         mode=mode,
         person_name=_person_name(story_text, story_analysis),
+        canonical_profile=canonical.model_dump(mode="json"),
         story={"analysis": story_analysis, "present": bool(story_text.strip())},
         resume={"analysis": resume_analysis, "loaded": resume_loaded},
         facts={
@@ -179,6 +188,8 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
             "confirmed_functions": confirmed_functions,
             "years_experience": normalized.years_experience or (int(experience_match.group(1)) if experience_match else None),
             "team_size": int(re.search(r"(?:команд\w*|подчинени\w*)[^\d]{0,20}(\d+)", story_text, re.I).group(1)) if re.search(r"(?:команд\w*|подчинени\w*)[^\d]{0,20}(\d+)", story_text, re.I) else None,
+            "desired_changes": desired_changes,
+            "selected_career_priorities": desired_changes,
         },
         routes={
             "selected": {
@@ -204,6 +215,44 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
             "resolved_fact_types": list(data.get("resolved_fact_types") or []),
         },
     )
+
+
+def build_generator_snapshot(snapshot: ReportSnapshot) -> dict[str, Any]:
+    """Build the exact active-pipeline payload from one immutable snapshot.
+
+    Keeping this transformation outside the Telegram handler lets the baseline
+    runner exercise the same input contract as production.  Most importantly,
+    the canonical fact ledger must reach ``build_career_assessment``; without it
+    the model sees an empty profile and every request falls back.
+    """
+    frozen = snapshot.model_dump(mode="json")
+    facts = copy.deepcopy(frozen["facts"])
+    hypotheses = copy.deepcopy(frozen["routes"].get("hypotheses") or [])
+    return {
+        **facts,
+        "assessment_id": frozen["assessment_id"],
+        "public_user_id": frozen["user_id"],
+        "profile_version": frozen["profile_version"],
+        "user_mode": frozen["mode"],
+        "person_name": frozen["person_name"],
+        "canonical_profile": copy.deepcopy(frozen["canonical_profile"]),
+        "country_name": facts.get("country"),
+        "target_countries": [facts.get("country")] if facts.get("country") else [],
+        "currency": facts.get("currency") or facts.get("income_currency"),
+        "resume_loaded": bool(frozen["resume"].get("loaded")),
+        "selected_route": copy.deepcopy(frozen["routes"].get("selected") or {}),
+        "route_hypotheses": hypotheses,
+        "target_roles": [
+            str(row.get("title") or "").strip()
+            for row in hypotheses
+            if isinstance(row, dict) and str(row.get("title") or "").strip()
+        ],
+        "constraints": list(frozen["constraints"]),
+        "market_context": copy.deepcopy(frozen["market_context"]),
+        "story_analysis": copy.deepcopy(frozen["story"].get("analysis") or {}),
+        "resume_analysis": copy.deepcopy(frozen["resume"].get("analysis") or {}),
+        "ready_for_report": True,
+    }
 
 
 def structured_identity_summary(snapshot: ReportSnapshot) -> str:

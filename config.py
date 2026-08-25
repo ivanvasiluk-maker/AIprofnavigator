@@ -17,7 +17,9 @@ class Settings:
             float(os.getenv("CAREER_ASSESSMENT_TIMEOUT_SECONDS", "40")),
         )
         self.report_output_dir = os.getenv("REPORT_OUTPUT_DIR", "reports")
-        self.report_base_url = os.getenv("REPORT_BASE_URL", "http://localhost:8000/reports")
+        public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+        default_report_url = f"https://{public_domain}/reports" if public_domain else "http://localhost:8000/reports"
+        self.report_base_url = os.getenv("REPORT_BASE_URL", default_report_url).strip()
         self.report_pdf_engine = os.getenv("REPORT_PDF_ENGINE", "auto")
         self.report_pdf_font_path = os.getenv("REPORT_PDF_FONT_PATH", "").strip()
         self.google_sheets_webhook_url = os.getenv("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
@@ -27,8 +29,10 @@ class Settings:
         self.specialist_telegram_url = os.getenv("SPECIALIST_TELEGRAM_URL", "").strip()
         self.specialist_notify_chat_id = os.getenv("SPECIALIST_NOTIFY_CHAT_ID", "").strip()
         self.support_group_telegram_url = os.getenv("SUPPORT_GROUP_TELEGRAM_URL", "").strip()
+        self.hybrid_support_url = os.getenv("HYBRID_SUPPORT_URL", "").strip()
         self.app_db_path = os.getenv("APP_DB_PATH", "reports/app_data.sqlite3").strip()
         self.environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        self.report_api_enabled = os.getenv("ENABLE_REPORT_API", "").strip().lower() in {"1", "true", "yes"}
         self.legacy_career_report_enabled = os.getenv("LEGACY_CAREER_REPORT_ENABLED", "false").strip().lower() in {
             "1",
             "true",

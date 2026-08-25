@@ -61,6 +61,8 @@ from keyboards import (
     RESULT_ANALYZE_MARKET,
     RESULT_SPECIALIST_EXPLICIT,
     RESULT_GROUP_EXPLICIT,
+    RESULT_AI_PROMPT,
+    RESULT_HYBRID_SUPPORT,
     REPORT_RETRY,
     REPORT_SHORT_FALLBACK,
     REPORT_CONTACT_SUPPORT,
@@ -166,6 +168,7 @@ from keyboards import (
     extended_diagnostics_keyboard,
     question_options_keyboard,
     result_actions_keyboard,
+    post_report_support_keyboard,
     report_failure_keyboard,
     snapshot_failure_keyboard,
     next_step_cta_keyboard,
@@ -206,6 +209,7 @@ from services.evidence_profile import (
     next_question_from_profile,
     profile_ready_for_safe_conclusion,
 )
+from services.interview_policy import MAX_MEANINGFUL_QUESTIONS
 from services.canonical_profile import (
     CanonicalProfile,
     ClarifyingQuestion,
@@ -213,7 +217,7 @@ from services.canonical_profile import (
     record_question_answer,
     select_clarifying_question,
 )
-from services.report_snapshot import ReportSnapshot, build_report_snapshot, merge_functions, normalize_functions, structured_identity_summary, validate_report_consistency, validate_report_snapshot
+from services.report_snapshot import ReportSnapshot, build_generator_snapshot, build_report_snapshot, merge_functions, normalize_functions, structured_identity_summary, validate_report_consistency, validate_report_snapshot
 from services.career_assessment import (
     CAREER_HTML_RENDERER_VERSION,
     CAREER_PIPELINE_VERSION,
@@ -228,6 +232,7 @@ from services.career_assessment import (
     start_guide_response,
     validated_assessment_result,
     build_income_bridge,
+    build_personal_ai_prompt,
     validate_career_assessment,
 )
 from services.assessment_integrity import audit_facts, build_fact_ledger, consistency_errors, contamination_errors
@@ -394,7 +399,7 @@ async def advance_assessment(message: Message, state: FSMContext, *, trigger: st
     evidence = _load_evidence_profile(data, data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {})
     unresolved = [gap for gap in evidence.unresolved_gaps if gap not in resolved]
     mode = str(data.get("user_mode") or "calm_steps")
-    limit = 1 if mode in {"fast", "quick"} else 5
+    limit = 1 if mode in {"fast", "quick"} else MAX_MEANINGFUL_QUESTIONS
     question_count = int(data.get("question_count") or 0)
     step_completed = trigger in {"psychology_done", "route_selected", "resume_parsed", "questions_completed"}
     should_generate = should_finalize_assessment(data) or question_count >= limit or step_completed or not unresolved
@@ -1833,10 +1838,10 @@ def _specialist_notify_target_chat_id() -> int | None:
         return None
 
 
-async def _notify_specialist_request_owner(message: Message, state: FSMContext, action: str) -> None:
+async def _notify_specialist_request_owner(message: Message, state: FSMContext, action: str) -> bool:
     target_chat_id = _specialist_notify_target_chat_id()
     if not target_chat_id:
-        return
+        return False
 
     data = await state.get_data()
     public_user_id = _ensure_public_id(data, message)
@@ -1870,6 +1875,7 @@ async def _notify_specialist_request_owner(message: Message, state: FSMContext, 
             action=action,
             meta={"target_chat_id": target_chat_id},
         )
+        return True
     except Exception as exc:
         await _track_event(
             message,
@@ -1878,6 +1884,7 @@ async def _notify_specialist_request_owner(message: Message, state: FSMContext, 
             action=action,
             meta={"error": type(exc).__name__},
         )
+        return False
 
 
 async def _run_pdf_generation_background(
@@ -2229,40 +2236,22 @@ def _adaptive_question_count(story_text: str, profile: dict, analysis: dict) -> 
     if enough_data >= 5:
         return 5
     if enough_data <= 2:
-        return 8
-    return 6
+        return MAX_MEANINGFUL_QUESTIONS
+    return MAX_MEANINGFUL_QUESTIONS
 
 
 def _question_count_for_mode(mode: str, configured_value: object = None) -> int:
     mode_key = str(mode or "calm_steps")
 
-    # Hard boundaries from MVP TZ.
-    bounds = {
-        "fast": (5, 5),
-        "calm_steps": (8, 10),
-        "deep_route": (12, 15),
-        "support": (12, 15),
-    }
-    min_q, max_q = bounds.get(mode_key, (8, 10))
-
     try:
         configured = int(configured_value or 0)
     except Exception:
         configured = 0
-
-    # If state/config provides a value, clamp it into allowed mode range.
+    if mode_key in {"fast", "quick"}:
+        return 1
     if configured > 0:
-        return max(min_q, min(max_q, configured))
-
-    # Defaults stay inside mode boundaries.
-    defaults = {
-        "fast": 5,
-        "calm_steps": 8,
-        "deep_route": 15,
-        "support": 15,
-    }
-    default_value = defaults.get(mode_key, 10)
-    return max(min_q, min(max_q, default_value))
+        return max(1, min(MAX_MEANINGFUL_QUESTIONS, configured))
+    return MAX_MEANINGFUL_QUESTIONS
 
 
 def _join_items(items: list[str], limit: int = 6) -> str:
@@ -2556,7 +2545,7 @@ async def _ask_next_interview_question(
     lang: str,
     user_mode: str,
 ) -> bool:
-    question_limit = 1 if user_mode in {"fast", "quick"} else 5
+    question_limit = 1 if user_mode in {"fast", "quick"} else MAX_MEANINGFUL_QUESTIONS
     question_count = int(data.get("question_count") or 0)
     if question_count >= question_limit:
         context.current_action = "show_preliminary_map"
@@ -2651,7 +2640,13 @@ async def _ask_next_interview_question(
 
 def _build_evidence_questions(profile: CareerEvidenceProfile, lang: str, user_mode: str) -> list[dict[str, object]]:
     mode_key = str(user_mode or "calm_steps")
-    soft_cap = {"fast": 1, "quick": 1, "calm_steps": 5, "deep_route": 5, "support": 5}.get(mode_key, 5)
+    soft_cap = {
+        "fast": 1,
+        "quick": 1,
+        "calm_steps": MAX_MEANINGFUL_QUESTIONS,
+        "deep_route": MAX_MEANINGFUL_QUESTIONS,
+        "support": MAX_MEANINGFUL_QUESTIONS,
+    }.get(mode_key, MAX_MEANINGFUL_QUESTIONS)
 
     questions: list[dict[str, object]] = []
     asked_gap_keys: set[str] = set()
@@ -4691,10 +4686,13 @@ def _set_mvp_questions(
 ) -> dict:
     updated = dict(analysis or {})
     mode_key = str(mode or "calm_steps")
-    effective_limit = max(1, int(limit) if int(limit) > 0 else _question_count_for_mode(mode_key))
+    effective_limit = min(
+        MAX_MEANINGFUL_QUESTIONS,
+        max(1, int(limit) if int(limit) > 0 else _question_count_for_mode(mode_key)),
+    )
 
     if mode_key == "fast":
-        effective_limit = min(effective_limit, 5)
+        effective_limit = 1
         normalized_fast: list[dict[str, object]] = []
         for idx, row in enumerate(_questions_fast()[:effective_limit], start=1):
             question_text = str(row.get("question", "")).strip() or f"Вопрос {idx}"
@@ -7061,31 +7059,7 @@ async def _prepare_report_snapshot(message: Message, state: FSMContext, data: di
         )
         return None
     frozen = report_snapshot.model_dump(mode="json")
-    facts = copy.deepcopy(frozen["facts"])
-    generator_snapshot = {
-        **facts,
-        "assessment_id": frozen["assessment_id"],
-        "public_user_id": frozen["user_id"],
-        "profile_version": frozen["profile_version"],
-        "user_mode": frozen["mode"],
-        "person_name": frozen["person_name"],
-        "country_name": facts.get("country"),
-        "target_countries": [facts.get("country")] if facts.get("country") else [],
-        "currency": facts.get("currency") or facts.get("income_currency"),
-        "resume_loaded": bool(frozen["resume"].get("loaded")),
-        "selected_route": copy.deepcopy(frozen["routes"].get("selected") or {}),
-        "route_hypotheses": copy.deepcopy(frozen["routes"].get("hypotheses") or []),
-        "target_roles": [
-            str(row.get("title") or "").strip()
-            for row in (frozen["routes"].get("hypotheses") or [])
-            if isinstance(row, dict) and str(row.get("title") or "").strip()
-        ],
-        "constraints": list(frozen["constraints"]),
-        "market_context": copy.deepcopy(frozen["market_context"]),
-        "story_analysis": copy.deepcopy(frozen["story"].get("analysis") or {}),
-        "resume_analysis": copy.deepcopy(frozen["resume"].get("analysis") or {}),
-        "ready_for_report": True,
-    }
+    generator_snapshot = build_generator_snapshot(report_snapshot)
     await state.update_data(report_snapshot=frozen, report_snapshot_errors=[])
     return report_snapshot, generator_snapshot
 
@@ -7397,7 +7371,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     canonical = build_canonical_profile(data, assessment_id=assessment_id)
     clarification_count = canonical.question_state.question_count
     question = select_clarifying_question(canonical) if _report_draft_is_empty(report) else None
-    if question is not None and clarification_count < 5:
+    if question is not None and clarification_count < MAX_MEANINGFUL_QUESTIONS:
         await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
         await state.update_data(
@@ -7472,6 +7446,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             )
             if Path(html_report_path).is_file():
                 await message.answer_document(FSInputFile(html_report_path), caption=t(lang, "web_report_ready"))
+            await message.answer(
+                "Как хотите продолжить после заключения?",
+                reply_markup=post_report_support_keyboard(),
+            )
             await _track_event(
                 message,
                 state,
@@ -7515,7 +7493,7 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             awaiting_route_context=False,
         )
         # Clarifications are selected one at a time during the interview. Report
-        # generation must continue after the five-question cap.
+        # generation must continue after the product-wide question cap.
 
     public_user_id = str(data.get("public_user_id") or _ensure_public_id(data, message))
     session_id = str(data.get("session_id") or "").strip()
@@ -7735,6 +7713,10 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
             caption=t(lang, "web_report_ready"),
             reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else None,
         )
+        await message.answer(
+            "Заключение готово. Выберите удобный формат продолжения:",
+            reply_markup=post_report_support_keyboard(),
+        )
         await _track_event(
             message,
             state,
@@ -7790,6 +7772,10 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
         path = str(data.get("html_report_path") or "")
         if path and Path(path).is_file():
             await callback.message.answer_document(FSInputFile(path), caption=t(_user_language(data), "web_report_ready"))
+            await callback.message.answer(
+                "Как хотите продолжить после заключения?",
+                reply_markup=post_report_support_keyboard(),
+            )
         else:
             await callback.message.answer("Полный отчёт ещё сохраняется. Попробуйте открыть его через несколько секунд.")
     elif callback.message and action == "guide":
@@ -8181,7 +8167,7 @@ async def restart_from_any_state(message: Message, state: FSMContext) -> None:
         asked_question_signatures=[],
         preferred_input="unknown",
         user_mode="calm_steps",
-        max_questions=10,
+        max_questions=MAX_MEANINGFUL_QUESTIONS,
         support_level="medium",
         support_need="medium",
         pace="normal",
@@ -9978,6 +9964,7 @@ async def handle_crisis_support_fallback(message: Message, state: FSMContext) ->
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_SPECIALIST_ROUTING_ACTIONS))
 @router.message(CareerFlow.FINAL_READY, F.text.in_(ALL_SPECIALIST_ROUTING_ACTIONS))
+@router.message(CareerFlow.REPORT_READY, F.text.in_(ALL_SPECIALIST_ROUTING_ACTIONS))
 async def handle_specialist_routing_actions(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = _user_language(data)
@@ -9999,9 +9986,25 @@ async def handle_specialist_routing_actions(message: Message, state: FSMContext)
         followup = f"{t(lang, 'specialist_contact_intro', request_id=request_id)}\n\nЗафиксировал(а), что важны оба трека: карьерный маршрут и психологическая устойчивость."
 
     await _track_event(message, state, "specialist_routing_selected", action=action, meta={"notify_action": notify_action})
-    await _notify_specialist_request_owner(message, state, notify_action)
-    await state.set_state(CareerFlow.REPORT_GENERATING)
-    await message.answer(followup, reply_markup=result_actions_keyboard())
+    notified = await _notify_specialist_request_owner(message, state, notify_action)
+    await state.set_state(CareerFlow.FINAL_READY)
+    if settings.specialist_telegram_url:
+        await message.answer(
+            "Откройте контакт специалиста и отправьте ему ID заявки: " + request_id,
+            reply_markup=telegram_link_keyboard("Написать специалисту", settings.specialist_telegram_url),
+        )
+        await message.answer(
+            "После сообщения специалисту можно продолжать выполнять шаги в боте.",
+            reply_markup=post_report_support_keyboard(),
+        )
+    elif notified:
+        await message.answer(followup, reply_markup=post_report_support_keyboard())
+    else:
+        await message.answer(
+            "Автоматическая передача заявки специалисту сейчас не настроена. "
+            "Вы можете продолжить сопровождение в боте или выбрать группу поддержки.",
+            reply_markup=post_report_support_keyboard(),
+        )
 
 
 @router.message(CareerFlow.waiting_for_post_result_action, F.text.in_(ALL_RESULT_ACTIONS))
@@ -10109,8 +10112,19 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         return
     if action in {REPORT_CONTACT_SUPPORT, SNAPSHOT_SUPPORT}:
         request_id = _ensure_public_id(data, message)
-        await _notify_specialist_request_owner(message, state, "report_generation_support")
-        await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=result_actions_keyboard())
+        notified = await _notify_specialist_request_owner(message, state, "report_generation_support")
+        if settings.specialist_telegram_url:
+            await message.answer(
+                "Напишите специалисту и укажите ID заявки: " + request_id,
+                reply_markup=telegram_link_keyboard("Написать специалисту", settings.specialist_telegram_url),
+            )
+        elif notified:
+            await message.answer(t(lang, "specialist_contact_intro", request_id=request_id), reply_markup=post_report_support_keyboard())
+        else:
+            await message.answer(
+                "Канал связи со специалистом сейчас не настроен. Ваши ответы сохранены; можно повторить сборку или продолжить в боте.",
+                reply_markup=post_report_support_keyboard(),
+            )
         return
     if not data.get("final_report_generated") and action != RESULT_OPEN_FULL_REPORT:
         await message.answer(t(lang, "generation_lock_message"))
@@ -10208,7 +10222,7 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await message.answer(t(lang, "self_exploration_intro"), reply_markup=self_exploration_keyboard())
         return
 
-    if action in {RESULT_DO_STEPS, PDF_FALLBACK_STEPS, CTA_CAREER_CHAT, CTA_JOB_SEARCH_SUPPORT}:
+    if action in {RESULT_SUPPORT, RESULT_DO_STEPS, PDF_FALLBACK_STEPS, CTA_CAREER_CHAT, CTA_JOB_SEARCH_SUPPORT}:
         steps = data.get("execution_steps") or _build_execution_steps(data.get("final_report") or {})
         progress = data.get("execution_progress") or {}
         current_day = int(data.get("current_execution_day", 0))
@@ -10218,6 +10232,52 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
         await state.set_state(CareerFlow.STEP_TRACKING)
         await message.answer(t(lang, "step_tracking_intro"), reply_markup=step_tracking_keyboard())
         await message.answer(t(lang, "step_tracking_current_day", day=current_day + 1, total=len(steps)), reply_markup=step_tracking_keyboard())
+        return
+
+    if action == RESULT_AI_PROMPT:
+        result = data.get("validated_assessment_result")
+        if not isinstance(result, dict):
+            assessment_payload = data.get("career_assessment")
+            if isinstance(assessment_payload, dict):
+                result = validated_assessment_result(career_assessment_from_dict(assessment_payload))
+            else:
+                result = {}
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(
+            "Скопируйте этот промт в выбранный ИИ:\n\n" + build_personal_ai_prompt(result),
+            reply_markup=post_report_support_keyboard(),
+        )
+        return
+
+    if action == RESULT_HYBRID_SUPPORT:
+        result = data.get("validated_assessment_result")
+        if not isinstance(result, dict):
+            assessment_payload = data.get("career_assessment")
+            result = (
+                validated_assessment_result(career_assessment_from_dict(assessment_payload))
+                if isinstance(assessment_payload, dict)
+                else {}
+            )
+        request_id = _ensure_public_id(data, message)
+        notified = await _notify_specialist_request_owner(message, state, "hybrid_human_ai_support")
+        await state.set_state(CareerFlow.FINAL_READY)
+        await message.answer(
+            "Гибридный формат: ИИ помогает выполнять шаги и готовить материалы, специалист проверяет решения и корректирует маршрут.\n\n"
+            "Промт для самостоятельного старта:\n" + build_personal_ai_prompt(result),
+            reply_markup=post_report_support_keyboard(),
+        )
+        hybrid_url = settings.hybrid_support_url or settings.specialist_telegram_url
+        if hybrid_url:
+            await message.answer(
+                "Для подключения человека укажите ID заявки: " + request_id,
+                reply_markup=telegram_link_keyboard("Подключить специалиста", hybrid_url),
+            )
+        elif notified:
+            await message.answer("Заявка на гибридное сопровождение передана. ID: " + request_id)
+        else:
+            await message.answer(
+                "Автоматическое подключение специалиста сейчас не настроено; промт выше можно использовать самостоятельно."
+            )
         return
 
     if action in {RESULT_CLARIFY, PDF_FALLBACK_CLARIFY, RESULT_FIX_FACT_OR_PRIORITY}:
@@ -10255,14 +10315,14 @@ async def handle_post_result_actions(message: Message, state: FSMContext) -> Non
 
     if action in {RESULT_SUPPORT_GROUP, RESULT_GROUP_EXPLICIT}:
         await state.set_state(CareerFlow.FINAL_READY)
-        await message.answer(t(lang, "support_group_contact_intro"), reply_markup=result_actions_keyboard())
+        await message.answer(t(lang, "support_group_contact_intro"), reply_markup=post_report_support_keyboard())
         if settings.support_group_telegram_url:
             await message.answer(
-                settings.support_group_telegram_url,
+                "Группа доступна по кнопке ниже.",
                 reply_markup=telegram_link_keyboard("Хочу в группу поддержки", settings.support_group_telegram_url),
             )
         else:
-            await message.answer(t(lang, "telegram_link_missing"), reply_markup=result_actions_keyboard())
+            await message.answer(t(lang, "telegram_link_missing"), reply_markup=post_report_support_keyboard())
         return
 
     if action == RESULT_START_FIRST_STEP:

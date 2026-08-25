@@ -13,7 +13,11 @@ def normalize_text(value: object) -> str:
 
 def tokenize(value: object) -> set[str]:
     text = normalize_text(value)
-    return {token for token in _TOKEN_RE.findall(text) if len(token) >= 3}
+    short_domain_tokens = {"hr", "it", "ai", "qa", "ux", "ui"}
+    return {
+        token for token in _TOKEN_RE.findall(text)
+        if len(token) >= 3 or token in short_domain_tokens
+    }
 
 
 def semantic_match_score(expected: object, actual: object) -> float:
@@ -21,8 +25,17 @@ def semantic_match_score(expected: object, actual: object) -> float:
     actual_tokens = tokenize(actual)
     if not expected_tokens or not actual_tokens:
         return 0.0
-    overlap = expected_tokens & actual_tokens
-    return len(overlap) / max(1, len(expected_tokens))
+    def related(left: str, right: str) -> bool:
+        if left == right:
+            return True
+        # The fixtures are bilingual and Russian role nouns are commonly
+        # compared with inflected function verbs (электромонтажник / электромонтаж).
+        # A conservative five-character stem catches that relation without
+        # turning generic short words into a match.
+        return min(len(left), len(right)) >= 6 and left[:5] == right[:5]
+
+    matched = sum(1 for token in expected_tokens if any(related(token, actual) for actual in actual_tokens))
+    return matched / max(1, len(expected_tokens))
 
 
 def semantic_signal(expected: object, actual: object, *, threshold: float = 0.45) -> bool:
@@ -53,6 +66,35 @@ def route_blocks(report: dict[str, Any]) -> list[dict[str, Any]]:
     blocks = report.get("route_evidence_blocks")
     if isinstance(blocks, list):
         return [item for item in blocks if isinstance(item, dict)]
+    routes = report.get("routes") if isinstance(report.get("routes"), dict) else {}
+    recommended_id = str(routes.get("recommended_route_id") or "").strip()
+    active_blocks: list[dict[str, Any]] = []
+    groups = (
+        ("primary_routes", "primary"),
+        ("transition_routes", "transition"),
+        ("quick_income_routes", "quick"),
+        ("emergency_routes", "emergency"),
+    )
+    for group_name, default_role in groups:
+        values = routes.get(group_name) if isinstance(routes.get(group_name), list) else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            role = "primary" if str(item.get("route_id") or "") == recommended_id else default_role
+            active_blocks.append({
+                "route": str(item.get("title") or "").strip(),
+                "route_id": str(item.get("route_id") or "").strip(),
+                "income_role": role,
+                "why_it_fits": [str(item.get("why_it_fits") or "").strip()],
+                "evidence_from_user": [str(value).strip() for value in item.get("evidence_ids") or [] if str(value).strip()],
+                "what_may_disprove_this_route": [
+                    str(value).strip() for value in item.get("disconfirming_conditions") or [] if str(value).strip()
+                ],
+                "missing_competencies": [str(value).strip() for value in item.get("missing") or [] if str(value).strip()],
+                "risks": [str(value).strip() for value in item.get("risks") or [] if str(value).strip()],
+            })
+    if active_blocks:
+        return active_blocks
     return []
 
 
@@ -114,10 +156,15 @@ def extract_route_slots(report: dict[str, Any]) -> dict[str, list[str]]:
     return slots
 
 
-def contains_contextual_route(expected_route: str, actual_titles: list[str]) -> tuple[bool, list[str]]:
+def contains_contextual_route(
+    expected_route: str,
+    actual_titles: list[str],
+    *,
+    threshold: float = 0.5,
+) -> tuple[bool, list[str]]:
     fragments: list[str] = []
     for actual in actual_titles:
-        if semantic_signal(expected_route, actual, threshold=0.5) or normalize_text(expected_route) in normalize_text(actual):
+        if semantic_signal(expected_route, actual, threshold=threshold) or normalize_text(expected_route) in normalize_text(actual):
             fragments.append(actual)
     return bool(fragments), fragments
 
@@ -151,6 +198,11 @@ def cautious_language_present(report: dict[str, Any]) -> bool:
         "потребуется проверить",
         "данных недостаточно",
         "неясно",
+        "нужно проверить",
+        "требует проверки",
+        "не подтвержден",
+        "не подтверждён",
+        "не указан",
     ]
     return any(marker in normalize_text(blob) for marker in markers)
 
@@ -167,4 +219,13 @@ def evidence_fragments(report: dict[str, Any]) -> list[str]:
         value = facts_only.get(key)
         if isinstance(value, list):
             fragments.extend(str(item).strip() for item in value if str(item).strip())
+    evidence = report.get("evidence") if isinstance(report.get("evidence"), list) else []
+    for item in evidence:
+        if isinstance(item, dict):
+            fact = str(item.get("fact") or "").strip()
+            if fact:
+                fragments.append(fact)
+    identity = report.get("identity") if isinstance(report.get("identity"), dict) else {}
+    fragments.extend(str(item).strip() for item in identity.get("professional_core") or [] if str(item).strip())
+    fragments.extend(str(item).strip() for item in identity.get("transferable_functions") or [] if str(item).strip())
     return fragments

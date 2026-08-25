@@ -57,6 +57,11 @@ class RecordingGenerator:
         }
 
 
+class FailingGenerator:
+    async def generate(self, input_profile: dict[str, Any], runtime_context: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("synthetic generation failure")
+
+
 def _input_payload(profile_id: str, preferred_route: str) -> dict[str, Any]:
     return {
         "profile_id": profile_id,
@@ -82,6 +87,28 @@ def _expected_payload(profile_id: str, expected_route: str) -> dict[str, Any]:
 
 
 class BaselineRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_profile_execution_error_makes_release_gate_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp)
+            inputs_dir = base_dir / "inputs"
+            expected_dir = base_dir / "expected"
+            inputs_dir.mkdir()
+            expected_dir.mkdir()
+            (inputs_dir / "profile_1.json").write_text(json.dumps(_input_payload("profile_1", "Route 1")), encoding="utf-8")
+            (expected_dir / "profile_1.json").write_text(json.dumps(_expected_payload("profile_1", "Route 1")), encoding="utf-8")
+
+            summary = await run_baseline_profiles(
+                generator=FailingGenerator(), evaluator=BaselineCareerEvaluator(),
+                inputs_dir=inputs_dir, expected_dir=expected_dir, results_dir=base_dir / "results",
+                baseline_lock_path=BASELINE_LOCK_PATH, required_profile_count=1, run_id="failed-profile",
+                application_version="test", git_commit="commit", prompt_version="prompt",
+                model="test", model_parameters={},
+            )
+
+            self.assertFalse(summary["baseline_complete"])
+            self.assertEqual(summary["failed_count"], 1)
+            self.assertEqual(summary["profiles"][0]["execution_error"]["error_type"], "RuntimeError")
+
     async def test_runner_executes_nine_profiles_with_separate_outputs(self) -> None:
         generator = RecordingGenerator()
         evaluator = BaselineCareerEvaluator()

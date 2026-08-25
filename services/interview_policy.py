@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field as PydanticField
 if TYPE_CHECKING:
     from services.evidence_profile import CareerEvidenceProfile
 
+
+# One product-wide ceiling. Unknown facts below the ceiling become explicit
+# uncertainty in the conclusion instead of an endless questionnaire.
+MAX_MEANINGFUL_QUESTIONS = 6
+
 CRITICAL_GAP_TYPES: list[str] = [
     "explicit_goal",
     "explicit_refusal",

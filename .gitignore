@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv-review/
 __pycache__/
 *.pyc
 *.pyo
@@ -30,5 +31,8 @@ Thumbs.db
 # Generated reports
 reports/*.html
 reports/*.pdf
+reports/*.json
+reports/*.jsonl
+reports/*.csv
 !reports/nextyou_report_example.html
-
+!reports/README.md

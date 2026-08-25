@@ -42,7 +42,7 @@ def test_missing_country_is_asked_before_conclusion_and_limit_is_seven_blocks():
     profile = CareerEvidenceProfile(unresolved_gaps=["residence_country", "target_country"])
     question = next_question_from_profile(profile)
     assert question and question["gap_key"] == "residence_country"
-    assert MAX_ADDITIONAL_QUESTIONS == 7
+    assert MAX_ADDITIONAL_QUESTIONS == 6
 
 
 def test_known_or_unknown_country_is_not_repeated():

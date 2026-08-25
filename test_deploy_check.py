@@ -1,84 +1,68 @@
 #!/usr/bin/env python
-"""Pre-deployment sanity check."""
-from utils.analytics import ensure_public_user_id, behavior_offer_snapshot, days_since_first_seen
-from utils.reporting import render_report_html, build_offer_text, build_meta
-from config import settings
-import json
+"""Read-only local checks used before the Railway deployment job.
+
+The module intentionally does nothing on import so pytest can collect the
+repository without creating analytics users or mutating report files.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-print("=" * 60)
-print("PRE-DEPLOYMENT CHECKS")
-print("=" * 60)
+from config import settings
+from tests.career_profiles.validate_package import PACKAGE_COMPLETE, validate_test_package
+from utils.reporting import ReportMeta, build_offer_text, render_report_html
 
-# 1. Analytics module
-print("\n1. Testing analytics...")
-user_id = ensure_public_user_id(99999, source_tag="deploy_test")
-print(f"   ✓ Generated public_user_id: {user_id}")
 
-days = days_since_first_seen(user_id)
-print(f"   ✓ Days since first seen: {days}")
+ROOT = Path(__file__).resolve().parent
+CAREER_PACKAGE = ROOT / "tests" / "career_profiles"
 
-snapshot = behavior_offer_snapshot(user_id)
-print(f"   ✓ Behavior snapshot loaded: {len(snapshot)} keys")
 
-# 2. Config validation
-print("\n2. Testing config...")
-try:
+def run_checks() -> list[str]:
+    """Run deterministic checks and return human-readable confirmations."""
+    confirmations: list[str] = []
+
     settings.validate()
-    print("   ✓ Required env vars (BOT_TOKEN, OPENAI_API_KEY) are set")
-except ValueError as e:
-    print(f"   ✗ Config error: {e}")
-    exit(1)
+    confirmations.append("required configuration is present")
 
-# 3. Reporting
-print("\n3. Testing reporting...")
-try:
     offer = build_offer_text()
-    assert len(offer) > 50, "Offer should have content"
-    print(f"   ✓ Offer text generated ({len(offer)} chars)")
-    
-    # Check HTML rendering can be called
+    if len(offer) <= 50:
+        raise AssertionError("offer text is unexpectedly empty")
+
     test_report = {
         "digital_human": {"current_state": "Test"},
         "career_decision": {"recommended_main_path": "Test"},
         "action_plan": {"today": {"action": "Test"}},
         "closing_message": "Test",
     }
-    meta = build_meta(test_report, user_name="TestUser")
-    html = render_report_html(test_report, meta)
-    assert "NextYou" in html, "HTML should contain report header"
-    print(f"   ✓ HTML rendering works ({len(html)} chars)")
-except Exception as e:
-    print(f"   ✗ Reporting error: {e}")
-    exit(1)
+    html = render_report_html(
+        test_report,
+        ReportMeta("TestUser", "Test", "Growth", "2026-01-01", "local-check"),
+    )
+    if "NextYou" not in html:
+        raise AssertionError("rendered HTML does not contain the report header")
+    confirmations.append("report rendering is operational")
 
-# 4. Check registry file
-registry_path = Path(settings.analytics_registry_path)
-if registry_path.exists():
-    registry = json.loads(registry_path.read_text())
-    print(f"\n4. Analytics registry:")
-    print(f"   ✓ File exists at {registry_path}")
-    print(f"   ✓ Contains {len(registry.get('users', {}))} users")
-else:
-    print(f"\n4. Analytics registry:")
-    print(f"   ✓ Will be created at {registry_path} on first user")
+    package_result = validate_test_package(
+        manifest_path=CAREER_PACKAGE / "package_manifest.json",
+        inputs_dir=CAREER_PACKAGE / "inputs",
+        expected_dir=CAREER_PACKAGE / "expected",
+    )
+    if package_result.get("status") != PACKAGE_COMPLETE:
+        blockers = ", ".join(package_result.get("baseline_blockers") or [])
+        raise AssertionError(f"career test package is incomplete: {blockers}")
+    confirmations.append("career profile package is complete")
 
-# 5. Check events log
-events_path = Path(settings.analytics_events_log_path)
-if events_path.exists():
-    lines = len(events_path.read_text().strip().split("\n"))
-    print(f"\n5. Events log:")
-    print(f"   ✓ File exists at {events_path}")
-    print(f"   ✓ Contains {lines} events")
-else:
-    print(f"\n5. Events log:")
-    print(f"   ✓ Will be created at {events_path} on first event")
+    return confirmations
 
-print("\n" + "=" * 60)
-print("✓ ALL PRE-DEPLOYMENT CHECKS PASSED")
-print("=" * 60)
-print("\nReady to deploy to Railway!")
-print("\nNew environment variables to add:")
-print("  - GOOGLE_SHEETS_WEBHOOK_URL")
-print("  - ANALYTICS_REGISTRY_PATH=/data/reports/user_registry.json")
-print("  - ANALYTICS_EVENTS_LOG_PATH=/data/reports/behavior_events.jsonl")
+
+def main() -> int:
+    print("PRE-DEPLOYMENT CHECKS")
+    for confirmation in run_checks():
+        print(f"  OK: {confirmation}")
+    print("Local deployment checks passed; CI test suite remains the release gate.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
