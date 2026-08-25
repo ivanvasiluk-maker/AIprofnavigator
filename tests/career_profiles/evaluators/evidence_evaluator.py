@@ -14,7 +14,20 @@ class EvidenceEvaluator:
     ) -> dict[str, Any]:
         expected_evidence = [str(item).strip() for item in expected_profile.get("evidence_fragments") or [] if str(item).strip()]
         if not expected_evidence:
-            return make_score(score=10, max_score=10, evaluator_comment="No explicit evidence fragments configured.")
+            story_analysis = input_profile.get("story_analysis") if isinstance(input_profile.get("story_analysis"), dict) else {}
+            expected_evidence = [
+                str(item).strip()
+                for item in story_analysis.get("confirmed_functions") or []
+                if str(item).strip()
+            ][:4]
+        if not expected_evidence:
+            return make_score(
+                score=0,
+                max_score=10,
+                reason_codes=["EVIDENCE_EXPECTATION_MISSING"],
+                missing_elements=["confirmed_functions"],
+                evaluator_comment="Neither expected evidence nor input functions are available for evaluation.",
+            )
 
         actual = evidence_fragments(generated_result)
         matched = 0

@@ -1,0 +1,24 @@
+{
+  "profile_id": "profile_06_career_break",
+  "language": "ru",
+  "fixture_notice": "Полностью вымышленный обезличенный сценарий для проверки программной логики. Не содержит данных реального человека.",
+  "title": "Синтетический профиль возвращения в HR после длительного перерыва",
+  "story": "До семейного перерыва двенадцать лет работала в HR: подбор, onboarding и координация обучения. Последние девять лет не работала по профессии. Не хочу скрывать перерыв или выдавать семейную заботу за профессиональный опыт. Хочу вернуться через содержательную coordinator-роль, обновить ATS и sourcing и постепенно восстановить уровень.",
+  "story_analysis": {
+    "current_role": "HR-специалист по подбору",
+    "confirmed_functions": [
+      "ведёт подбор сотрудников",
+      "координирует onboarding",
+      "организует обучение сотрудников",
+      "поддерживает HR-операции"
+    ],
+    "constraints": ["девятилетний карьерный перерыв"],
+    "target_roles": ["Recruitment Coordinator", "Onboarding Coordinator", "HR Operations Specialist"]
+  },
+  "answers": "Готова к coordinator или junior-middle уровню, но не к полной потере профессии. Нужно уточнить занятость, минимальный доход и актуальность ATS/sourcing.",
+  "resume_analysis": {
+    "experience": ["12 лет в подборе, onboarding и обучении"],
+    "skills": ["recruitment", "onboarding", "training coordination"]
+  },
+  "selected_career_priorities": ["вернуться в HR", "не обнулять прошлый опыт"]
+}

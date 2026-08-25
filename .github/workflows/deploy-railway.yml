@@ -1,21 +1,75 @@
 name: Deploy to Railway
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
   workflow_dispatch:
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Validate career test package
+        run: >-
+          python tests/career_profiles/validate_package.py
+          --manifest tests/career_profiles/package_manifest.json
+          --inputs-dir tests/career_profiles/inputs
+          --expected-dir tests/career_profiles/expected
+          --expected-package-version career_profiles_v1
+
+      - name: Run local deployment checks
+        run: python test_deploy_check.py
+        env:
+          BOT_TOKEN: "123456:CI_TEST_TOKEN"
+          OPENAI_API_KEY: "sk-ci-test"
+
+      - name: Run deterministic 10-profile release gate
+        run: >-
+          python tests/career_profiles/run_baseline_profiles.py
+          --generator deterministic
+          --run-id ci-${{ github.run_id }}-${{ github.run_attempt }}
+          --results-dir /tmp/career-baseline-results
+          --application-version ci
+          --git-commit ${{ github.sha }}
+          --prompt-version active-career-assessment-v1
+          --environment ci
+
+      - name: Run test suite
+        run: pytest -q
+        env:
+          BOT_TOKEN: "123456:CI_TEST_TOKEN"
+          OPENAI_API_KEY: "sk-ci-test"
+          PYTHONDONTWRITEBYTECODE: "1"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Deploy to Railway
-        uses: railwayapp/cli-action@v1
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          command: up --service AIprofnavigator
+        run: npx -y @railway/cli@latest up --service AIprofnavigator --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

@@ -12,7 +12,15 @@ class UserChoiceEvaluator:
         generated_result: dict[str, Any],
         expected_profile: dict[str, Any],
     ) -> dict[str, Any]:
-        refusals = [str(item).strip() for item in expected_profile.get("direct_refusals") or [] if str(item).strip()]
+        story_analysis = input_profile.get("story_analysis") if isinstance(input_profile.get("story_analysis"), dict) else {}
+        refusals = [
+            str(item).strip()
+            for item in [
+                *(expected_profile.get("direct_refusals") or []),
+                *(story_analysis.get("functions_to_avoid") or []),
+            ]
+            if str(item).strip()
+        ]
         if not refusals:
             return make_score(score=10, max_score=10, evaluator_comment="No direct refusals configured.")
 

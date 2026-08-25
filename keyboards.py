@@ -199,6 +199,8 @@ RESULT_UPLOAD_OR_EDIT_RESUME = "📄 Загрузить / доработать �
 RESULT_ANALYZE_MARKET = "🔎 Разобрать рынок и вакансии"
 RESULT_SPECIALIST_EXPLICIT = "👤 Разобрать со специалистом"
 RESULT_GROUP_EXPLICIT = "👥 Найти группу / сообщество"
+RESULT_AI_PROMPT = "🤖 Получить персональный промт для ИИ"
+RESULT_HYBRID_SUPPORT = "🧑‍💻 Сопровождение: человек + ИИ"
 REPORT_RETRY = "Повторить заключение"
 REPORT_SHORT_FALLBACK = "Получить краткий результат"
 REPORT_CONTACT_SUPPORT = "Связаться с поддержкой"
@@ -377,6 +379,9 @@ ALL_RESULT_ACTIONS = {
     RESULT_ANALYZE_MARKET,
     RESULT_SPECIALIST_EXPLICIT,
     RESULT_GROUP_EXPLICIT,
+    RESULT_SUPPORT,
+    RESULT_AI_PROMPT,
+    RESULT_HYBRID_SUPPORT,
     CTA_CAREER_CHAT,
     CTA_CAREER_CONSULTANT,
     CTA_JOB_SEARCH_SUPPORT,
@@ -694,6 +699,21 @@ def result_actions_keyboard(*, include_pdf_download: bool = False, include_docx_
             download_row.append(KeyboardButton(text=RESULT_DOWNLOAD_DOCX))
         rows.append(download_row)
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def post_report_support_keyboard() -> ReplyKeyboardMarkup:
+    """Commercial next-step menu shown after every successful conclusion."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=RESULT_SUPPORT)],
+            [KeyboardButton(text=RESULT_SPECIALIST_EXPLICIT)],
+            [KeyboardButton(text=RESULT_GROUP_EXPLICIT)],
+            [KeyboardButton(text=RESULT_AI_PROMPT)],
+            [KeyboardButton(text=RESULT_HYBRID_SUPPORT)],
+            [KeyboardButton(text=RESULT_SELF_EXPLORE)],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def next_step_cta_keyboard(report: dict) -> ReplyKeyboardMarkup:

@@ -1160,6 +1160,9 @@ def build_deterministic_assessment(
         + values(story_analysis, "career_hypotheses", "target_roles", "role_hypotheses")
         + values(resume_analysis, "target_roles")
     )
+    explicit_target_role_keys = {
+        role.casefold() for role in explicit_target_roles if is_valid_occupation_title(role)
+    }
     snapshot_hypotheses = values(profile_snapshot, "route_hypotheses") if not explicit_target_roles else []
     target_roles = [role for role in concise(
         selected_route_titles
@@ -1364,8 +1367,16 @@ def build_deterministic_assessment(
             selected_markers = groups["support"]
         elif any(token in low for token in ("quality", "качест")):
             selected_markers = groups["quality"]
-        elif any(token in low for token in ("coordinator", "координ", "planner", "planning")):
+        elif any(token in low for token in ("service coordinator", "service dispatcher", "maintenance planner", "сервисн", "диспетчер")):
             selected_markers = (*groups["coordinator"], "выезд", "ремонт", "диагност")
+        elif any(token in low for token in ("recruit", "onboarding", "hr coordinator", "подбор", "адаптац")):
+            selected_markers = ("подбор", "кандидат", "интервью", "адаптац", "сотрудник", "координ")
+        elif any(token in low for token in ("medical care", "patient", "care coordinator", "медицинск", "пациент")):
+            selected_markers = ("пациент", "врач", "медицин", "прием", "запис", "координ", "документац")
+        elif any(token in low for token in ("purchasing", "procurement", "buyer", "закуп", "снабжен")):
+            selected_markers = ("закуп", "поставщик", "заказ", "снабжен", "остат", "договор", "координ")
+        elif any(token in low for token in ("coordinator", "координ", "planner", "planning")):
+            selected_markers = groups["coordinator"]
         elif any(token in low for token in ("spare parts", "запчаст")):
             selected_markers = ("компонент", "замен", "ремонт", "диагност", "оборудован")
         elif any(token in low for token in ("technical sales", "техническ продаж")):
@@ -1412,6 +1423,7 @@ def build_deterministic_assessment(
         source_facts: list[str],
         *,
         experimental: bool = False,
+        user_selected_target: bool = False,
     ) -> None:
         clean_title = title.strip()
         if is_valid_occupation_title(clean_title):
@@ -1421,6 +1433,7 @@ def build_deterministic_assessment(
                 "functions": list(dict.fromkeys(route_functions)),
                 "source_facts": list(dict.fromkeys(source_facts)),
                 "experimental": experimental,
+                "user_selected_target": user_selected_target,
             })
 
     rejection_blob = " ".join(unwanted + [desired_change or ""]).casefold()
@@ -1439,10 +1452,16 @@ def build_deterministic_assessment(
         if conflicts_with_explicit_rejection(role):
             continue
         route_functions = relevant_functions_for_role(role)
+        user_selected_target = role.casefold() in explicit_target_role_keys
+        if not route_functions and user_selected_target:
+            # A role named by the user is a hypothesis worth checking, not proof
+            # of fit. Preserve the current functions as provisional evidence and
+            # keep the confidence/gap language explicit in the generated route.
+            route_functions = confirmed_functions[:2]
         # Adjacent titles are recommendations only when at least two currently
         # demonstrated functions support them. A title or interest alone is not
         # professional evidence.
-        if len(route_functions) < 2:
+        if len(route_functions) < 2 and not user_selected_target:
             continue
         role_low = role.casefold()
         cross_domain_industrial = dental_context and any(marker in role_low for marker in ("industrial", "supplier quality", "manufacturing", "промышлен"))
@@ -1453,6 +1472,7 @@ def build_deterministic_assessment(
             "retraining" if substantial_change else "transition",
             route_functions,
             route_functions,
+            user_selected_target=user_selected_target,
         )
     if wants_self_employment and (current_role or functions):
         base = current_role or functions[0]
@@ -1517,12 +1537,33 @@ def build_deterministic_assessment(
         unwanted_tokens = normalized(" ".join(unwanted))
         function_overlap = len(route_tokens & confirmed_tokens)
         unwanted_overlap = len(route_tokens & unwanted_tokens)
-        preference_blob = " ".join([desired_change or "", *unwanted, *interests]).casefold()
+        # Explicit change priorities must rank the target-role hypotheses; do
+        # not let the list of hypotheses match itself and give every candidate
+        # the same artificial goal score.
+        preference_sources = [desired_change] if desired_change else interests
+        preference_blob = " ".join([*(item for item in preference_sources if item), *unwanted]).casefold()
         analytical_route = any(token in candidate["title"].casefold() for token in ("data", "analyst", "improvement", "planning", "quality engineer"))
         coordination_route = any(token in candidate["title"].casefold() for token in ("coordinator", "координ", "planner", "planning"))
         avoids_shop_floor = any(token in preference_blob for token in ("не хочу", "уйти", "меньше", "цех", "ручн", "физическ"))
         wants_analysis = any(token in preference_blob for token in ("аналит", "данн", "цифров", "компьют"))
         desired_change_score = 2 if (wants_analysis and analytical_route) or (avoids_shop_floor and (analytical_route or coordination_route)) else -3 if kind == "continuation" and (avoids_shop_floor or wants_analysis) else 0
+
+        goal_groups = (
+            (("продукт", "product"), ("product", "продукт", "insight", "исслед")),
+            (("образован", "обуч", "education", "edtech"), ("education", "learning", "program", "обуч", "образован")),
+            (("аналит", "данн", "analysis", "data"), ("analyst", "data", "insight", "аналит", "исслед")),
+            (("качест", "quality"), ("quality", "качест")),
+            (("координ", "организ"), ("coordinator", "operations", "program", "координ")),
+            (("супервиз", "этичн", "законн"), ("супервиз", "supervis", "consult", "консульт")),
+            (("допуск", "квалификац"), ("после допуска", "qualified", "квалифиц", "licensed")),
+        )
+        title_blob = candidate["title"].casefold()
+        matched_goal = any(
+            any(marker in preference_blob for marker in goal_markers)
+            and any(marker in title_blob for marker in route_markers)
+            for goal_markers, route_markers in goal_groups
+        )
+        goal_match = 1.0 if matched_goal else .5 if not preference_blob.strip() else .25
 
         if function_overlap and unwanted_overlap == 0:
             function_fit = "confirmed"
@@ -1599,8 +1640,8 @@ def build_deterministic_assessment(
         income_feasibility = .7 if income_minimum else .4
         rejected_condition_penalty = .35 if kind == "continuation" and avoids_shop_floor else .25 if unwanted_overlap else 0.0
         score = round(100 * (
-            function_match * .35 + domain_match * .20 + transferable_capital * .20
-            + desired_condition_match * .15 + income_feasibility * .10
+            function_match * .30 + domain_match * .15 + transferable_capital * .15
+            + goal_match * .20 + desired_condition_match * .10 + income_feasibility * .10
             - rejected_condition_penalty
         ))
         ranking = {
@@ -1622,6 +1663,10 @@ def build_deterministic_assessment(
         # A user-selected hypothesis backed by at least two current-assessment
         # facts is the primary route to verify, rather than a disposable label.
         not (selected_route_supported and item[0]["title"].casefold() in {title.casefold() for title in selected_route_titles}),
+        # Explicit target roles are evaluated before automatically generated
+        # cluster ideas. They remain hypotheses and keep their evidence gaps,
+        # but the user's stated choice should not disappear at the output cap.
+        not bool(item[0].get("user_selected_target")),
         # An unchanged current occupation is financial support, not the final
         # recommendation, whenever concrete alternative market roles exist.
         bool(item[0]["kind"] == "continuation" and bool(target_roles)),
@@ -1636,7 +1681,10 @@ def build_deterministic_assessment(
     seen_function_sets: set[tuple[str, ...]] = set()
     for item in evaluated:
         signature = tuple(sorted(str(value).casefold() for value in item[0]["functions"]))
-        deduplicate = item[0]["kind"] in {"transition", "retraining"}
+        deduplicate = (
+            item[0]["kind"] in {"transition", "retraining"}
+            and not bool(item[0].get("user_selected_target"))
+        )
         if deduplicate and signature and signature in seen_function_sets:
             continue
         if deduplicate and signature:
@@ -1649,7 +1697,47 @@ def build_deterministic_assessment(
     # An explicitly supported experiment receives one alternative slot, but it
     # can never become the primary recommendation or displace all conventional
     # routes. All candidates were evaluated before this output limit is applied.
-    selected = non_experimental[:3 if experimental else 4]
+    selection_limit = 3 if experimental else 4
+
+    def route_family(title: str) -> str:
+        low = title.casefold()
+        families = (
+            ("quality", ("quality", "качест")),
+            ("data", ("data", "analyst", "аналит")),
+            ("planning", ("planner", "planning", "process improvement", "планир")),
+            ("coordination", ("coordinator", "координ")),
+            ("support", ("support", "поддерж")),
+            ("training", ("trainer", "обуч", "методист")),
+            ("research", ("research", "исслед")),
+            ("warranty", ("warranty", "гарант")),
+            ("sales", ("sales", "продаж")),
+        )
+        return next((family for family, markers in families if any(marker in low for marker in markers)), low)
+
+    selected = []
+    selected_families: set[str] = set()
+    for item in non_experimental:
+        family = route_family(str(item[0]["title"]))
+        if family in selected_families:
+            continue
+        selected.append(item)
+        selected_families.add(family)
+        if len(selected) >= selection_limit:
+            break
+    if len(selected) < selection_limit:
+        selected_ids = {id(item[0]) for item in selected}
+        selected.extend(
+            item for item in non_experimental
+            if id(item[0]) not in selected_ids
+        )
+        selected = selected[:selection_limit]
+    # A reversible income bridge based on the current occupation must not
+    # disappear merely because four explicit future hypotheses filled the
+    # recommendation cap. It is rendered separately as quick income.
+    if current_role and not any(item[0]["kind"] == "continuation" for item in selected):
+        continuation = next((item for item in evaluated if item[0]["kind"] == "continuation"), None)
+        if continuation is not None:
+            selected.append(continuation)
     if experimental:
         selected.append(experimental[0])
 
@@ -1674,6 +1762,12 @@ def build_deterministic_assessment(
             return ("аудит поставщиков, разбор входящих дефектов и корректирующие действия", "оклад специалиста по качеству поставщиков", "аудиты поставщиков и аналитика несоответствий")
         if "quality engineer" in low:
             return ("RCA, работа с поставщиками и предупреждение повторных дефектов", "оклад инженера по качеству", "периодические аудиты при преимущественно аналитической работе")
+        if "team operations" in low:
+            return ("распределение потока задач внутри команды и устранение операционных блокеров", "оклад руководителя командных операций", "высокая плотность ежедневной координации внутри команды")
+        if "business operations" in low:
+            return ("сквозная настройка бизнес-процессов, метрик и взаимодействия подразделений", "оклад менеджера бизнес-операций", "аналитическая нагрузка и ответственность за межфункциональные изменения")
+        if "operations manager" in low:
+            return ("управление операционным контуром, приоритетами и устойчивостью процессов", "оклад операционного менеджера", "управленческая нагрузка и ответственность за результат нескольких процессов")
         if "production planning" in low or "production planner" in low or "process improvement" in low:
             return ("планирование производства, поиск потерь и улучшение потока", "оклад производственного планировщика", "низкая физическая и высокая системная нагрузка")
         if "data analyst" in low or "manufacturing analyst" in low:
@@ -1694,8 +1788,20 @@ def build_deterministic_assessment(
             return ("консультации сотрудников в рамках корпоративной программы", "оклад или оплата сессий по договору с организацией", "эмоциональная нагрузка при стабильном потоке клиентов")
         if "support" in low or "поддерж" in low:
             return ("удалённая диагностика и решение обращений", "оклад за экспертную поддержку", "меньше выездов, больше коммуникации")
+        if any(token in low for token in ("recruit", "recruitment", "подбор")):
+            return ("ведение подбора: вакансии, кандидаты, интервью и обратная связь нанимающим менеджерам", "оклад специалиста по подбору", "высокая коммуникационная нагрузка без сервисно-технических выездов")
+        if any(token in low for token in ("onboarding", "адаптац")):
+            return ("координация выхода и адаптации новых сотрудников, материалов и контрольных точек", "оклад координатора адаптации", "организационная нагрузка и взаимодействие с сотрудниками и руководителями")
+        if any(token in low for token in ("medical care", "care coordinator", "patient", "медицинск", "пациент")):
+            return ("координация маршрута пациента, записей, документов и взаимодействия с медицинской командой", "оклад координатора медицинской помощи", "высокая ответственность за коммуникацию и конфиденциальность данных")
+        if any(token in low for token in ("purchasing", "procurement", "buyer", "закуп", "снабжен")):
+            return ("заказы, работа с поставщиками, сроки поставок и контроль запасов", "оклад специалиста по закупкам", "коммерческая и организационная нагрузка без технического сервиса")
+        if "operations coordinator" in low or "операционн" in low and "координ" in low:
+            return ("координация ежедневных операций, сроков, участников и устранение процессных блокеров", "оклад операционного координатора", "высокая организационная и коммуникационная нагрузка")
+        if any(token in low for token in ("service coordinator", "service dispatcher", "maintenance planner", "сервисн", "диспетчер")):
+            return ("планирование сервисных работ и связь между клиентом и техническими специалистами", "оклад за координацию сервиса", "низкая физическая, более высокая организационная нагрузка")
         if "coordinator" in low or "координ" in low:
-            return ("планирование работ и связь между клиентом и техниками", "оклад за координацию сервиса", "низкая физическая, более высокая организационная нагрузка")
+            return ("координация задач, сроков и взаимодействия участников в предметной области роли", "оклад координатора соответствующей функции", "низкая физическая, более высокая организационная нагрузка")
         if "trainer" in low or "тренер" in low or "обуч" in low:
             return ("подготовка материалов и обучение специалистов", "оклад или проектная оплата за обучение", "низкая физическая, заметная публичная нагрузка")
         if "warranty" in low or "гарант" in low:
@@ -1759,7 +1865,7 @@ def build_deterministic_assessment(
         if not preserved:
             preserved = ["Факты текущей оценки без добавления неподтверждённой профессии"]
         risks = [
-            f"Модель нагрузки — {load_model}; это нужно сверить с ограничениями пользователя.",
+            f"Специфическая нагрузка маршрута «{label}» — {load_model}; это нужно сверить с ограничениями пользователя.",
             (
                 f"Для «{label}» возможна заметная временная просадка; модель «{income_model}» нужно подтвердить отдельно"
                 if criteria["income_status_loss_risk"] == "high"
@@ -1780,16 +1886,21 @@ def build_deterministic_assessment(
         )
         market_test = market_test_patterns[(index - 1) % len(market_test_patterns)]
         why = (
-            f"Этот маршрут подходит, потому что вы уже умеете: {source_facts[(index - 1) % len(source_facts)]}. "
+            f"Для маршрута «{label}» есть опора на ваш факт: {source_facts[(index - 1) % len(source_facts)]}. "
             f"В новой роли основная работа — {daily_focus}. Перед переходом нужно проверить условия и доход."
             if source_facts
             else "Конкретная профессия не названа: сначала нужно подтвердить выполнявшиеся функции."
         )
         route_evaluations[route_id] = evaluation
+        route_category: RouteCategory = (
+            "primary" if index == 1
+            else "quick_income" if kind == "continuation"
+            else "transition"
+        )
         routes.append(CareerRoute(
             route_id=route_id,
             title=label,
-            category="primary" if index == 1 else "transition",
+            category=route_category,
             why_it_fits=why,
             evidence_ids=evidence_ids,
             preserves=preserved,
@@ -1840,7 +1951,8 @@ def build_deterministic_assessment(
     ), "")
 
     primary = routes[:1]
-    alternatives = routes[1:4]
+    alternatives = [route for route in routes[1:] if route.category == "transition"][:3]
+    quick_income = [route for route in routes[1:] if route.category == "quick_income"][:1]
     recommended_id = primary[0].route_id
     assessment = CareerAssessment(
         assessment_id=assessment_id,
@@ -1868,7 +1980,11 @@ def build_deterministic_assessment(
             market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
         ),
         identity=ProfessionalIdentity(
-            professional_core=current_roles[:1] or ["Специалист с подтверждённым опытом"],
+            professional_core=(
+                confirmed_functions[:4]
+                if confirmed_functions
+                else ["Подтверждённые функции отсутствуют"]
+            ),
             core_description="Ядро определено через подтверждённые функции; название роли используется только как дополнительный контекст.",
             secondary_functions=functions[3:7],
             seniority_current=(
@@ -1893,8 +2009,9 @@ def build_deterministic_assessment(
         routes=CareerRoutes(
             primary_routes=primary,
             transition_routes=alternatives,
+            quick_income_routes=quick_income,
             recommended_route_id=recommended_id,
-            alternative_route_ids=[route.route_id for route in alternatives],
+            alternative_route_ids=[route.route_id for route in [*alternatives, *quick_income]],
         ),
         questions=QuestionAssessment(
             answered_critical_questions=answered_questions,
@@ -2109,7 +2226,10 @@ def validate_career_assessment(
     # stored reports remain readable and are upgraded on their next generation.
     if assessment.context.target_countries:
         routes_for_compare = assessment.routes.all_routes()
-        fields = ("why_it_fits", "missing", "risks", "market_test", "entry_path")
+        # Several distinct roles may legitimately share the same entry mechanics
+        # (for example, adjacent transition). Detect copied analysis from the
+        # substantive rationale/gap/risk/test fields instead.
+        fields = ("why_it_fits", "missing", "risks", "market_test")
         for left_index, left in enumerate(routes_for_compare):
             for right in routes_for_compare[left_index + 1:]:
                 duplicates = []
@@ -2300,6 +2420,12 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         else "Требования и спрос на выбранный маршрут нужно подтвердить по вакансиям."
     )
     insight = assessment.personal_insights[0].text if assessment.personal_insights else assessment.identity.core_description
+    critical_unknowns = list(assessment.questions.unanswered_critical_questions)
+    if not critical_unknowns:
+        critical_unknowns = ["Требования, спрос и доход по маршруту нужно подтвердить на актуальной выборке."]
+    confidence = str(assessment.metadata.get("fallback_confidence") or "").strip().lower()
+    if confidence not in {"low", "medium", "high"}:
+        confidence = "medium" if critical_unknowns else "high"
     return {
         "professional_core": list(assessment.identity.professional_core),
         "secondary_functions": list(assessment.identity.secondary_functions),
@@ -2324,6 +2450,9 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         "income_bridge": None,
         "main_insight": insight,
         "main_uncertainty": uncertainty,
+        "critical_unknowns": critical_unknowns,
+        "confidence": confidence,
+        "first_steps": [asdict(step) for step in assessment.first_steps[:3]],
         "recommended_experiment": asdict(first_step) if first_step else {},
     }
 
@@ -2332,7 +2461,12 @@ def render_short_conclusion(result: dict[str, Any]) -> str:
     """Render the first, compact answer without generating another assessment."""
     primary = result.get("primary_route") or {}
     alternatives = result.get("alternative_routes") or []
-    experiment = result.get("recommended_experiment") or {}
+    first_steps = result.get("first_steps") if isinstance(result.get("first_steps"), list) else []
+    if not first_steps and result.get("recommended_experiment"):
+        first_steps = [result["recommended_experiment"]]
+    confidence_labels = {"low": "низкая", "medium": "средняя", "high": "высокая"}
+    confidence = confidence_labels.get(str(result.get("confidence") or "").lower(), "средняя")
+    unknowns = [str(item) for item in result.get("critical_unknowns") or [] if str(item).strip()][:3]
     alternative_titles = [str(item.get("title")) for item in alternatives[:2] if item.get("title")]
     lines = [
         "Ваше профессиональное ядро",
@@ -2340,14 +2474,50 @@ def render_short_conclusion(result: dict[str, Any]) -> str:
         "",
         f"Основной маршрут: {primary.get('title', '')}",
         str(primary.get("why_it_fits") or "Маршрут сохраняет подтверждённые функции и допускает проверку до перехода."),
+        f"Уверенность: {confidence}.",
     ]
     if alternative_titles:
         lines.extend(["", f"Альтернативы: {', '.join(alternative_titles)}."])
     if result.get("main_insight"):
         lines.extend(["", f"Главный вывод: {result['main_insight']}"])
-    if experiment:
-        lines.extend(["", f"Первый шаг: {experiment.get('action') or experiment.get('title', '')}"])
+    if unknowns:
+        lines.extend(["", "Критически важно уточнить:", *[f"• {item}" for item in unknowns]])
+    if first_steps:
+        lines.extend(["", "Первые 3 шага:"])
+        lines.extend(
+            f"{index}. {step.get('action') or step.get('title', '')}"
+            for index, step in enumerate(first_steps[:3], 1)
+        )
     return "\n".join(lines)
+
+
+def build_personal_ai_prompt(result: dict[str, Any]) -> str:
+    """Create a copy-ready prompt from the already validated assessment only."""
+    primary = result.get("primary_route") if isinstance(result.get("primary_route"), dict) else {}
+    alternatives = result.get("alternative_routes") if isinstance(result.get("alternative_routes"), list) else []
+    core = [str(item) for item in result.get("professional_core") or [] if str(item).strip()]
+    unknowns = [str(item) for item in result.get("critical_unknowns") or [] if str(item).strip()]
+    steps = result.get("first_steps") if isinstance(result.get("first_steps"), list) else []
+    alternative_titles = [str(item.get("title")) for item in alternatives[:3] if isinstance(item, dict) and item.get("title")]
+    step_lines = [
+        str(step.get("action") or step.get("title") or "").strip()
+        for step in steps[:3]
+        if isinstance(step, dict) and str(step.get("action") or step.get("title") or "").strip()
+    ]
+    return "\n".join([
+        "Ты — мой карьерный навигатор. Работай только с фактами ниже и не придумывай опыт, доход, вакансии или квалификацию.",
+        "",
+        f"Моё подтверждённое профессиональное ядро: {', '.join(core) or 'не определено'}.",
+        f"Основной проверяемый маршрут: {primary.get('title') or 'не определён'}.",
+        f"Альтернативы: {', '.join(alternative_titles) or 'не выбраны'}.",
+        f"Критические неизвестные: {'; '.join(unknowns) or 'нет зафиксированных'}.",
+        f"Первые шаги: {'; '.join(step_lines) or 'нужно сформировать'}.",
+        "",
+        "Помоги мне выполнить один ближайший шаг. Сначала коротко повтори цель и отдели факты от предположений. "
+        "Если без уточнения нельзя дать безопасный совет — задай только один вопрос. Затем дай действие на 15–30 минут, "
+        "критерий готовности и шаблон результата. Любые рыночные или зарплатные сведения указывай только с датой и источником; "
+        "при отсутствии источника честно напиши, что данные нужно проверить.",
+    ])
 
 
 def start_guide_response(result: dict[str, Any], branch: str | None = None, choice: str | None = None) -> str:
@@ -2593,13 +2763,26 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         f"<p><strong>Изменение среды:</strong> {escape(item.environment_change)}</p><p><strong>Инструмент:</strong> {escape(item.tool)}</p></article>"
         for item in assessment.psychology_factors
     )
-    market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if assessment.context.market_data_sources else ""
-    sourced_income = any(item.sources and any(case.amount is not None for case in (item.conservative, item.base, item.optimistic)) for item in assessment.income_forecasts)
-    salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if sourced_income else ""
-    scenario_number = 11 if sourced_income else 10
-    insight_number = scenario_number + 1
-    steps_number = scenario_number + 2
-    final_number = scenario_number + 3
+    market_disclaimer = (
+        ""
+        if assessment.context.market_data_sources
+        else "<p><strong>Ограничение данных:</strong> Актуальный датированный источник не получен. "
+             "Рыночные выводы ниже — план проверки, а не подтверждённая статистика.</p>"
+    )
+    market_section = (
+        f"<h3>Анализ по маршрутам</h3>{market_disclaimer}"
+        f"{market_html or '<p>Спрос и требования нужно проверить по актуальным вакансиям выбранного рынка.</p>'}"
+    )
+    salary_section = (
+        '<section><h2>10. Прогноз зарплаты или дохода</h2>'
+        + market_disclaimer
+        + (salary_html or '<p>Доход не заявлен без сопоставимого источника.</p>')
+        + '</section>'
+    )
+    scenario_number = 11
+    insight_number = 12
+    steps_number = 13
+    final_number = 14
     authorization_html = f"<p><strong>Право на работу:</strong> {escape(assessment.context.work_authorization)}</p>" if assessment.context.work_authorization else ""
     work_format_html = f"<p><strong>Формат:</strong> {escape(assessment.context.work_format)}</p>" if assessment.context.work_format else ""
     return f"""<!doctype html>

@@ -60,11 +60,20 @@ def load_json_file(path: Path) -> dict[str, Any]:
 
 def discover_profile_cases(inputs_dir: Path, expected_dir: Path) -> list[BaselineProfileCase]:
     input_files = sorted(path for path in inputs_dir.glob("*.json") if path.is_file())
+    expected_by_id: dict[str, Path] = {}
+    for expected_path in sorted(path for path in expected_dir.glob("*.json") if path.is_file()):
+        payload = load_json_file(expected_path)
+        expected_id = str(payload.get("profile_id") or payload.get("id") or "").strip()
+        if expected_id:
+            expected_by_id[expected_id] = expected_path
     cases: list[BaselineProfileCase] = []
     for input_path in input_files:
-        profile_id = input_path.stem
-        expected_path = expected_dir / f"{profile_id}.json"
-        if not expected_path.exists():
+        input_payload = load_json_file(input_path)
+        profile_id = str(input_payload.get("profile_id") or "").strip()
+        if not profile_id:
+            raise ValueError(f"Input profile has no profile_id: {input_path}")
+        expected_path = expected_by_id.get(profile_id)
+        if expected_path is None:
             raise FileNotFoundError(f"Missing expected profile for {profile_id}: {expected_path}")
         cases.append(BaselineProfileCase(profile_id=profile_id, input_path=input_path, expected_path=expected_path))
     return cases
@@ -117,14 +126,21 @@ def _comparison_flags(
     baseline_lock: dict[str, Any],
     input_manifest_hash: str,
     expected_manifest_hash: str,
+    git_commit: str,
+    prompt_version: str,
     model: str,
     model_parameters: dict[str, Any],
 ) -> dict[str, Any]:
-    changed_code = str(baseline_lock.get("git_commit") or "").strip() == "" or bool(baseline_lock.get("git_worktree_dirty"))
-    changed_prompt = str(baseline_lock.get("prompt_version") or "").strip() == ""
+    locked_commit = str(baseline_lock.get("git_commit") or "").strip()
+    locked_prompt = str(baseline_lock.get("prompt_version") or "").strip()
+    changed_code = not locked_commit or locked_commit != str(git_commit or "").strip() or bool(baseline_lock.get("git_worktree_dirty"))
+    changed_prompt = not locked_prompt or locked_prompt != str(prompt_version or "").strip()
     changed_model = str(baseline_lock.get("model") or "").strip() != str(model or "").strip()
     changed_parameters = (baseline_lock.get("model_parameters") or {}) != model_parameters
-    changed_test_data = bool(input_manifest_hash) or bool(expected_manifest_hash)
+    changed_test_data = (
+        str(baseline_lock.get("input_manifest_hash") or "").strip() != input_manifest_hash
+        or str(baseline_lock.get("expected_manifest_hash") or "").strip() != expected_manifest_hash
+    )
     reliability = "full"
     if changed_code or changed_prompt or changed_model or changed_parameters or changed_test_data:
         reliability = "limited"
@@ -282,7 +298,7 @@ async def run_baseline_profiles(
     expected_dir: Path,
     results_dir: Path,
     baseline_lock_path: Path,
-    required_profile_count: int | None = 9,
+    required_profile_count: int | None = 10,
     run_id: str,
     application_version: str,
     git_commit: str,
@@ -343,6 +359,8 @@ async def run_baseline_profiles(
         baseline_lock=baseline_lock,
         input_manifest_hash=input_manifest_hash,
         expected_manifest_hash=expected_manifest_hash,
+        git_commit=git_commit,
+        prompt_version=prompt_version,
         model=model,
         model_parameters=model_parameters,
     )
@@ -393,12 +411,51 @@ async def run_baseline_profiles(
         assert_no_generator_leakage(input_profile, "input_profile")
 
         runtime_context = build_runtime_context(input_profile)
-        generated_result, conversation_trace, retry_log = await _run_profile_with_retry(
-            adapter=adapter,
-            profile=CareerTestInput(profile_id=case.profile_id, payload=input_profile),
-            run_context=RunContext(run_id=run_id, profile_id=case.profile_id, runtime_context=runtime_context),
-        )
-        evaluation_result = await evaluator.evaluate(input_profile, generated_result, expected_profile)
+        runtime_context.update({"run_id": run_id, "profile_id": case.profile_id, "profile_version": test_package_version})
+        execution_error: dict[str, Any] | None = None
+        try:
+            generated_result, conversation_trace, retry_log = await _run_profile_with_retry(
+                adapter=adapter,
+                profile=CareerTestInput(profile_id=case.profile_id, payload=input_profile),
+                run_context=RunContext(run_id=run_id, profile_id=case.profile_id, runtime_context=runtime_context),
+            )
+            evaluation_result = await evaluator.evaluate(input_profile, generated_result, expected_profile)
+        except Exception as exc:
+            generated_result = {}
+            retry_log = []
+            execution_error = {
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            }
+            conversation_trace = {
+                "conversation_turns": list(input_profile.get("conversation_turns") or []),
+                "questions_asked": list(input_profile.get("questions_asked") or []),
+                "question_signatures": list(input_profile.get("question_signatures") or []),
+                "evidence_profile_snapshots": list(input_profile.get("evidence_profile_snapshots") or []),
+                "readiness_transitions": list(input_profile.get("readiness_transitions") or []),
+                "preliminary_result": input_profile.get("preliminary_result"),
+                "final_result": None,
+            }
+            evaluation_result = {
+                "profile_id": case.profile_id,
+                "evaluation_status": "failed",
+                "passed": False,
+                "critical_error_detected": True,
+                "total_score": 0,
+                "max_score": 100,
+                "score_breakdown": {},
+                "reason_codes": ["EXECUTION_ERROR"],
+                "supporting_fragments": [],
+                "missing_elements": ["generated_result"],
+                "critical_findings": [{
+                    "error_code": "EXECUTION_ERROR",
+                    "rule_signal": True,
+                    "semantic_signal": False,
+                    "decision": "confirmed",
+                    "evidence": [type(exc).__name__],
+                }],
+                "evaluator_comment": "Profile generation failed; the runner continued with remaining profiles.",
+            }
 
         raw_response_payload = {
             "profile_id": case.profile_id,
@@ -409,6 +466,7 @@ async def run_baseline_profiles(
             "retry_log": retry_log,
             "conversation_trace": conversation_trace,
             "generated_result": generated_result,
+            "execution_error": execution_error,
         }
         judge_log_payload = {
             "profile_id": case.profile_id,
@@ -418,6 +476,7 @@ async def run_baseline_profiles(
             "expected_source": str(case.expected_path),
             "retry_log": retry_log,
             "evaluation_result": evaluation_result,
+            "execution_error": execution_error,
         }
         profile_payload = {
             "profile_id": case.profile_id,
@@ -430,6 +489,7 @@ async def run_baseline_profiles(
             "conversation_trace": conversation_trace,
             "generated_result": generated_result,
             "evaluation_result": evaluation_result,
+            "execution_error": execution_error,
         }
 
         (raw_responses_dir / f"{case.profile_id}.raw.json").write_text(
@@ -459,6 +519,7 @@ async def run_baseline_profiles(
                 "raw_response_path": str(raw_responses_dir / f"{case.profile_id}.raw.json"),
                 "evaluation_status": str(evaluation_result.get("evaluation_status") or "unknown"),
                 "comparison_reliability": comparison["comparison_reliability"],
+                "execution_error": execution_error,
             }
         )
 
@@ -531,7 +592,16 @@ async def run_baseline_profiles(
     summary["package_validation"] = package_validation
     summary["change_proposal_gate"] = change_proposal_gate
     summary["regression_gate"] = regression_gate
-    summary["baseline_complete"] = bool(package_validation and package_validation.get("status") == PACKAGE_COMPLETE)
+    passed_count = sum(1 for row in summary_rows if row.get("evaluation_status") == "passed")
+    failed_count = len(summary_rows) - passed_count
+    summary["passed_count"] = passed_count
+    summary["failed_count"] = failed_count
+    summary["baseline_complete"] = bool(
+        package_validation
+        and package_validation.get("status") == PACKAGE_COMPLETE
+        and summary_rows
+        and failed_count == 0
+    )
     (run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     (run_dir / "baseline_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -26,8 +26,11 @@ class ForbiddenRecommendationEvaluator:
         supporting: list[str] = []
         reason_codes: list[str] = []
         for forbidden_route in forbidden_targets:
-            primary_hit, primary_fragments = contains_contextual_route(forbidden_route, primary_titles)
-            temporary_hit, temporary_fragments = contains_contextual_route(forbidden_route, temporary_titles)
+            # A forbidden professional title requires its qualifiers too:
+            # "Clinical Psychologist" must not flag "Junior Psychologist", and
+            # "Project Manager" must not flag "Junior Project Coordinator".
+            primary_hit, primary_fragments = contains_contextual_route(forbidden_route, primary_titles, threshold=0.75)
+            temporary_hit, temporary_fragments = contains_contextual_route(forbidden_route, temporary_titles, threshold=0.75)
             if primary_hit:
                 reason_codes.append("FORBIDDEN_ROLE_RECOMMENDED")
                 supporting.extend(primary_fragments)

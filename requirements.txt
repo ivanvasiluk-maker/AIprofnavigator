@@ -7,3 +7,4 @@ uvicorn
 playwright
 aiohttp==3.9.5
 python-docx
+socksio>=1.0.0

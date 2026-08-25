@@ -6,7 +6,11 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["confirmed", "probable", "weak", "unknown"]
 DataImportance = Literal["blocking", "useful", "optional"]
-MAX_ADDITIONAL_QUESTIONS = 7
+from services.interview_policy import MAX_MEANINGFUL_QUESTIONS
+
+
+# Backward-compatible name used by existing callers and reports.
+MAX_ADDITIONAL_QUESTIONS = MAX_MEANINGFUL_QUESTIONS
 EvidenceSource = Literal[
     "user_story",
     "user_clarification",

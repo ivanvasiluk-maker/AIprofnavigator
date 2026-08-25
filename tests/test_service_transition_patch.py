@@ -38,7 +38,7 @@ def test_current_field_role_is_bridge_and_adjacent_routes_are_generated():
     adjacent = [route for route in assessment.routes.all_routes() if route.entry_path == "adjacent_transition"]
     assert len(adjacent) >= 2
     assert all(len(route.transferable_functions) >= 2 for route in adjacent)
-    assert assessment.identity.professional_core == ["Техник по ремонту профессиональных кофемашин и HoReCa-оборудования"]
+    assert assessment.identity.professional_core == FUNCTIONS[:4]
     assert "5–6 выездов" not in " ".join(assessment.identity.professional_core)
 
 

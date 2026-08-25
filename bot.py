@@ -19,6 +19,26 @@ from services.career_assessment import (
 from utils.persistence import save_profile_version, touch_session
 
 
+async def _start_report_server():
+    """Serve generated report links in the same Railway service as the bot."""
+    port_raw = str(os.getenv("PORT") or "").strip()
+    if not port_raw and not settings.report_api_enabled:
+        return None
+
+    import uvicorn
+
+    from report_api import app
+
+    port = int(port_raw or "8000")
+    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info"))
+    task = asyncio.create_task(server.serve(), name="report-api")
+    await asyncio.sleep(0)
+    if task.done():
+        task.result()
+    print(f"Report API is serving on port {port}.", flush=True)
+    return server, task
+
+
 class SingleInstanceGuard:
     """Keep one local bot process per machine by reserving a TCP port."""
 
@@ -146,6 +166,7 @@ async def main() -> None:
         flush=True,
     )
 
+    report_server = await _start_report_server()
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
@@ -161,6 +182,11 @@ async def main() -> None:
         print("Bot is running and waiting for Telegram updates.", flush=True)
         await dp.start_polling(bot)
     finally:
+        if report_server is not None:
+            server, task = report_server
+            server.should_exit = True
+            with suppress(asyncio.CancelledError):
+                await task
         guard.release()
 
 

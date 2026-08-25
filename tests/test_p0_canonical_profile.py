@@ -94,9 +94,9 @@ def test_unknown_is_skipped_and_never_repeated():
     assert next_question.question_id != question.question_id
 
 
-def test_five_question_limit_never_blocks_conclusion():
+def test_six_question_limit_never_blocks_conclusion():
     profile = build_canonical_profile({}, assessment_id="a-5")
-    profile.question_state.question_count = 5
+    profile.question_state.question_count = 6
     assert select_clarifying_question(profile) is None
 
 

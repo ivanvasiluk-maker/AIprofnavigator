@@ -31,6 +31,16 @@ class BaselineCareerEvaluator:
         generated_result: dict[str, Any],
         expected_profile: dict[str, Any],
     ) -> dict[str, Any]:
+        # Distributed packages use an ``expected`` envelope, while older unit
+        # fixtures use top-level fields.  Evaluators must see one normalized
+        # contract; silently treating the envelope as "no expectations" used to
+        # award full points to an unevaluated result.
+        nested = expected_profile.get("expected") if isinstance(expected_profile.get("expected"), dict) else {}
+        normalized_expected = {**expected_profile, **nested}
+        normalized_expected["profile_id"] = str(
+            expected_profile.get("profile_id") or expected_profile.get("id") or input_profile.get("profile_id") or ""
+        ).strip()
+
         results: dict[str, dict[str, Any]] = {}
         total_score = 0
         max_score = 0
@@ -40,7 +50,7 @@ class BaselineCareerEvaluator:
         missing_elements: list[str] = []
 
         for key, evaluator in self._evaluators.items():
-            result = await evaluator.evaluate(input_profile, generated_result, expected_profile)
+            result = await evaluator.evaluate(input_profile, generated_result, normalized_expected)
             results[key] = result
             total_score += int(result.get("score") or 0)
             max_score += int(result.get("max_score") or 0)
@@ -52,7 +62,7 @@ class BaselineCareerEvaluator:
         critical_error_detected = any(str(item.get("decision") or "") == "confirmed" for item in critical_findings)
         passed = total_score >= 80 and not critical_error_detected
         return {
-            "profile_id": str(input_profile.get("profile_id") or expected_profile.get("profile_id") or "").strip(),
+            "profile_id": str(input_profile.get("profile_id") or normalized_expected.get("profile_id") or "").strip(),
             "evaluation_status": "passed" if passed else "failed",
             "passed": passed,
             "critical_error_detected": critical_error_detected,

@@ -153,19 +153,19 @@ class CareerGpsRenderTests(unittest.TestCase):
         self.assertGreaterEqual(score_hi, 4)
 
     def test_question_count_for_mode_is_fixed_by_default(self) -> None:
-        self.assertEqual(_question_count_for_mode("fast"), 5)
-        self.assertEqual(_question_count_for_mode("calm_steps"), 8)
-        self.assertEqual(_question_count_for_mode("deep_route"), 15)
+        self.assertEqual(_question_count_for_mode("fast"), 1)
+        self.assertEqual(_question_count_for_mode("calm_steps"), 6)
+        self.assertEqual(_question_count_for_mode("deep_route"), 6)
 
     def test_question_count_for_mode_is_clamped_by_tz_bounds(self) -> None:
-        self.assertEqual(_question_count_for_mode("fast", 1), 5)
-        self.assertEqual(_question_count_for_mode("fast", 9), 5)
+        self.assertEqual(_question_count_for_mode("fast", 1), 1)
+        self.assertEqual(_question_count_for_mode("fast", 9), 1)
 
-        self.assertEqual(_question_count_for_mode("calm_steps", 6), 8)
-        self.assertEqual(_question_count_for_mode("calm_steps", 12), 10)
+        self.assertEqual(_question_count_for_mode("calm_steps", 4), 4)
+        self.assertEqual(_question_count_for_mode("calm_steps", 12), 6)
 
-        self.assertEqual(_question_count_for_mode("deep_route", 10), 12)
-        self.assertEqual(_question_count_for_mode("deep_route", 20), 15)
+        self.assertEqual(_question_count_for_mode("deep_route", 3), 3)
+        self.assertEqual(_question_count_for_mode("deep_route", 20), 6)
 
     def test_reconcile_country_duration_prefers_story_value_on_conflict(self) -> None:
         story = "Живу в Польше полтора года, работал в сметах и хочу вернуться в сферу."
@@ -829,7 +829,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_set_mvp_questions_respects_exact_limit_for_normal_mode(self) -> None:
         result = _set_mvp_questions({"follow_up_questions": []}, limit=8, mode="calm_steps", story_text="", user_segment=SEGMENT_WORKER)
-        self.assertEqual(len(result.get("follow_up_questions", [])), 8)
+        self.assertEqual(len(result.get("follow_up_questions", [])), 6)
 
     def test_set_mvp_questions_pins_required_diagnostics(self) -> None:
         result = _set_mvp_questions(
@@ -1239,7 +1239,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("руках" in text.lower() or "руками" in text.lower() or "производственн" in text.lower() for text in texts))
         self.assertTrue(any("оборудован" in text.lower() or "техник" in text.lower() or "инструмент" in text.lower() for text in texts))
 
-    def test_set_mvp_questions_fast_mode_is_max_five_and_compact(self) -> None:
+    def test_set_mvp_questions_fast_mode_is_one_question_and_compact(self) -> None:
         analysis = {"follow_up_questions": []}
 
         result = _set_mvp_questions(
@@ -1252,17 +1252,13 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         questions = result.get("follow_up_questions", [])
         texts = [str(row.get("question", "")).lower() for row in questions if isinstance(row, dict)]
 
-        self.assertLessEqual(len(questions), 5)
+        self.assertEqual(len(questions), 1)
         self.assertTrue(any("главная цель" in text for text in texts))
-        self.assertTrue(any("главный барьер" in text for text in texts))
-        self.assertTrue(any("правом работать" in text or "документ" in text for text in texts))
-        self.assertTrue(any("живете в этой стране" in text for text in texts))
-        self.assertTrue(any("ресурса и времени" in text for text in texts))
         self.assertFalse(any("энерги" in text for text in texts))
         self.assertFalse(any("интеграц" in text for text in texts))
         self.assertFalse(any("приоритет" in text for text in texts))
 
-    def test_set_mvp_questions_deep_route_mode_has_12_to_15(self) -> None:
+    def test_set_mvp_questions_deep_route_mode_never_exceeds_six(self) -> None:
         analysis = {"follow_up_questions": []}
 
         result = _set_mvp_questions(
@@ -1274,8 +1270,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         )
         questions = result.get("follow_up_questions", [])
 
-        self.assertGreaterEqual(len(questions), 12)
-        self.assertLessEqual(len(questions), 15)
+        self.assertEqual(len(questions), 6)
 
     def test_set_mvp_questions_has_alignment_metadata(self) -> None:
         analysis = {"follow_up_questions": []}
@@ -1883,7 +1878,7 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
                 await process_story_input(message, state, "Работала с документами и координацией, нужен стабильный доход.")
 
         self.assertEqual(state.current_state, CareerFlow.confirming_story.state)
-        self.assertEqual(state.data.get("promised_question_count"), 5)
+        self.assertEqual(state.data.get("promised_question_count"), 6)
         self.assertGreaterEqual(message.answer.await_count, 3)
 
     async def test_start_questions_module_moves_to_interview(self) -> None:

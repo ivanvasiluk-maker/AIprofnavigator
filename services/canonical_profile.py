@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from services.interview_policy import MAX_MEANINGFUL_QUESTIONS
+
 
 FactType = Literal[
     "profession", "professional_function", "skill", "responsibility", "achievement",
@@ -37,7 +39,7 @@ CITY_COUNTRIES = {
 }
 
 CITY_DISPLAY_NAMES = {
-    "tbilisi": "Tbilisi", "тбилиси": "Tbilisi",
+    "tbilisi": "Tbilisi", "тбилиси": "Тбилиси",
     "kaunas": "Kaunas", "каунас": "Kaunas", "каунасе": "Kaunas",
     "berlin": "Berlin", "берлин": "Berlin", "берлине": "Berlin",
     "prague": "Prague", "praha": "Prague", "прага": "Prague", "праге": "Prague",
@@ -774,7 +776,7 @@ def _gap_is_resolved(profile: CanonicalProfile, fact_type: str, gap_id: str) -> 
 
 def select_clarifying_question(profile: CanonicalProfile) -> ClarifyingQuestion | None:
     state = profile.question_state
-    if state.question_count >= 5:
+    if state.question_count >= MAX_MEANINGFUL_QUESTIONS:
         return None
     excluded = set(state.answered_gap_ids) | set(state.skipped_gap_ids)
     if profile.contradictions:

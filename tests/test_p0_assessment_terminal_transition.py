@@ -19,7 +19,7 @@ from services.hypothesis_engine import CareerHypothesis, ConversationTurn, forma
 from keyboards import REPORT_CONTACT_SUPPORT, REPORT_RETRY, REPORT_SHORT_FALLBACK, report_failure_keyboard
 
 
-SERGEY_ANALYSIS = {
+SYNTHETIC_ANALYSIS = {
     "current_role": "инженер-механик",
     "confirmed_functions": [
         "управление качеством",
@@ -34,17 +34,17 @@ SERGEY_ANALYSIS = {
 }
 
 
-def sergey_data(**overrides):
+def synthetic_data(**overrides):
     data = {
-        "assessment_id": "sergey-assessment",
-        "public_user_id": "sergey-user",
-        "session_id": "sergey-session",
+        "assessment_id": "synthetic-assessment",
+        "public_user_id": "synthetic-user",
+        "session_id": "synthetic-session",
         "user_mode": "fast",
         "story_text": (
             "Живу в Брно, право на работу есть. Русский родной, чешский B1, английский B2. "
             "Минимум 45000 CZK, цель 55000-65000 CZK. Не готов к переезду, без ночных смен."
         ),
-        "story_analysis": dict(SERGEY_ANALYSIS),
+        "story_analysis": dict(SYNTHETIC_ANALYSIS),
         "route_context": {
             "country": "Czech Republic",
             "city": "Brno",
@@ -84,10 +84,10 @@ class FakeState:
 
 class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
     def test_a_sufficient_initial_story_can_finalize(self):
-        self.assertTrue(should_finalize_assessment(sergey_data()))
+        self.assertTrue(should_finalize_assessment(synthetic_data()))
 
     async def test_b_resume_completed_step_generates_report(self):
-        state = FakeState(sergey_data(resume_analysis={"confirmed_functions": ["quality", "process"]}))
+        state = FakeState(synthetic_data(resume_analysis={"confirmed_functions": ["quality", "process"]}))
         message = SimpleNamespace(answer=AsyncMock())
         with patch("handlers.career._maybe_trigger_career_finalization", new=AsyncMock()) as generate:
             action = await advance_assessment(message, state, trigger="resume_parsed")
@@ -95,16 +95,16 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         generate.assert_awaited_once()
 
     def test_c_known_facts_are_resolved(self):
-        resolved = _resolved_fact_types(sergey_data())
+        resolved = _resolved_fact_types(synthetic_data())
         self.assertTrue({"country", "city", "work_authorization", "work_languages", "minimum_income", "target_market"} <= resolved)
 
     async def test_d_quick_mode_does_not_start_diagnostics(self):
         from handlers.career import _maybe_offer_extended_diagnostics
-        state = FakeState(sergey_data())
+        state = FakeState(synthetic_data())
         self.assertFalse(await _maybe_offer_extended_diagnostics(SimpleNamespace(), state, "ru"))
 
     async def test_e_route_selection_is_terminal(self):
-        state = FakeState(sergey_data())
+        state = FakeState(synthetic_data())
         message = SimpleNamespace(answer=AsyncMock())
         with patch("handlers.career._maybe_trigger_career_finalization", new=AsyncMock()) as generate:
             action = await advance_assessment(message, state, trigger="route_selected")
@@ -112,7 +112,7 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         generate.assert_awaited_once()
 
     async def test_f_psychology_done_sends_and_generates(self):
-        state = FakeState(sergey_data(psychology_step="completed"))
+        state = FakeState(synthetic_data(psychology_step="completed"))
         message = SimpleNamespace(answer=AsyncMock())
         with patch("handlers.career._maybe_trigger_career_finalization", new=AsyncMock()) as generate:
             action = await advance_assessment(message, state, trigger="psychology_done")
@@ -121,10 +121,10 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         generate.assert_awaited_once()
 
     def test_g_psychology_is_not_required(self):
-        self.assertTrue(should_finalize_assessment(sergey_data(psychology_step="optional")))
+        self.assertTrue(should_finalize_assessment(synthetic_data(psychology_step="optional")))
 
     async def test_h_no_silent_terminal_transition(self):
-        state = FakeState(sergey_data())
+        state = FakeState(synthetic_data())
         message = SimpleNamespace(answer=AsyncMock())
         with patch("handlers.career._maybe_trigger_career_finalization", new=AsyncMock()):
             await advance_assessment(message, state, trigger="questions_completed")
@@ -132,7 +132,7 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
 
     def test_i_routes_are_real_role_titles(self):
         self.assertEqual(
-            _real_route_titles(SERGEY_ANALYSIS)[:3],
+            _real_route_titles(SYNTHETIC_ANALYSIS)[:3],
             ["Quality Engineer", "Process Improvement Specialist", "Quality Systems / Documentation Specialist"],
         )
 
@@ -140,9 +140,9 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         profile = build_evidence_profile_from_analysis({"missing_data": ["страна", "язык", "доход"]})
         self.assertLessEqual(len(_build_evidence_questions(profile, "ru", "fast")), 1)
 
-    def test_k_deep_mode_has_five_question_limit(self):
+    def test_k_deep_mode_has_six_question_limit(self):
         profile = build_evidence_profile_from_analysis({"missing_data": ["страна", "язык", "доход", "документы", "ограничения", "формат"]})
-        self.assertLessEqual(len(_build_evidence_questions(profile, "ru", "deep_route")), 5)
+        self.assertLessEqual(len(_build_evidence_questions(profile, "ru", "deep_route")), 6)
 
     def test_l_question_has_no_duplicate_confirmation_prefix(self):
         turn = ConversationTurn(
@@ -203,16 +203,16 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         message.answer.assert_awaited_once()
 
     def test_q_failure_fallback_replaces_descriptive_sentence_with_real_route(self):
-        data = sergey_data(resume_analysis={
+        data = synthetic_data(resume_analysis={
             "confirmed_functions": ["контроль качества", "улучшение процессов", "техническая документация"]
         })
-        report = {"career_decision": {"recommended_main_path": "Сергей имеет опыт в управлении и контроле качества на производстве."}}
+        report = {"career_decision": {"recommended_main_path": "Кандидат имеет опыт в управлении и контроле качества на производстве."}}
         fallback = _ensure_preliminary_report(report, data)
         self.assertEqual(fallback["career_decision"]["recommended_main_path"], "Quality Engineer")
         self.assertEqual(fallback["career_decision"]["backup_path"], "Process Improvement Specialist")
 
     async def test_r_retry_uses_exception_safe_finalization_wrapper(self):
-        state = FakeState(sergey_data(final_report={"status": "preliminary"}, final_report_generated=True))
+        state = FakeState(synthetic_data(final_report={"status": "preliminary"}, final_report_generated=True))
         message = SimpleNamespace(
             answer=AsyncMock(),
             text=REPORT_RETRY,
@@ -222,7 +222,7 @@ class AssessmentTerminalTests(unittest.IsolatedAsyncioTestCase):
         with patch("handlers.career.finalize_career_flow", new=AsyncMock()) as finalize, \
              patch("handlers.career._build_and_send_report", new=AsyncMock()) as direct_build:
             await handle_post_result_actions(message, state)
-        finalize.assert_awaited_once_with("sergey-user", "sergey-session", "user_retry")
+        finalize.assert_awaited_once_with("synthetic-user", "synthetic-session", "user_retry")
         direct_build.assert_not_awaited()
         self.assertFalse(state.data["report_generation_in_progress"])
 
