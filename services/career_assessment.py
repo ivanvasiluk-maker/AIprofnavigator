@@ -837,29 +837,31 @@ def ensure_strategy_sections(assessment: CareerAssessment) -> None:
             ],
         ) for route in routes]
     recommended = assessment.routes.by_id(assessment.routes.recommended_route_id) or routes[0]
-    distinct_routes = [route for route in routes if route.route_id != recommended.route_id]
-    alternative = distinct_routes[0] if distinct_routes else recommended
-    ambitious_route = distinct_routes[1] if len(distinct_routes) > 1 else alternative
+    continuation = next((route for route in routes if route.entry_path == "direct_entry"), None)
+    adjacent_routes = [route for route in routes if route.entry_path != "direct_entry"]
+    safe_route = continuation or recommended
+    main_route = next((route for route in adjacent_routes if route.route_id == recommended.route_id), None) or (adjacent_routes[0] if adjacent_routes else recommended)
+    ambitious_route = next((route for route in adjacent_routes if route.route_id != main_route.route_id), None) or main_route
     if not assessment.scenarios:
         assessment.scenarios = [
-            CareerScenario("safe", recommended.route_id, "1–3 месяца", f"Проверить «{recommended.title}» без увольнения.",
-                "Текущая занятость + параллельный тест", recommended.preserves, ["Добавляется рыночная проверка"],
-                "Текущий доход сохраняется; новый доход не заявляется без источников.", "4–6 часов", "Минимальные",
-                [recommended.market_test], ["10 проверенных вакансий", "1 профессиональный разговор"],
+            CareerScenario("safe", safe_route.route_id, "1–3 месяца", f"Сохранить текущую работу и искать «{safe_route.title}» с меньшим числом выездов.",
+                "Текущая работа как финансовый мост", safe_route.preserves, ["Снижается доля выездов и физической работы"],
+                "Проверять предложения не ниже финансового минимума.", "4–6 часов", "Минимальные",
+                [safe_route.market_test], ["10 проверенных вакансий", "доход не ниже минимума"],
                 "Получен подтверждённый сигнал спроса и приемлемых условий.", "Задачи повторяют ключевые нежелательные условия.",
                 "Сохранить текущую работу как источник дохода."),
-            CareerScenario("main", alternative.route_id, "3–6 месяцев", f"Подготовить доказательства входа в «{alternative.title}».",
-                "Переход после подтверждённого предложения", alternative.preserves, ["Меняется формат применения опыта"],
+            CareerScenario("main", main_route.route_id, "3–6 месяцев", f"Подготовить технические кейсы для входа в «{main_route.title}».",
+                "Переход только после предложения", main_route.preserves, ["Меньше физической работы, больше координации или удалённой поддержки"],
                 "Переход только после проверки финансового минимума.", "7–10 часов", "Точечное обучение после анализа требований",
                 ["Собрать один подтверждающий кейс", "Адаптировать CV под повторяющиеся требования", "Провести серию из 10 откликов"],
                 ["Кейс готов", "Есть интервью или предложение"], "Есть предложение с приемлемыми задачами и доходом.",
-                "После серии проверок нет спроса или условия неприемлемы.", f"Вернуться к «{recommended.title}»."),
+                "После серии проверок нет спроса или условия неприемлемы.", f"Сохранить «{safe_route.title}» как финансовый мост."),
             CareerScenario("ambitious", ambitious_route.route_id, "6–18 месяцев", f"Проверить потолок маршрута «{ambitious_route.title}».",
                 "B2B, международный рынок или самостоятельная модель — только после пилота", ambitious_route.preserves,
                 ["Растёт риск и масштабируемость"], "Доход определяется экономикой пилота, а не обещанием.", "10–15 часов",
                 "Только после подтверждения спроса", [ambitious_route.market_test, "Посчитать unit-экономику или международный диапазон"],
                 ["Есть повторный спрос", "Экономика выдерживает расходы и простой"], "Получены повторные продажи или предложения.",
-                "Расходы растут без повторного спроса.", f"Вернуться к «{recommended.title}»."),
+                "Расходы растут без повторного спроса.", f"Вернуться к «{main_route.title}»."),
         ]
     if len(assessment.personal_insights) < 3:
         facts = [item.fact for item in assessment.evidence]
@@ -1206,7 +1208,7 @@ def build_deterministic_assessment(
     ))
     cluster_routes: list[str] = []
     cluster_generation_requested = bool(target_roles or interests) or any(
-        marker in change_text for marker in ("больше аналит", "данн", "уйти от", "меньше физ", "меньше руч")
+        marker in change_text for marker in ("больше аналит", "данн", "уйти от", "меньше физ", "уменьшить физ", "снизить физ", "меньше руч")
     )
     operations_context = (
         sum(any(marker in function.casefold() for marker in ("организ", "распредел", "контрол", "процесс", "отдел", "команд")) for function in functions) >= 2
@@ -1227,6 +1229,18 @@ def build_deterministic_assessment(
         cluster_routes.append("Manufacturing Data Analyst")
     if cluster_generation_requested and any(marker in cluster_blob for marker in ("техническ", "диагност", "клиент", "коммуникац")):
         cluster_routes.append("Technical Support Specialist")
+    service_context = any(marker in identity_blob for marker in (
+        "сервис", "ремонт", "обслужив", "оборудован", "техник", "field service", "horeca",
+    ))
+    if cluster_generation_requested and service_context:
+        if sum(any(marker in function.casefold() for marker in ("организ", "выезд", "клиент", "диагност", "ремонт")) for function in functions) >= 2:
+            cluster_routes.extend(["Service Coordinator / Service Dispatcher", "Maintenance Planner"])
+        if sum(any(marker in function.casefold() for marker in ("диагност", "компонент", "ремонт", "клиент")) for function in functions) >= 2:
+            cluster_routes.append("Warranty / Spare Parts Specialist")
+        if sum(any(marker in function.casefold() for marker in ("клиент", "настрой", "оборудован", "диагност")) for function in functions) >= 2:
+            cluster_routes.append("Technical Sales Specialist")
+        if any(marker in cluster_blob for marker in ("обуч", "инструктаж", "настав")):
+            cluster_routes.append("Technical Trainer")
     information_work = any(marker in cluster_blob for marker in (
         "документац", "инструкц", "структур", "редакт", "писат", "knowledge", "баз знан", "объяс",
     ))
@@ -1260,7 +1274,7 @@ def build_deterministic_assessment(
         (profile_snapshot, "history", "profile_snapshot", (
             "story_text", "answers_text", "career_goal", "current_role", "profession",
             "target_roles", "country_name", "target_countries", "work_authorization_status",
-            "qualification_status", "minimum_income", "target_income", "learning_hours_week",
+            "qualification_status", "current_income", "minimum_income", "target_income", "learning_hours_week",
             "learning_budget", "work_preferences", "care_constraints", "external_barriers",
         )),
     ]
@@ -1351,7 +1365,11 @@ def build_deterministic_assessment(
         elif any(token in low for token in ("quality", "качест")):
             selected_markers = groups["quality"]
         elif any(token in low for token in ("coordinator", "координ", "planner", "planning")):
-            selected_markers = groups["coordinator"]
+            selected_markers = (*groups["coordinator"], "выезд", "ремонт", "диагност")
+        elif any(token in low for token in ("spare parts", "запчаст")):
+            selected_markers = ("компонент", "замен", "ремонт", "диагност", "оборудован")
+        elif any(token in low for token in ("technical sales", "техническ продаж")):
+            selected_markers = ("клиент", "настрой", "оборудован", "диагност", "техническ")
         elif any(token in low for token in ("data", "analyst", "аналит")):
             selected_markers = groups["data"]
         elif any(token in low for token in ("cad/cam", "digital dental", "цифров")):
@@ -1421,6 +1439,11 @@ def build_deterministic_assessment(
         if conflicts_with_explicit_rejection(role):
             continue
         route_functions = relevant_functions_for_role(role)
+        # Adjacent titles are recommendations only when at least two currently
+        # demonstrated functions support them. A title or interest alone is not
+        # professional evidence.
+        if len(route_functions) < 2:
+            continue
         role_low = role.casefold()
         cross_domain_industrial = dental_context and any(marker in role_low for marker in ("industrial", "supplier quality", "manufacturing", "промышлен"))
         if cross_domain_industrial and len(route_functions) < 2:
@@ -1456,13 +1479,25 @@ def build_deterministic_assessment(
 
     country_known = bool(profile_snapshot.get("country_name") or profile_snapshot.get("target_countries"))
     market_sources = values(profile_snapshot, "market_data_sources")
-    languages = list(dict.fromkeys(
+    raw_languages = (
         values(resume_analysis, "languages")
         + values(story_analysis, "languages")
         + values(profile_snapshot, "languages", "current_language_level")
-    ))
+    )
+    language_rows: dict[str, str] = {}
+    for item in raw_languages:
+        match = re.match(r"\s*([A-Za-zА-Яа-яЁё]+)(?:\s+([ABC][12]|native|fluent|родной))?", item, re.I)
+        if match:
+            language_code = match.group(1).casefold()
+            level = (match.group(2) or "").upper()
+            language_rows[language_code] = f"{match.group(1)} {level}".strip()
+    languages = list(language_rows.values())
     language_known = bool(languages)
-    authorization = _optional_text(profile_snapshot.get("work_authorization_status"))
+    authorization_raw = profile_snapshot.get("work_authorization_status")
+    if authorization_raw in (None, "") and isinstance(profile_snapshot.get("work_authorization"), dict):
+        authorization_raw = profile_snapshot["work_authorization"].get("status")
+    authorization = _optional_text(authorization_raw)
+    authorization_confirmed = str(authorization or "").casefold() in {"confirmed", "да", "есть", "true", "authorized"}
     income_minimum = money_value("minimum_income")
     learning_time = _optional_text(profile_snapshot.get("learning_hours_week"))
     qualifications = values(
@@ -1553,16 +1588,21 @@ def build_deterministic_assessment(
             "safe_test_speed": safe_test,
             "income_status_loss_risk": loss_risk,
         }
-        points = {
-            "confirmed": 4, "partial": 1, "conflict": -5,
-            "high": 3, "medium": 1, "low": 0,
-            "current_level_supported": 3, "qualification_check_required": 1,
-            "source_check_available": 2, "fast_reversible": 2,
-            "reversible_pilot": 1, "vacancy_and_interview_test": 1,
-            "limited_for_continuation": 1, "substantial_retraining": -2,
-        }
-        score = sum(points.get(value, 0) for value in criteria.values())
-        score += desired_change_score
+        function_match = min(1.0, len(route_functions) / max(2, len(confirmed_functions)))
+        domain_match = 1.0 if kind == "continuation" or service_context and any(
+            token in candidate["title"].casefold() for token in ("service", "support", "maintenance", "warranty", "technical")
+        ) else .5 if route_functions else 0.0
+        transferable_capital = 1.0 if kind == "continuation" else .8 if route_functions else 0.0
+        desired_condition_match = 1.0 if avoids_shop_floor and (analytical_route or coordination_route or any(
+            token in candidate["title"].casefold() for token in ("support", "warranty", "sales", "trainer")
+        )) else .5
+        income_feasibility = .7 if income_minimum else .4
+        rejected_condition_penalty = .35 if kind == "continuation" and avoids_shop_floor else .25 if unwanted_overlap else 0.0
+        score = round(100 * (
+            function_match * .35 + domain_match * .20 + transferable_capital * .20
+            + desired_condition_match * .15 + income_feasibility * .10
+            - rejected_condition_penalty
+        ))
         ranking = {
             "experience_match": "high" if function_fit == "confirmed" else "medium" if functions else "requires_check",
             "desired_change_match": "high" if desired_change_score > 0 else "low" if desired_change_score < 0 else "requires_check",
@@ -1573,6 +1613,7 @@ def build_deterministic_assessment(
             "location_match": "requires_check" if country_known else "unknown",
             "transition_speed": "fast" if kind == "continuation" else "medium" if kind == "transition" else "slow",
             "overall_confidence": "medium" if functions else "low",
+            "route_score": score,
         }
         return {"score": score, "kind": kind, "criteria": criteria, "ranking": ranking}
 
@@ -1669,8 +1710,8 @@ def build_deterministic_assessment(
             return ("маркетинговая стратегия, координация команды и оценка результата", "оклад руководителя маркетинга", "высокая управленческая и коммуникационная нагрузка")
         focus = ", ".join(route_functions[:2]) or "подтверждённые функции пользователя"
         return (
-            f"применение функций: {focus}",
-            "оклад при найме или договорная оплата по выбранному формату",
+            f"ежедневная работа опирается на то, что вы уже умеете: {focus}",
+            "оплата по трудовому договору или согласованному контракту",
             f"нагрузка зависит от ежедневной доли функций: {focus}",
         )
 
@@ -1694,7 +1735,7 @@ def build_deterministic_assessment(
             missing.append("Целевая страна")
         if not language_known:
             missing.append("Рабочие языки и их уровень")
-        if not authorization:
+        if not authorization_confirmed and not authorization:
             missing.append("Юридическая доступность требует проверки")
         if income_minimum and not market_sources:
             missing.append("Нет рыночных данных для сравнения с финансовым минимумом")
@@ -1739,8 +1780,8 @@ def build_deterministic_assessment(
         )
         market_test = market_test_patterns[(index - 1) % len(market_test_patterns)]
         why = (
-            f"Маршрут «{label}» использует подтверждённую основу «{source_facts[(index - 1) % len(source_facts)]}». "
-            f"Его отдельная карьерная модель — {daily_focus}; оплата строится как {income_model}."
+            f"Этот маршрут подходит, потому что вы уже умеете: {source_facts[(index - 1) % len(source_facts)]}. "
+            f"В новой роли основная работа — {daily_focus}. Перед переходом нужно проверить условия и доход."
             if source_facts
             else "Конкретная профессия не названа: сначала нужно подтвердить выполнявшиеся функции."
         )
@@ -1755,7 +1796,7 @@ def build_deterministic_assessment(
             risks=risks,
             missing=list(dict.fromkeys(missing)),
             entry_level=(
-                "Текущий уровень поддержан только для продолжения подтверждённой роли"
+                "Можно опираться на опыт в текущей роли"
                 if kind == "continuation"
                 else "Уровень входа определяется после проверки требований, квалификаций и допусков"
             ),
@@ -1789,7 +1830,7 @@ def build_deterministic_assessment(
         (len(confirmed_functions) < 2, ("функц", "задач"), "Какие три конкретные рабочие функции вы выполняли чаще всего и хотите сохранить?"),
         (not country_known, ("стран", "рынок"), "В какой стране вы планируете искать работу?"),
         (not language_known, ("язык",), "На каких языках и на каком уровне вы можете работать?"),
-        (not authorization, ("прав", "документ"), "Есть ли у вас право на работу в целевой стране?"),
+        (not authorization_confirmed and not authorization, ("прав", "документ"), "Есть ли у вас право на работу в целевой стране?"),
         (income_minimum is None, ("доход", "миним"), "Какой минимальный ежемесячный доход для вас допустим?"),
         (not desired_change, ("масштаб", "смен"), "Вы хотите сохранить профессию, перейти в смежную роль или полностью сменить сферу?"),
     ]
@@ -1827,7 +1868,7 @@ def build_deterministic_assessment(
             market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
         ),
         identity=ProfessionalIdentity(
-            professional_core=confirmed_functions[:4] or current_roles[:2] or ["Подтверждённые функции отсутствуют"],
+            professional_core=current_roles[:1] or ["Специалист с подтверждённым опытом"],
             core_description="Ядро определено через подтверждённые функции; название роли используется только как дополнительный контекст.",
             secondary_functions=functions[3:7],
             seniority_current=(
@@ -2478,7 +2519,7 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
     ]
     unanswered = assessment.questions.unanswered_critical_questions
     known = list(evidence.values())[:7]
-    assumptions = ["Рыночные выводы предварительны: встроенного актуального поиска вакансий нет."] if not assessment.context.market_data_sources else []
+    assumptions = ["Рыночные выводы предварительны: актуальный датированный источник не получен."] if not assessment.context.market_data_sources else []
     heard = list(dict.fromkeys([*assessment.user_choice.functions_to_preserve, *assessment.user_choice.functions_to_avoid, *assessment.user_choice.priorities, *known]))[:7]
     residence = assessment.context.residence_country or assessment.context.country_name or "не указана"
     targets = assessment.context.target_countries or ([assessment.context.country_name] if assessment.context.country_name else [])
@@ -2555,6 +2596,10 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
     market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if assessment.context.market_data_sources else ""
     sourced_income = any(item.sources and any(case.amount is not None for case in (item.conservative, item.base, item.optimistic)) for item in assessment.income_forecasts)
     salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if sourced_income else ""
+    scenario_number = 11 if sourced_income else 10
+    insight_number = scenario_number + 1
+    steps_number = scenario_number + 2
+    final_number = scenario_number + 3
     authorization_html = f"<p><strong>Право на работу:</strong> {escape(assessment.context.work_authorization)}</p>" if assessment.context.work_authorization else ""
     work_format_html = f"<p><strong>Формат:</strong> {escape(assessment.context.work_format)}</p>" if assessment.context.work_format else ""
     return f"""<!doctype html>
@@ -2572,8 +2617,8 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
 <section><h2>8. Условия, при которых переход будет устойчивым</h2>{_list_html(constraints or ['Проверять переход без увольнения и крупных расходов.', 'Не трактовать неизвестные семейные, медицинские или миграционные обстоятельства как психологические факты.'])}{f'<h3>Психологические и социальные факторы</h3>{psychology_html}' if psychology_html else ''}</section>
 <section><h2>9. Пробелы и неопределённость</h2><h3>Что известно</h3>{_list_html(known)}<h3>Что предполагается</h3>{_list_html(assumptions or ['Предположения отделены от подтверждённых фактов.'])}<h3>Чего пока не знаем</h3>{_list_html(unanswered or ['Критичных неизвестных не зафиксировано.'])}<h3>Что может изменить рекомендацию</h3>{_list_html(assessment.conclusions.what_may_change_conclusion)}</section>
 {salary_section}
-<section><h2>11. Три сценария развития</h2>{scenarios_html}</section>
-<section><h2>12. Что здесь легко не заметить</h2>{insights_html}</section>
-<section><h2>13. Несколько первых шагов</h2>{steps}</section>
-<section><h2>14. Итоговая рекомендация</h2><p><strong>Основной маршрут:</strong> {escape(recommended.title if recommended else '')}</p><p>{escape(assessment.conclusions.main_conclusion)}</p><p><strong>Уровень уверенности:</strong> {escape('средний' if unanswered else 'высокий')}</p>{f'<p><strong>Альтернатива:</strong> {escape(", ".join(alternatives))}</p>' if alternatives else ''}<h3>Условие изменения рекомендации</h3>{_list_html(assessment.conclusions.what_may_change_conclusion)}</section>
+<section><h2>{scenario_number}. Три сценария развития</h2>{scenarios_html}</section>
+<section><h2>{insight_number}. Что здесь легко не заметить</h2>{insights_html}</section>
+<section><h2>{steps_number}. Несколько первых шагов</h2>{steps}</section>
+<section><h2>{final_number}. Итоговая рекомендация</h2><p><strong>Основной маршрут:</strong> {escape(recommended.title if recommended else '')}</p><p>{escape(assessment.conclusions.main_conclusion)}</p><p><strong>Уровень уверенности:</strong> {escape('средний' if unanswered else 'высокий')}</p>{f'<p><strong>Альтернатива:</strong> {escape(", ".join(alternatives))}</p>' if alternatives else ''}<h3>Условие изменения рекомендации</h3>{_list_html(assessment.conclusions.what_may_change_conclusion)}</section>
 </body></html>"""

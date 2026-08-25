@@ -123,7 +123,17 @@ def build_report_snapshot(data: dict[str, Any]) -> ReportSnapshot:
     assessment_id = str(data.get("assessment_id") or "").strip()
     if not assessment_id:
         raise ValueError("assessment_id is required for report snapshot")
-    canonical: CanonicalProfile = build_canonical_profile(data, assessment_id=assessment_id)
+    # Resume parsing may return a partial payload. Preserve already confirmed
+    # assessment facts instead of letting that partial payload shadow them.
+    merged_data = copy.deepcopy(data)
+    assessment_values = [
+        value for key in ("assessment", "assessment_data", "profile_snapshot", "report_snapshot")
+        if isinstance((value := data.get(key)), dict)
+    ]
+    for key in ("current_income", "minimum_income", "target_income", "currency"):
+        if merged_data.get(key) in (None, ""):
+            merged_data[key] = next((row.get(key) for row in assessment_values if row.get(key) not in (None, "")), None)
+    canonical: CanonicalProfile = build_canonical_profile(merged_data, assessment_id=assessment_id)
     normalized = canonical.normalized_profile
     story_analysis = copy.deepcopy(data.get("story_analysis") if isinstance(data.get("story_analysis"), dict) else {})
     resume_analysis = copy.deepcopy(data.get("resume_analysis") if isinstance(data.get("resume_analysis"), dict) else {})
