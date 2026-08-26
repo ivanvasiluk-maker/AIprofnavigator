@@ -61,6 +61,45 @@ def income_urgency_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"income_urgency:{assessment_id}:{code}")] for text, code in options])
 
 
+def post_report_support_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    options = [("👤 Разобрать с карьерным экспертом", "career"), ("🧠 Разобрать внутренние барьеры с психологом", "psychology"), ("🤖 Получить мой промт для нейросети", "prompt"), ("💬 Сопровождение: человек + нейронка", "hybrid"), ("✅ Пока продолжу самостоятельно", "self")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"post_support:{assessment_id}:{code}")] for text, code in options])
+
+
+def consent_keyboard(assessment_id: str, recipient: str) -> InlineKeyboardMarkup:
+    options = [("Да, передать отчёт", "full_report"), ("Передать только краткое резюме", "summary"), ("Нет, ничего не передавать", "none")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"share_consent:{assessment_id}:{recipient}:{scope}")] for text, scope in options])
+
+
+def prompt_actions_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=text, callback_data=f"prompt_action:{assessment_id}:{action}")] for text, action in [("Скопировать промт", "copy"), ("Скачать как файл", "download"), ("Сделать промт короче", "short"), ("Добавить задачу к промту", "task")]]
+    rows.insert(2, [InlineKeyboardButton(text="Отправить в ChatGPT", url="https://chatgpt.com/")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def prompt_tasks_keyboard(assessment_id: str) -> InlineKeyboardMarkup:
+    options = [("Анализировать вакансии", "vacancies"), ("Адаптировать резюме", "resume"), ("Подготовиться к интервью", "interview"), ("Выбрать обучение", "learning"), ("Составить план перехода", "plan"), ("Описать карьерный кейс", "case")]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=f"prompt_task:{assessment_id}:{task}")] for text, task in options])
+
+
+def support_detail_keyboard(assessment_id: str, support_type: str) -> InlineKeyboardMarkup:
+    labels = {
+        "career": [("Записаться", "book"), ("Что будет на встрече", "about")],
+        "psychology": [("Записаться к психологу", "book"), ("Понять, подходит ли мне это", "about")],
+        "hybrid": [("Как это работает", "about"), ("Начать сопровождение", "book"), ("Сравнить форматы", "compare")],
+    }[support_type]
+    rows = [[InlineKeyboardButton(text=text, callback_data=f"support_detail:{assessment_id}:{support_type}:{action}")] for text, action in labels]
+    rows.append([InlineKeyboardButton(text="Вернуться назад", callback_data=f"support_detail:{assessment_id}:{support_type}:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def booking_keyboard(url: str, assessment_id: str, recipient: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Перейти к записи", url=url)],
+        [InlineKeyboardButton(text="Я записался(ась)", callback_data=f"booking_complete:{assessment_id}:{recipient}")],
+    ])
+
+
 def selected_step_actions_keyboard(assessment: CareerAssessment, step_id: str) -> InlineKeyboardMarkup:
     step_index = next(index for index, step in enumerate(assessment.first_steps) if step.step_id == step_id)
     return InlineKeyboardMarkup(
