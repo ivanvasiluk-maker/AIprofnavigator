@@ -1713,7 +1713,7 @@ def build_deterministic_assessment(
     if experimental:
         selected.append(experimental[0])
     continuation_candidate = next((item for item in non_experimental if item[0]["kind"] == "continuation"), None)
-    if current_role and continuation_candidate is not None and continuation_candidate not in selected:
+    if service_context and current_role and continuation_candidate is not None and continuation_candidate not in selected:
         if len(selected) >= (4 if not experimental else 5):
             selected[-1] = continuation_candidate
         else:
