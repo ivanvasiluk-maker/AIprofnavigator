@@ -222,7 +222,9 @@ from services.career_assessment import (
     CareerAssessment,
     build_deterministic_assessment,
     career_assessment_from_dict,
+    render_30_day_program,
     render_first_step_instruction,
+    render_personalized_ai_prompt,
     render_route_comparison,
     render_telegram_map,
     render_short_conclusion,
@@ -7921,8 +7923,39 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
         await callback.message.answer(start_guide_response(result), reply_markup=start_guide_keyboard(assessment.assessment_id))
     elif callback.message and action == "income":
         await callback.message.answer("Когда должен появиться дополнительный или новый доход?", reply_markup=income_urgency_keyboard(assessment.assessment_id))
+    elif callback.message and action == "career":
+        await callback.message.answer(
+            "Карьерный специалист поможет проверить основной маршрут, сравнить его с альтернативами и принять решение без обнуления опыта.",
+            reply_markup=specialist_routing_keyboard(),
+        )
+    elif callback.message and action == "psychologist":
+        if assessment.psychology_factors:
+            factors = ", ".join(item.factor for item in assessment.psychology_factors[:3])
+            await callback.message.answer(
+                f"Психологическая поддержка здесь уместна не для выбора профессии вместо вас, а для работы с факторами: {factors}. Карьерный маршрут при этом остаётся сохранён.",
+                reply_markup=specialist_routing_keyboard(),
+            )
+        else:
+            await callback.message.answer("В заключении нет подтверждённых психологических факторов, поэтому направлять к психологу сейчас не буду.")
+    elif callback.message and action == "group":
+        if settings.support_group_telegram_url:
+            await callback.message.answer(
+                "Группа подходит для регулярной поддержки поиска работы и обмена обратной связью.",
+                reply_markup=telegram_link_keyboard("Открыть группу поддержки", settings.support_group_telegram_url),
+            )
+        else:
+            await callback.message.answer("Ссылка на группу поддержки пока не настроена.")
+    elif callback.message and action == "program30":
+        await callback.message.answer(render_30_day_program(result))
+    elif callback.message and action == "prompt":
+        await callback.message.answer(render_personalized_ai_prompt(result))
+    elif callback.message and action == "reconsider":
+        await callback.message.answer(
+            render_route_comparison(assessment),
+            reply_markup=assessment_actions_keyboard(assessment),
+        )
     elif callback.message and action == "resume":
-        await callback.message.answer("Пришлите резюме или описание одного результата — используем сохранённое профессиональное ядро и маршрут без повторного анализа профиля.")
+        await callback.message.answer("Пришлите резюме. Я сам извлеку кейсы и результаты и адаптирую CV под сохранённый маршрут без повторного анализа профиля.")
     await callback.answer()
 
 

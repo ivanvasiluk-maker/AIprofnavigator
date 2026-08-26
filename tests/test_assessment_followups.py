@@ -1,7 +1,9 @@
 from keyboards import assessment_actions_keyboard
 from services.career_assessment import (
     build_income_bridge,
+    render_30_day_program,
     render_assessment_html,
+    render_personalized_ai_prompt,
     render_short_conclusion,
     start_guide_response,
     validated_assessment_result,
@@ -22,6 +24,25 @@ def test_short_and_full_use_one_assessment_result():
     assert all(item in short and item in full for item in view["professional_core"])
     assert "Анализ по маршрутам" not in full
     assert "Прогноз зарплаты или дохода" not in full
+
+
+def test_short_conclusion_separates_user_routes_from_new_ai_hypotheses():
+    assessment = build_maria()
+    primary = assessment.routes.by_id(assessment.routes.recommended_route_id)
+    alternative = next(route for route in assessment.routes.all_routes() if route.route_id != primary.route_id)
+    assessment.user_choice.preferred_directions = [primary.title]
+
+    view = validated_assessment_result(assessment)
+    short = render_short_conclusion(view)
+
+    assert primary.title in [item["title"] for item in view["user_proposed_routes"]]
+    assert alternative.title in [item["title"] for item in view["ai_discovered_routes"]]
+    assert f"Ваши варианты: {primary.title}" in short
+    assert "Новые гипотезы ИИ:" in short and alternative.title in short
+    assert "Известно:" in short
+    assert "Выведено из фактов:" in short
+    assert "Подтверждено рынком:" in short
+    assert "Нужно проверить:" in short
 
 
 def test_start_guide_asks_one_question_instead_of_rendering_report():
@@ -68,6 +89,18 @@ def test_income_bridge_requires_confirmed_urgency():
 def test_followup_keyboard_uses_callbacks_not_assessment_generation():
     assessment = build_maria()
     callbacks = [button.callback_data for row in assessment_actions_keyboard(assessment).inline_keyboard for button in row]
-    assert any(item.endswith(":guide") for item in callbacks)
     assert any(item.endswith(":full") for item in callbacks)
+    assert any(item.endswith(":career") for item in callbacks)
+    assert any(item.endswith(":group") for item in callbacks)
+    assert any(item.endswith(":program30") for item in callbacks)
+    assert any(item.endswith(":prompt") for item in callbacks)
+    assert any(item.endswith(":reconsider") for item in callbacks)
+    assert not any(item.endswith(":guide") for item in callbacks)
     assert all("generate" not in item and "rebuild" not in item for item in callbacks)
+
+
+def test_post_report_products_reuse_selected_route():
+    view = result()
+    title = view["primary_route"]["title"]
+    assert title in render_30_day_program(view)
+    assert title in render_personalized_ai_prompt(view)

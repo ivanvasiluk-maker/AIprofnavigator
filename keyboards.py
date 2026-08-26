@@ -24,11 +24,18 @@ def first_step_selection_keyboard(assessment: CareerAssessment) -> InlineKeyboar
 def assessment_actions_keyboard(assessment: CareerAssessment) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="📄 Полный отчёт", callback_data=f"assessment_action:{assessment.assessment_id}:full")],
-        [InlineKeyboardButton(text="🧭 Не знаю, с чего начать", callback_data=f"assessment_action:{assessment.assessment_id}:guide")],
-        [InlineKeyboardButton(text="💰 Мне срочно нужен доход", callback_data=f"assessment_action:{assessment.assessment_id}:income")],
-        [InlineKeyboardButton(text="🔄 Хочу другие варианты", callback_data=f"show_first_steps:{assessment.assessment_id}")],
-        [InlineKeyboardButton(text="📝 Подготовить резюме", callback_data=f"assessment_action:{assessment.assessment_id}:resume")],
+        [InlineKeyboardButton(text="👤 Карьерный специалист", callback_data=f"assessment_action:{assessment.assessment_id}:career")],
+        [InlineKeyboardButton(text="👥 Группа поддержки", callback_data=f"assessment_action:{assessment.assessment_id}:group")],
+        [InlineKeyboardButton(text="📅 Программа на 30 дней", callback_data=f"assessment_action:{assessment.assessment_id}:program30")],
+        [InlineKeyboardButton(text="✨ Персональный AI-prompt", callback_data=f"assessment_action:{assessment.assessment_id}:prompt")],
+        [InlineKeyboardButton(text="🔄 Пересмотреть варианты", callback_data=f"assessment_action:{assessment.assessment_id}:reconsider")],
+        [InlineKeyboardButton(text="📝 CV под выбранный маршрут", callback_data=f"assessment_action:{assessment.assessment_id}:resume")],
     ]
+    if assessment.psychology_factors:
+        rows.insert(2, [InlineKeyboardButton(text="🧠 Психолог", callback_data=f"assessment_action:{assessment.assessment_id}:psychologist")])
+    urgency = str(assessment.context.income_urgency or "").casefold()
+    if any(marker in urgency for marker in ("сроч", "month", "месяц", "1_3", "1-3")):
+        rows.insert(1, [InlineKeyboardButton(text="💰 Финансовый мост", callback_data=f"assessment_action:{assessment.assessment_id}:income")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -2531,6 +2531,29 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         else "Требования и спрос на выбранный маршрут нужно подтвердить по вакансиям."
     )
     insight = assessment.personal_insights[0].text if assessment.personal_insights else assessment.identity.core_description
+    preferred_directions = [item for item in assessment.user_choice.preferred_directions if item.strip()]
+
+    def proposed_by_user(route: CareerRoute) -> bool:
+        route_text = route.title.casefold()
+        for direction in preferred_directions:
+            direction_text = direction.casefold()
+            if direction_text in route_text or route_text in direction_text:
+                return True
+        return False
+
+    selected_routes = [route for route in [primary, *alternatives] if route is not None]
+    user_proposed_routes = [asdict(route) for route in selected_routes if proposed_by_user(route)]
+    ai_discovered_routes = [asdict(route) for route in selected_routes if not proposed_by_user(route)][:3]
+    known = list(dict.fromkeys([
+        *assessment.identity.professional_core,
+        *assessment.identity.transferable_functions,
+        *[item.fact for item in assessment.evidence[:4]],
+    ]))
+    market_confirmed = [
+        f"{item.route_id}: {item.demand}"
+        for item in assessment.market_analysis
+        if item.sources and item.confidence.casefold() in {"medium", "high"}
+    ]
     return {
         "professional_core": list(assessment.identity.professional_core),
         "secondary_functions": list(assessment.identity.secondary_functions),
@@ -2552,6 +2575,17 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         },
         "primary_route": asdict(primary) if primary else {},
         "alternative_routes": [asdict(route) for route in alternatives],
+        "user_proposed_routes": user_proposed_routes,
+        "ai_discovered_routes": ai_discovered_routes,
+        "confidence_layers": {
+            "known": known[:6],
+            "inferred": [primary.why_it_fits] if primary else [],
+            "market_confirmed": market_confirmed,
+            "needs_verification": list(dict.fromkeys([
+                *([uncertainty] if uncertainty else []),
+                *(primary.missing if primary else []),
+            ]))[:4],
+        },
         "income_bridge": None,
         "main_insight": insight,
         "main_uncertainty": uncertainty,
@@ -2562,23 +2596,72 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
 def render_short_conclusion(result: dict[str, Any]) -> str:
     """Render the first, compact answer without generating another assessment."""
     primary = result.get("primary_route") or {}
-    alternatives = result.get("alternative_routes") or []
+    user_routes = result.get("user_proposed_routes") or []
+    ai_routes = result.get("ai_discovered_routes") or []
+    layers = result.get("confidence_layers") or {}
     experiment = result.get("recommended_experiment") or {}
-    alternative_titles = [str(item.get("title")) for item in alternatives[:2] if item.get("title")]
+    matching_functions = primary.get("matching_functions") or primary.get("transferable_functions") or primary.get("preserves") or []
+    user_titles = [str(item.get("title")) for item in user_routes[:3] if item.get("title")]
+    ai_titles = [str(item.get("title")) for item in ai_routes[:3] if item.get("title")]
+    known = [str(item) for item in (layers.get("known") or [])[:3] if str(item).strip()]
+    market_confirmed = [str(item) for item in (layers.get("market_confirmed") or [])[:2] if str(item).strip()]
+    needs_verification = [str(item) for item in (layers.get("needs_verification") or [])[:2] if str(item).strip()]
     lines = [
-        "Ваше профессиональное ядро",
-        ", ".join(result.get("professional_core") or []),
+        "Короткое карьерное заключение",
+        "",
+        f"Ваше профессиональное ядро: {', '.join(result.get('professional_core') or [])}",
+        f"Сильные переносимые функции: {', '.join(matching_functions)}",
         "",
         f"Основной маршрут: {primary.get('title', '')}",
-        str(primary.get("why_it_fits") or "Маршрут сохраняет подтверждённые функции и допускает проверку до перехода."),
+        f"Почему он первый: {primary.get('why_it_fits') or 'Маршрут сохраняет подтверждённые функции и допускает проверку до перехода.'}",
     ]
-    if alternative_titles:
-        lines.extend(["", f"Альтернативы: {', '.join(alternative_titles)}."])
+    if primary.get("why_better_than_excluded"):
+        lines.append(f"Почему сильнее отсеянных: {primary['why_better_than_excluded']}")
+    lines.extend(["", f"Ваши варианты: {', '.join(user_titles) if user_titles else 'конкретные роли не были названы.'}"])
+    lines.append(f"Новые гипотезы ИИ: {', '.join(ai_titles) if ai_titles else 'дополнительных маршрутов сверх ваших вариантов нет.'}")
     if result.get("main_insight"):
-        lines.extend(["", f"Главный вывод: {result['main_insight']}"])
+        lines.extend(["", f"Главный синтез: {result['main_insight']}"])
+    lines.extend(["", "Уверенность:"])
+    lines.append(f"Известно: {'; '.join(known) if known else 'подтверждённых фактов пока мало.'}")
+    lines.append(f"Выведено из фактов: {primary.get('why_it_fits') or 'предварительная гипотеза.'}")
+    lines.append(f"Подтверждено рынком: {'; '.join(market_confirmed) if market_confirmed else 'пока нет актуального внешнего подтверждения.'}")
+    lines.append(f"Нужно проверить: {'; '.join(needs_verification) if needs_verification else 'критичных неизвестных не зафиксировано.'}")
     if experiment:
-        lines.extend(["", f"Первый шаг: {experiment.get('action') or experiment.get('title', '')}"])
+        lines.extend(["", f"Одна проверка до решения: {experiment.get('action') or experiment.get('title', '')}"])
     return "\n".join(lines)
+
+
+def render_personalized_ai_prompt(result: dict[str, Any]) -> str:
+    primary = result.get("primary_route") or {}
+    alternatives = result.get("alternative_routes") or []
+    return "\n".join([
+        "Персональный prompt для продолжения работы с ИИ:",
+        "",
+        "Помоги мне проверить карьерное решение, не придумывая факты и не обнуляя мой опыт.",
+        f"Моё профессиональное ядро: {', '.join(result.get('professional_core') or [])}.",
+        f"Основной маршрут: {primary.get('title', '')}.",
+        f"Альтернативы: {', '.join(str(item.get('title')) for item in alternatives[:3] if item.get('title')) or 'не выбраны'}.",
+        f"Функции, которые важно сохранить: {', '.join(primary.get('matching_functions') or primary.get('preserves') or [])}.",
+        f"Ограничения: {', '.join(result.get('constraints') or []) or 'не зафиксированы'}.",
+        "Сначала отдели известные факты от выводов и рыночных допущений. Затем предложи один способ проверить маршрут, один критерий отказа от него и адаптацию CV только под подтверждённые функции.",
+    ])
+
+
+def render_30_day_program(result: dict[str, Any]) -> str:
+    primary = result.get("primary_route") or {}
+    title = str(primary.get("title") or "выбранный маршрут")
+    market_test = str(primary.get("market_test") or "сравнить требования актуальных вакансий")
+    missing = ", ".join(primary.get("missing") or []) or "критичный пробел не определён"
+    return "\n".join([
+        f"30 дней проверки маршрута «{title}»",
+        "",
+        f"Неделя 1 — проверить реальную работу: {market_test}",
+        "Неделя 2 — извлечь из CV 2–3 кейса: задача, ваше действие, результат и масштаб.",
+        f"Неделя 3 — закрыть один решающий пробел: {missing}.",
+        "Неделя 4 — провести 5 прицельных откликов или 2 разговора со специалистами и сравнить сигналы.",
+        "",
+        "Решение на 30-й день: продолжать маршрут только при подтверждении задач, реалистичного уровня входа и приемлемых условий.",
+    ])
 
 
 def start_guide_response(result: dict[str, Any], branch: str | None = None, choice: str | None = None) -> str:
