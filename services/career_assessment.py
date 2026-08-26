@@ -1621,6 +1621,42 @@ def build_deterministic_assessment(
         return {"score": score, "kind": kind, "criteria": criteria, "ranking": ranking}
 
     evaluated = [(candidate, evaluate(candidate), index) for index, candidate in enumerate(candidates)]
+    candidate_debug_before_filter = [
+        {
+            "title": candidate["title"],
+            "kind": candidate["kind"],
+            "functions": list(candidate["functions"]),
+            "score": evaluation["score"],
+            "ranking": dict(evaluation["ranking"]),
+            "rejection_reasons": [],
+        }
+        for candidate, evaluation, _ in evaluated
+    ]
+
+    def service_route_family(title: str) -> str:
+        low = title.casefold()
+        if service_context and any(token in low for token in ("coordinator", "dispatcher", "planner", "maintenance", "warranty", "spare parts", "support", "sales", "trainer")):
+            return next(
+                token for token in ("coordinator", "dispatcher", "planner", "maintenance", "warranty", "spare parts", "support", "sales", "trainer")
+                if token in low
+            )
+        return ""
+
+    def service_route_priority(title: str) -> int:
+        family = service_route_family(title)
+        order = {
+            "coordinator": 0,
+            "dispatcher": 0,
+            "support": 1,
+            "warranty": 2,
+            "spare parts": 2,
+            "planner": 2,
+            "maintenance": 2,
+            "trainer": 3,
+            "sales": 4,
+        }
+        return order.get(family, 5)
+
     evaluated.sort(key=lambda item: (
         # A user-selected hypothesis backed by at least two current-assessment
         # facts is the primary route to verify, rather than a disposable label.
@@ -1629,6 +1665,7 @@ def build_deterministic_assessment(
         # recommendation, whenever concrete alternative market roles exist.
         bool(item[0]["kind"] == "continuation" and bool(target_roles)),
         bool(item[0]["experimental"]),
+        service_route_priority(item[0]["title"]),
         -int(item[1]["score"]),
         item[2],
     ))
@@ -1637,13 +1674,23 @@ def build_deterministic_assessment(
     # different application of the person's experience.
     diverse_evaluated: list[tuple[dict[str, Any], dict[str, Any], int]] = []
     seen_function_sets: set[tuple[str, ...]] = set()
+    rejected_candidates: list[dict[str, Any]] = []
+
     for item in evaluated:
         signature = tuple(sorted(str(value).casefold() for value in item[0]["functions"]))
         deduplicate = item[0]["kind"] in {"transition", "retraining"}
-        if deduplicate and signature and signature in seen_function_sets and item[0]["title"] not in explicit_target_roles:
+        comparable_signature = (*signature, service_route_family(item[0]["title"]))
+        if deduplicate and signature and comparable_signature in seen_function_sets and item[0]["title"] not in explicit_target_roles:
+            rejected_candidates.append({
+                "title": item[0]["title"],
+                "kind": item[0]["kind"],
+                "functions": list(item[0]["functions"]),
+                "score": item[1]["score"],
+                "rejection_reasons": ["duplicate_transferable_function_set"],
+            })
             continue
         if deduplicate and signature:
-            seen_function_sets.add(signature)
+            seen_function_sets.add(comparable_signature)
         diverse_evaluated.append(item)
     evaluated = diverse_evaluated
 
@@ -1665,6 +1712,12 @@ def build_deterministic_assessment(
                 selected.append(data_candidate)
     if experimental:
         selected.append(experimental[0])
+    continuation_candidate = next((item for item in non_experimental if item[0]["kind"] == "continuation"), None)
+    if current_role and continuation_candidate is not None and continuation_candidate not in selected:
+        if len(selected) >= (4 if not experimental else 5):
+            selected[-1] = continuation_candidate
+        else:
+            selected.append(continuation_candidate)
 
     insufficient_data = not current_role and len(confirmed_functions) < 2
     if not selected:
@@ -1871,6 +1924,7 @@ def build_deterministic_assessment(
     primary = routes[:1]
     alternatives = routes[1:4]
     recommended_id = primary[0].route_id
+    fallback_confidence = "low" if insufficient_data or (not alternatives and len(confirmed_functions) >= 2) else "medium"
     assessment = CareerAssessment(
         assessment_id=assessment_id,
         session_id=session_id,
@@ -1940,7 +1994,7 @@ def build_deterministic_assessment(
             ],
             main_conclusion=(
                 f"Основной маршрут для безопасной проверки — {primary[0].title}; "
-                f"уверенность {'низкая' if insufficient_data else 'средняя'}."
+                f"уверенность {'низкая' if fallback_confidence == 'low' else 'средняя'}."
             ),
             # A question belongs in "what is unknown".  Repeating it verbatim
             # under "what may change" makes the report look like it asked twice.
@@ -1971,10 +2025,22 @@ def build_deterministic_assessment(
         ],
         metadata={
             "fallback_source_policy": "current_assessment_only",
-            "fallback_confidence": "low" if insufficient_data else "medium",
+            "fallback_confidence": fallback_confidence,
             "fallback_reason": fallback_reason,
             "fallback_mode": "insufficient_data" if insufficient_data else "ranked_hypotheses",
             "route_evaluations": route_evaluations,
+            "route_generation_debug": {
+                "current_role": current_role,
+                "confirmed_functions": confirmed_functions,
+                "desired_changes": desired_change_values,
+                "rejected_conditions": unwanted,
+                "generated_route_candidates": candidate_debug_before_filter,
+                "rejected_route_candidates": rejected_candidates,
+                "route_candidates_after_filter": [
+                    {"title": candidate["title"], "kind": candidate["kind"], "score": evaluation["score"]}
+                    for candidate, evaluation, _ in selected
+                ],
+            },
             "candidate_count_before_selection": len(candidates),
             "measurable_results_count": len(achievements),
         },
@@ -2085,6 +2151,20 @@ def validate_career_assessment(
         add_error("GENERIC_ROUTE_TITLE", "routes.recommended_route_id", "recommended_route_id does not exist", assessment.routes.recommended_route_id)
     elif len(set(recommended.evidence_ids)) < 2:
         add_error("MISSING_ROUTE_EVIDENCE", f"routes.{recommended.route_id}.evidence_ids", "recommended route must reference at least two evidence items", recommended.evidence_ids)
+    if (
+        not assessment.routes.alternative_route_ids
+        and len(assessment.identity.transferable_functions) >= 5
+        and bool(assessment.user_choice.desired_change)
+    ):
+        add_error(
+            "ROUTE_DIVERSITY_FAILURE",
+            "routes.alternative_route_ids",
+            "confirmed functions and desired changes require at least one adjacent or transition route",
+            {
+                "confirmed_functions_count": len(assessment.identity.transferable_functions),
+                "desired_change": assessment.user_choice.desired_change,
+            },
+        )
 
     route_ids = {route.route_id for route in assessment.routes.all_routes() if route.route_id}
     evidence_ids = {item.evidence_id for item in assessment.evidence if item.evidence_id}
