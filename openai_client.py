@@ -1362,7 +1362,16 @@ route_changed=false. Дай один следующий измеримый ша�
                 "routes",
                 STAGED_ROUTES_SCHEMA,
                 ["routes"],
-                "Собери только 3-5 разных маршрутов. Используй evidence_id из уже собранного профиля.",
+                """Собери только маршруты решения.
+Сначала выдели подтверждённые профессиональные функции, переносимые навыки и отраслевой опыт.
+Создай широкий candidate_routes из 5-12 конкретных профессий, каждая с 2+ evidence_id.
+Для каждого кандидата оцени совпадение функций, отрасли, страны, языка, легального доступа,
+рынка и реалистичного уровня входа. Затем перенеси отсеянные варианты в excluded_routes
+с причиной, блокерами и условиями пересмотра. Выбери ровно один primary route и не более
+трёх alternatives. Для каждого выбранного маршрута объясни matching_functions,
+why_better_than_excluded, missing, entry_level и disconfirming_conditions.
+Допустима любая профессия, подтверждённая фактами пользователя, даже если её нет в prompts
+или tests. Не копируй названия ролей из примеров и не выбирай по совпадению job title.""",
             ),
             (
                 "market_income",
@@ -1385,6 +1394,7 @@ route_changed=false. Дай один следующий измеримый ша�
                     "- не добавляй факты из примеров или прошлых сессий;",
                     "- сохраняй route_id/evidence_id из входа, если ссылаешься на них;",
                     "- не выдавай неподтверждённые психологические утверждения как факт;",
+                    "- не подменяй выбор профессии внутренним каталогом или названием из примера;",
                     "- верни только JSON по схеме этого этапа.",
                 ]
             ) + "\n\nВХОД:\n" + json.dumps(
@@ -1423,7 +1433,8 @@ route_changed=false. Дай один следующий измеримый ша�
             repair_prompt = """Исправь только текущий этап CareerAssessment.
 
 Используй validation_errors как список точечных правок. Верни JSON только по stage_schema,
-не переписывай остальные блоки и не добавляй факты вне ProfileSnapshot.
+не переписывай остальные блоки и не добавляй факты вне ProfileSnapshot. Для этапа routes
+сохрани широкий longlist и историю фильтрации; не заменяй профессии названиями из примеров.
 
 ДАННЫЕ:
 """ + json.dumps(
@@ -1583,17 +1594,12 @@ route_changed=false. Дай один следующий измеримый ша�
                 if first and not str(digital_human.get("previous_identity", "")).strip():
                     digital_human["previous_identity"] = first
 
-        preferred_titles = self._preferred_polish_roles(story_analysis, user_segment)
-        if preferred_titles:
-            self._normalize_admin_backoffice_roles(report, preferred_titles)
-
         profile_domain = self._detect_profile_domain(story_analysis, answers_text, story_text)
         if profile_domain:
             report["profile_domain"] = profile_domain
 
         self._deduplicate_directions(report)
         self._enrich_layers_and_non_reset(report, story_analysis, answers_text)
-        self._inject_signal_roles(report, story_analysis, answers_text)
         self._ensure_strategy_mode(report)
         self._ensure_social_integration(report)
         self._ensure_resource_level(report, answers_text)
@@ -1602,10 +1608,8 @@ route_changed=false. Дай один следующий измеримый ша�
         self._normalize_market_geography(report, story_text, story_analysis, answers_text)
         self._ensure_career_first_today_action(report)
         self._ensure_barrier_driven_today_action(report, answers_text)
-        self._enforce_segment_routes(report, user_segment, user_segment_label)
         normalized_layers = self._normalize_decision_layers(decision_layers)
         self._enforce_route_change_guardrails(report, story_analysis, answers_text, normalized_layers)
-        self._enforce_domain_specific_routes(report, profile_domain)
         self._sanitize_unconfirmed_claims(report, normalized_facts)
 
         return report

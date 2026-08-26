@@ -846,7 +846,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("energy", keys)
         self.assertIn("priorities", keys)
 
-    def test_admin_profile_normalizes_generic_roles(self) -> None:
+    def test_admin_profile_does_not_replace_model_roles_from_catalog(self) -> None:
         story_analysis = {
             "current_identity": "Женщина с административным опытом, документооборотом и координацией процессов в Польше.",
             "experience_snapshot": ["Документооборот", "Контроль сроков", "Координация задач"],
@@ -869,12 +869,12 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         normalized = ai_client._align_report_with_story(report, story_analysis)
 
         self.assertEqual(normalized["digital_human"]["current_state"], story_analysis["current_identity"])
-        self.assertEqual(normalized["career_recommendations"][0]["title"], "Administrative Assistant")
-        self.assertEqual(normalized["market_analysis"][0]["profession"], "Administrative Assistant")
-        self.assertEqual(normalized["career_translation"][0]["market_term"], "Administrative Assistant")
-        self.assertEqual(normalized["career_decision"]["recommended_main_path"], "Administrative Assistant / Back-office Specialist")
+        self.assertEqual(normalized["career_recommendations"][0]["title"], "Customer Support Specialist")
+        self.assertEqual(normalized["market_analysis"][0]["profession"], "B2B Sales")
+        self.assertEqual(normalized["career_translation"][0]["market_term"], "Офис-менеджер")
+        self.assertEqual(normalized["career_decision"]["recommended_main_path"], "Customer Success Entry")
 
-    def test_construction_estimator_domain_forces_main_route(self) -> None:
+    def test_construction_domain_does_not_force_catalog_route(self) -> None:
         story_analysis = {
             "current_identity": "Инженер-сметчик в строительной сфере.",
             "experience_snapshot": [
@@ -914,24 +914,10 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         normalized = ai_client._align_report_with_story(report, story_analysis)
 
         self.assertEqual(normalized.get("profile_domain"), "construction_engineering_cost_estimation")
-        self.assertIn("assistant cost estimator", normalized["career_decision"]["recommended_main_path"].lower())
-        self.assertNotIn("administrative assistant / back-office specialist", normalized["career_decision"]["recommended_main_path"].lower())
-        self.assertEqual(normalized["market_analysis"][0]["profession"], "Assistant Cost Estimator")
-        self.assertEqual(normalized["career_recommendations"][0]["title"], "Assistant Cost Estimator")
+        self.assertEqual(normalized["career_decision"]["recommended_main_path"], "Administrative Assistant / Back-office Specialist")
+        self.assertEqual(normalized["market_analysis"][0]["profession"], "Administrative Assistant")
+        self.assertEqual(normalized["career_recommendations"][0]["title"], "Administrative Assistant")
         self.assertEqual(normalized["action_plan"]["today"]["timebox"], "15 минут")
-        self.assertIn("Assistant Cost Estimator", normalized["action_plan"]["today"]["action"])
-        self.assertIn("Junior Quantity Surveyor", normalized["action_plan"]["today"]["action"])
-        self.assertNotIn("плитк", normalized["action_plan"]["today"]["action"].lower())
-        self.assertEqual(
-            normalized.get("first_step_buttons"),
-            [
-                "Сделал",
-                "Слишком сложно",
-                "Сделать проще",
-                "Помоги составить таблицу",
-                "Хочу примеры запросов",
-            ],
-        )
 
     def test_construction_overwhelm_step_uses_estimator_examples(self) -> None:
         story_analysis = {
@@ -990,8 +976,8 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         today_action = normalized["action_plan"]["today"]["action"].lower()
-        self.assertIn("assistant cost estimator", today_action)
-        self.assertIn("junior quantity surveyor", today_action)
+        self.assertIn("смет", today_action)
+        self.assertIn("проектн", today_action)
         self.assertNotIn("плитк", today_action)
 
     def test_facts_only_removes_unconfirmed_admin_claims(self) -> None:
@@ -1034,7 +1020,7 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("срок" in str(item).lower() for item in normalized["what_not_reset"]))
         self.assertIn("facts_only", normalized)
 
-    def test_align_report_enforces_segment_routes(self) -> None:
+    def test_align_report_does_not_inject_segment_routes(self) -> None:
         story_analysis = {
             "current_identity": "Работал водителем и на складе",
             "experience_snapshot": ["Логистика", "Склад"],
@@ -1069,13 +1055,8 @@ class CareerGpsRouteSelectionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         decision = normalized.get("career_decision", {})
-        self.assertIn("диспетчер", str(decision.get("recommended_main_path", "")).lower())
-        self.assertIn("сегмент", str(decision.get("decision_summary", "")).lower())
-        solutions = normalized.get("real_solutions", [])
-        self.assertGreaterEqual(len(solutions), 3)
-        self.assertIn("быстрый доход", str(solutions[0].get("recommendation_level", "")).lower())
-        self.assertIn("основной маршрут", str(solutions[1].get("recommendation_level", "")).lower())
-        self.assertIn("долгосрочная", str(solutions[2].get("recommendation_level", "")).lower())
+        self.assertEqual(decision.get("recommended_main_path"), "")
+        self.assertEqual(normalized.get("real_solutions"), [])
 
     def test_final_report_chunks_render(self) -> None:
         report = {

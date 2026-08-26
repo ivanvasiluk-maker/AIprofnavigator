@@ -60,6 +60,20 @@ def profile_10_assessment_payload() -> dict:
             "entry_level": "Senior в Product Marketing; отдельно оценить уровень в Product Management",
             "disconfirming_conditions": ["роль требует неподтверждённого владения продуктовой разработкой"],
             "market_test": "Сравнить требования десяти вакансий и получить обратную связь по одному кейсу.",
+            "matching_functions": ["исследование рынка", "позиционирование"],
+            "why_better_than_excluded": "Лучше сохраняет подтверждённые функции и требует меньше неподтверждённых компетенций.",
+        }
+    def candidate(title: str, functions: list[str], industry: str, evidence_ids: list[str]) -> dict:
+        return {
+            "title": title,
+            "matching_functions": functions,
+            "industry_fit": industry,
+            "country_fit": "Нужно проверить на рынке Литвы",
+            "language_fit": "Английский B2 подтверждён",
+            "legal_access_fit": "Требует проверки разрешения на работу",
+            "market_fit": "Требует проверки актуальных вакансий",
+            "entry_level_fit": "Уровень определяется по совпадению функций",
+            "evidence_ids": evidence_ids,
         }
     return {
         "metadata": {"generator_version": CAREER_PIPELINE_VERSION},
@@ -77,17 +91,30 @@ def profile_10_assessment_payload() -> dict:
             "seniority_notes": "Уровень преимущественно сохраняется в Product Marketing.",
             "professional_capital": ["восемь лет опыта", "подтверждённые запуски"],
             "transferable_functions": ["исследования", "позиционирование", "координация"],
+            "industry_experience": ["IT", "B2B-продукты", "образовательный контент"],
         },
         "evidence": evidence,
         "user_choice": {"desired_change": "более осмысленная продуктовая роль", "preferred_directions": ["продукт", "образование"], "functions_to_preserve": ["исследования", "стратегию"], "functions_to_avoid": ["чистое продвижение"], "priorities": ["сохранить доход", "не обнулять опыт"], "acceptable_income_drop": "требует уточнения"},
         "constraints": [{"title": "Допустимое снижение дохода не определено", "impact": "Ограничивает выбор уровня входа.", "evidence_ids": ["e1"], "confirmed": True}],
         "routes": {
-            "primary_routes": [route("pm-marketing", "Product Marketing Manager", "primary", ["e1", "e2"]), route("discovery", "Product Discovery / Customer Insights", "primary", ["e1", "e2"])],
-            "transition_routes": [route("product-manager", "Product Manager через продуктовые кейсы", "transition", ["e2", "e3"]), route("edtech", "EdTech Product или Program Manager", "transition", ["e2", "e4"])],
-            "quick_income_routes": [route("consulting", "Маркетинговый или продуктовый консалтинг", "quick_income", ["e1", "e2"])],
+            "candidate_routes": [
+                candidate("Product Marketing Manager", ["исследование рынка", "позиционирование"], "IT и B2B", ["e1", "e2"]),
+                candidate("Product Discovery / Customer Insights", ["интервью", "исследование клиентов"], "Продуктовые IT-команды", ["e2", "e5"]),
+                candidate("Product Manager через продуктовые кейсы", ["запуски", "координация"], "B2B-продукты", ["e2", "e6"]),
+                candidate("EdTech Product или Program Manager", ["образовательный контент", "вебинары"], "EdTech", ["e8", "e9"]),
+                candidate("Customer Research Lead", ["интервью", "исследование рынка"], "Исследовательские команды", ["e2", "e5"]),
+                candidate("Маркетинговый консультант", ["стратегия", "позиционирование"], "B2B-услуги", ["e4", "e7"]),
+            ],
+            "excluded_routes": [
+                {"title": "Маркетинговый консультант", "reason": "Спрос не подтверждён", "blocking_factors": ["нет проверки спроса"], "reconsider_if": ["появятся два платных запроса"]},
+                {"title": "Customer Research Lead", "reason": "Масштаб leadership требует проверки", "blocking_factors": ["research leadership не подтверждён"], "reconsider_if": ["подтвердится руководство исследованиями"]},
+            ],
+            "primary_routes": [route("pm-marketing", "Product Marketing Manager", "primary", ["e1", "e2"])],
+            "transition_routes": [route("discovery", "Product Discovery / Customer Insights", "transition", ["e2", "e5"]), route("product-manager", "Product Manager через продуктовые кейсы", "transition", ["e2", "e6"]), route("edtech", "EdTech Product или Program Manager", "transition", ["e8", "e9"])],
+            "quick_income_routes": [],
             "emergency_routes": [],
             "recommended_route_id": "pm-marketing",
-            "alternative_route_ids": ["discovery", "edtech"],
+            "alternative_route_ids": ["discovery", "product-manager", "edtech"],
         },
         "questions": {"answered_critical_questions": ["Какие функции сохранить"], "unanswered_critical_questions": ["Какое снижение дохода допустимо?", "Локальный или международный рынок?"], "optional_questions": []},
         "conclusions": {
@@ -102,7 +129,7 @@ def profile_10_assessment_payload() -> dict:
             {"step_id": "market", "title": "Проверка рынка", "purpose": "Сравнить три смежных направления.", "action": "Найдите пять вакансий Product Marketing Manager и пять вакансий Product Discovery / Customer Insights.", "expected_result": "Таблица требований по двум направлениям.", "duration_minutes": 45, "related_route_id": "pm-marketing", "type": "market_research"},
             {"step_id": "case", "title": "Портфолио", "purpose": "Показать продуктовую часть опыта.", "action": "Опишите один запуск: проблема, исследование, позиционирование, действия и результат.", "expected_result": "Один проверяемый продуктово-маркетинговый кейс.", "duration_minutes": 60, "related_route_id": "pm-marketing", "type": "portfolio"},
             {"step_id": "contact", "title": "Профессиональный контакт", "purpose": "Проверить кейс у специалиста.", "action": "Отправьте кейс одному Product Marketing Manager и попросите назвать один сильный и один слабый элемент.", "expected_result": "Одна предметная обратная связь.", "duration_minutes": 20, "related_route_id": "pm-marketing", "type": "networking"},
-            {"step_id": "consulting-test", "title": "Проверка консультирования", "purpose": "Проверить спрос без увольнения.", "action": "Сформулируйте одну услугу для маршрута Маркетинговый или продуктовый консалтинг и предложите её одному потенциальному клиенту.", "expected_result": "Один подтверждающий или опровергающий сигнал спроса.", "duration_minutes": 30, "related_route_id": "consulting", "type": "clarification"},
+            {"step_id": "route-check", "title": "Проверка альтернативы", "purpose": "Проверить границы продуктовой ответственности.", "action": "Уточните у нанимающего менеджера, какие решения самостоятельно принимает Product Manager через продуктовые кейсы.", "expected_result": "Один подтверждающий или опровергающий критерий уровня входа.", "duration_minutes": 30, "related_route_id": "product-manager", "type": "clarification"},
         ],
     }
 
@@ -124,6 +151,44 @@ class CareerAssessmentTest(unittest.TestCase):
     def test_profile_10_is_valid(self) -> None:
         result = validate_career_assessment(self.assessment, snapshot_country_code="LT", snapshot_currency="EUR")
         self.assertTrue(result.is_valid, result.errors)
+
+    def test_profession_outside_examples_is_allowed_when_evidence_based(self) -> None:
+        payload = profile_10_assessment_payload()
+        custom_title = "Museum Collections Coordinator"
+        payload["routes"]["candidate_routes"][0]["title"] = custom_title
+        payload["routes"]["candidate_routes"][0]["matching_functions"] = ["cataloguing", "collection records"]
+        payload["routes"]["primary_routes"][0]["title"] = custom_title
+        payload["routes"]["primary_routes"][0]["matching_functions"] = ["cataloguing", "collection records"]
+        payload["routes"]["primary_routes"][0]["market_test"] = f"Сравнить десять вакансий {custom_title}."
+        for step in payload["first_steps"]:
+            if step["related_route_id"] == "pm-marketing" and step["type"] == "market_research":
+                step["action"] = f"Найдите десять вакансий {custom_title} и сравните требования."
+
+        assessment = career_assessment_from_dict(payload)
+        validation = validate_career_assessment(assessment, snapshot_country_code="LT", snapshot_currency="EUR")
+
+        self.assertTrue(validation.valid, validation.errors)
+        self.assertEqual(assessment.routes.by_id(assessment.routes.recommended_route_id).title, custom_title)
+
+    def test_full_assessment_without_broad_candidate_list_is_rejected(self) -> None:
+        payload = profile_10_assessment_payload()
+        payload["routes"]["candidate_routes"] = payload["routes"]["candidate_routes"][:4]
+
+        validation = validate_career_assessment(career_assessment_from_dict(payload))
+
+        self.assertIn("MISSING_CANDIDATE_LONGLIST", {issue.code for issue in validation.errors})
+
+    def test_more_than_three_alternatives_is_rejected(self) -> None:
+        payload = profile_10_assessment_payload()
+        extra = copy.deepcopy(payload["routes"]["transition_routes"][0])
+        extra["route_id"] = "extra-route"
+        extra["title"] = "Customer Research Lead"
+        payload["routes"]["transition_routes"].append(extra)
+        payload["routes"]["alternative_route_ids"].append("extra-route")
+
+        validation = validate_career_assessment(career_assessment_from_dict(payload))
+
+        self.assertIn("INVALID_SHORTLIST", {issue.code for issue in validation.errors})
 
     def test_validation_returns_structured_codes_and_field_paths(self) -> None:
         payload = profile_10_assessment_payload()
@@ -470,11 +535,14 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._run_json.await_count, 7)
         self.assertEqual(assessment.metadata["recovered_by"], "deterministic_fallback")
         # Recovery must not activate a profile-specific golden fixture.
+        self.assertEqual(assessment.status, "preliminary")
         self.assertGreaterEqual(assessment.metadata["resume_important_facts_count"], 8)
         self.assertEqual(assessment.routes.recommended_route_id, "source-route-1")
         public_payload = assessment.to_dict()
         public_payload.pop("metadata", None)
         self.assertNotIn("Product Marketing Manager", str(public_payload))
+        self.assertNotIn("Product Discovery", str(public_payload))
+        self.assertNotIn("EdTech", str(public_payload))
 
     async def test_existing_assessment_is_reused_without_ai_call(self) -> None:
         class State:

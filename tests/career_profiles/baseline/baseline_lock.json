@@ -4,7 +4,7 @@
   "application_version": "baseline_worktree_1d23e2c_dirty",
   "git_commit": "1d23e2c6020a6f6e1e87a736c92b0d58bfd4248e",
   "git_worktree_dirty": true,
-  "prompt_version": "prompts.py@sha256:C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
+  "prompt_version": "prompts.py@sha256:3DB4FB670279EF2FCACEBBCEC0F7FE4050353A51AD27B920029AD287B092C586",
   "model": "gpt-4o-mini",
   "model_parameters": {
     "temperature": 0.2,
@@ -38,7 +38,8 @@
     "ASSESSMENT_CASE_ISOLATION_2026_08_19",
     "INTERVIEW_RAPID_TAP_SERIALIZATION_2026_08_19",
     "RUNTIME_PIPELINE_DIAGNOSTICS_AND_ROUTING_2026_08_19",
-    "P0 currency integrity: dynamic market keyboards and mismatch validation"
+    "P0 currency integrity: dynamic market keyboards and mismatch validation",
+    "OPEN_PROFESSION_LONGLIST_2026_08_26"
   ],
   "patches_not_verified_from_code": [
     "NXT_PATCH_21",
@@ -156,6 +157,13 @@
       "services/career_assessment.py",
       "tests/test_assessment_case_isolation.py"
     ],
+    "OPEN_PROFESSION_LONGLIST_2026_08_26": [
+      "prompts.py",
+      "openai_client.py",
+      "services/career_assessment.py",
+      "tests/test_career_assessment.py",
+      "tests/test_render_ru_be.py"
+    ],
     "INTERVIEW_RAPID_TAP_SERIALIZATION_2026_08_19": [
       "handlers/career.py",
       "localization.py",
@@ -173,9 +181,10 @@
   },
   "production_logic_changes_allowed": false,
   "locked_files": {
-    "prompts.py": "C902F822179E5BFA0F96E3F1ACE0896659F6628B173862FA8FC48C8330D9A6A1",
-    "openai_client.py": "515919FE9F70DDD0C0A915A8D3686A92A250B4C2564ABEE70298C91F8C03839E",
+    "prompts.py": "3DB4FB670279EF2FCACEBBCEC0F7FE4050353A51AD27B920029AD287B092C586",
+    "openai_client.py": "87F584A5926E282BD5E273A1F65163F47088774DB25CA3FA885D7CFCF9D17506",
     "handlers/career.py": "BEE6FE57BC1CBC530FBEF2E286652A10EE7020DE1EBD14249C04B7285919D40F",
+    "services/career_assessment.py": "B490E22A2EB15B76067A2B18F447497D96E842E590230A0164A65D1A7CAC7FFA",
     "states.py": "ED6CD096545DB8F5B18242B39BFFC73780B5FEB9BBD8F8A79D1EA67453FD8B58",
     "services/evidence_profile.py": "CA9D9470B31594417DB7C0F98566BBDC9736F5C502332D669097E66C8174A311",
     "services/interview_policy.py": "BAC7C75FD999329A6AD6F83E55C7A632B6773103D9A951FCD7A4F3C427679E10",

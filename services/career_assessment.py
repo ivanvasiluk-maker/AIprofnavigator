@@ -53,9 +53,9 @@ def is_valid_occupation_title(title: str) -> bool:
 # Backwards-compatible public name used by existing integrity checks.
 is_market_role_title = is_valid_occupation_title
 
-CAREER_PIPELINE_VERSION = "career-assessment-v2"
-CAREER_TELEGRAM_RENDERER_VERSION = "career-assessment-telegram-v1"
-CAREER_HTML_RENDERER_VERSION = "career-assessment-html-v1"
+CAREER_PIPELINE_VERSION = "career-assessment-v3"
+CAREER_TELEGRAM_RENDERER_VERSION = "career-assessment-telegram-v2"
+CAREER_HTML_RENDERER_VERSION = "career-assessment-html-v2"
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,29 @@ _ROUTE_SCHEMA = _object_schema(
         "entry_path": {"type": "string", "enum": ["direct_entry", "adjacent_transition", "bridge_project", "retraining_required", "not_recommended_now"]},
         "evidence_claims": {"type": "array", "items": _object_schema({"claim": _STRING, "evidence_fact_ids": _STRINGS, "confidence": _STRING, "uncertainties": _STRINGS})},
         "market_notes": _STRINGS,
+        "matching_functions": _STRINGS,
+        "why_better_than_excluded": _STRING,
+    }
+)
+_CANDIDATE_ROUTE_SCHEMA = _object_schema(
+    {
+        "title": _STRING,
+        "matching_functions": _STRINGS,
+        "industry_fit": _STRING,
+        "country_fit": _STRING,
+        "language_fit": _STRING,
+        "legal_access_fit": _STRING,
+        "market_fit": _STRING,
+        "entry_level_fit": _STRING,
+        "evidence_ids": _STRINGS,
+    }
+)
+_EXCLUDED_ROUTE_SCHEMA = _object_schema(
+    {
+        "title": _STRING,
+        "reason": _STRING,
+        "blocking_factors": _STRINGS,
+        "reconsider_if": _STRINGS,
     }
 )
 
@@ -151,6 +174,7 @@ CAREER_ASSESSMENT_SCHEMA = _object_schema(
                 "seniority_notes": _STRING,
                 "professional_capital": _STRINGS,
                 "transferable_functions": _STRINGS,
+                "industry_experience": _STRINGS,
             }
         ),
         "evidence": {
@@ -183,6 +207,8 @@ CAREER_ASSESSMENT_SCHEMA = _object_schema(
         },
         "routes": _object_schema(
             {
+                "candidate_routes": {"type": "array", "items": _CANDIDATE_ROUTE_SCHEMA},
+                "excluded_routes": {"type": "array", "items": _EXCLUDED_ROUTE_SCHEMA},
                 "primary_routes": {"type": "array", "items": _ROUTE_SCHEMA},
                 "transition_routes": {"type": "array", "items": _ROUTE_SCHEMA},
                 "quick_income_routes": {"type": "array", "items": _ROUTE_SCHEMA},
@@ -312,6 +338,7 @@ class ProfessionalIdentity:
     seniority_notes: str
     professional_capital: list[str]
     transferable_functions: list[str]
+    industry_experience: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -361,11 +388,36 @@ class CareerRoute:
     evidence_claims: list[dict[str, Any]] = field(default_factory=list)
     market_notes: list[str] = field(default_factory=list)
     ranking: dict[str, str] = field(default_factory=dict)
+    matching_functions: list[str] = field(default_factory=list)
+    why_better_than_excluded: str = ""
+
+
+@dataclass(slots=True)
+class CandidateRoute:
+    title: str
+    matching_functions: list[str]
+    industry_fit: str
+    country_fit: str
+    language_fit: str
+    legal_access_fit: str
+    market_fit: str
+    entry_level_fit: str
+    evidence_ids: list[str]
+
+
+@dataclass(slots=True)
+class ExcludedRoute:
+    title: str
+    reason: str
+    blocking_factors: list[str]
+    reconsider_if: list[str]
 
 
 @dataclass(slots=True)
 class CareerRoutes:
     primary_routes: list[CareerRoute]
+    candidate_routes: list[CandidateRoute] = field(default_factory=list)
+    excluded_routes: list[ExcludedRoute] = field(default_factory=list)
     transition_routes: list[CareerRoute] = field(default_factory=list)
     quick_income_routes: list[CareerRoute] = field(default_factory=list)
     emergency_routes: list[CareerRoute] = field(default_factory=list)
@@ -640,6 +692,8 @@ def _route(item: dict[str, Any], category: RouteCategory) -> CareerRoute:
         evidence_claims=claims,
         market_notes=_texts(item.get("market_notes")),
         ranking={str(key): str(value) for key, value in (item.get("ranking") or {}).items()},
+        matching_functions=_texts(item.get("matching_functions")) or _texts(item.get("transferable_functions")) or _texts(item.get("preserves")),
+        why_better_than_excluded=str(item.get("why_better_than_excluded") or "").strip(),
     )
 
 
@@ -688,6 +742,7 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
             seniority_notes=str(identity.get("seniority_notes") or "").strip(),
             professional_capital=_texts(identity.get("professional_capital")),
             transferable_functions=_texts(identity.get("transferable_functions")),
+            industry_experience=_texts(identity.get("industry_experience")),
         ),
         evidence=[
             EvidenceItem(
@@ -719,6 +774,31 @@ def career_assessment_from_dict(payload: dict[str, Any]) -> CareerAssessment:
             if isinstance(item, dict)
         ],
         routes=CareerRoutes(
+            candidate_routes=[
+                CandidateRoute(
+                    title=str(item.get("title") or "").strip(),
+                    matching_functions=_texts(item.get("matching_functions")),
+                    industry_fit=str(item.get("industry_fit") or "").strip(),
+                    country_fit=str(item.get("country_fit") or "").strip(),
+                    language_fit=str(item.get("language_fit") or "").strip(),
+                    legal_access_fit=str(item.get("legal_access_fit") or "").strip(),
+                    market_fit=str(item.get("market_fit") or "").strip(),
+                    entry_level_fit=str(item.get("entry_level_fit") or "").strip(),
+                    evidence_ids=_texts(item.get("evidence_ids")),
+                )
+                for item in routes.get("candidate_routes") or []
+                if isinstance(item, dict)
+            ],
+            excluded_routes=[
+                ExcludedRoute(
+                    title=str(item.get("title") or "").strip(),
+                    reason=str(item.get("reason") or "").strip(),
+                    blocking_factors=_texts(item.get("blocking_factors")),
+                    reconsider_if=_texts(item.get("reconsider_if")),
+                )
+                for item in routes.get("excluded_routes") or []
+                if isinstance(item, dict)
+            ],
             primary_routes=[_route(item, "primary") for item in routes.get("primary_routes") or [] if isinstance(item, dict)],
             transition_routes=[_route(item, "transition") for item in routes.get("transition_routes") or [] if isinstance(item, dict)],
             quick_income_routes=[_route(item, "quick_income") for item in routes.get("quick_income_routes") or [] if isinstance(item, dict)],
@@ -902,11 +982,7 @@ def build_preliminary_assessment(
         if is_valid_occupation_title(title)
     ][:1]
     if not core:
-        return build_deterministic_assessment(
-            profile_snapshot, story_analysis, {}, assessment_id=assessment_id,
-            session_id=session_id, profile_version=profile_version,
-            fallback_reason="preliminary_profile_requires_deterministic_routing",
-        )
+        core = ["Маршрут на основе подтверждённых функций"]
     facts = _texts(story_analysis.get("facts_extracted"))
     story_text = str(profile_snapshot.get("story_text") or "").strip()
     career_goal = str(profile_snapshot.get("career_goal") or "").strip()
@@ -2146,6 +2222,16 @@ def validate_career_assessment(
         )
     if not assessment.routes.primary_routes:
         add_error("GENERIC_ROUTE_TITLE", "routes.primary_routes", "primary_routes is empty", [])
+    if len(assessment.routes.primary_routes) != 1:
+        add_error("INVALID_SHORTLIST", "routes.primary_routes", "assessment must select exactly one primary route", len(assessment.routes.primary_routes))
+    if len(assessment.routes.alternative_route_ids) > 3:
+        add_error("INVALID_SHORTLIST", "routes.alternative_route_ids", "assessment may select at most three alternatives", assessment.routes.alternative_route_ids)
+    if len(assessment.routes.all_routes()) > 4:
+        add_error("INVALID_SHORTLIST", "routes", "shortlist may contain one primary route and at most three alternatives", len(assessment.routes.all_routes()))
+    if assessment.status == "full" and len(assessment.routes.candidate_routes) < 5:
+        add_error("MISSING_CANDIDATE_LONGLIST", "routes.candidate_routes", "full assessment must compare at least five evidence-based professions", len(assessment.routes.candidate_routes))
+    if assessment.status == "full" and not assessment.routes.excluded_routes:
+        add_error("MISSING_FILTERED_ROUTES", "routes.excluded_routes", "full assessment must explain which candidates were filtered out", [])
     recommended = assessment.routes.by_id(assessment.routes.recommended_route_id)
     if recommended is None:
         add_error("GENERIC_ROUTE_TITLE", "routes.recommended_route_id", "recommended_route_id does not exist", assessment.routes.recommended_route_id)
@@ -2168,6 +2254,36 @@ def validate_career_assessment(
 
     route_ids = {route.route_id for route in assessment.routes.all_routes() if route.route_id}
     evidence_ids = {item.evidence_id for item in assessment.evidence if item.evidence_id}
+    non_primary_ids = {route.route_id for route in assessment.routes.all_routes() if route.category != "primary"}
+    if set(assessment.routes.alternative_route_ids) != non_primary_ids:
+        add_error("INVALID_SHORTLIST", "routes.alternative_route_ids", "alternative ids must identify every non-primary shortlisted route", assessment.routes.alternative_route_ids)
+    candidate_titles = {candidate.title.casefold() for candidate in assessment.routes.candidate_routes if candidate.title}
+    shortlisted_titles = {route.title.casefold() for route in assessment.routes.all_routes() if route.title}
+    for index, candidate in enumerate(assessment.routes.candidate_routes):
+        candidate_path = f"routes.candidate_routes[{index}]"
+        filter_values = (
+            candidate.industry_fit,
+            candidate.country_fit,
+            candidate.language_fit,
+            candidate.legal_access_fit,
+            candidate.market_fit,
+            candidate.entry_level_fit,
+        )
+        if not candidate.title or not candidate.matching_functions or not all(filter_values):
+            add_error("INCOMPLETE_CANDIDATE_FILTER", candidate_path, "candidate must include functions and every market-access filter", asdict(candidate))
+        if len(set(candidate.evidence_ids)) < 2 or set(candidate.evidence_ids) - evidence_ids:
+            add_error("MISSING_ROUTE_EVIDENCE", f"{candidate_path}.evidence_ids", "candidate must reference at least two known evidence items", candidate.evidence_ids)
+    for index, excluded in enumerate(assessment.routes.excluded_routes):
+        excluded_path = f"routes.excluded_routes[{index}]"
+        if excluded.title.casefold() not in candidate_titles:
+            add_error("EXCLUDED_ROUTE_NOT_IN_LONGLIST", f"{excluded_path}.title", "excluded route must come from candidate longlist", excluded.title)
+        if not excluded.reason or not excluded.blocking_factors or not excluded.reconsider_if:
+            add_error("INCOMPLETE_ROUTE_EXCLUSION", excluded_path, "exclusion needs a reason, blockers and reconsideration conditions", asdict(excluded))
+        if excluded.title.casefold() in shortlisted_titles:
+            add_error("ROUTE_BOTH_SELECTED_AND_EXCLUDED", excluded_path, "route cannot be shortlisted and excluded", excluded.title)
+    missing_from_longlist = shortlisted_titles - candidate_titles
+    if assessment.status == "full" and missing_from_longlist:
+        add_error("SELECTED_ROUTE_NOT_IN_LONGLIST", "routes", "every shortlisted route must come from candidate longlist", sorted(missing_from_longlist))
     generic_route_titles = {
         "смежные роли",
         "возможный маршрут",
@@ -2197,6 +2313,8 @@ def validate_career_assessment(
             add_error("MISSING_ROUTE_EVIDENCE", f"{route_path}.evidence_ids", "route must reference at least two evidence items", route.evidence_ids)
         if not route.why_it_fits or not route.entry_level:
             add_error("UNSUPPORTED_RECOMMENDATION", route_path, "route lacks rationale or entry level", route.to_dict() if hasattr(route, "to_dict") else asdict(route))
+        if assessment.status == "full" and (not route.matching_functions or not route.why_better_than_excluded):
+            add_error("INCOMPLETE_ROUTE_COMPARISON", route_path, "selected route needs matching functions and comparative rationale", asdict(route))
         if not route.market_test:
             add_error("MISSING_ROUTE_TEST", f"{route_path}.market_test", "route lacks a market test", route.market_test)
         if not route.missing or not route.risks:
@@ -2559,10 +2677,14 @@ def render_route_comparison(assessment: CareerAssessment) -> str:
             "\n".join(
                 [
                     route.title,
+                    f"Совпавшие функции: {', '.join(route.matching_functions)}",
                     f"Почему подходит: {route.why_it_fits}",
+                    f"Почему сильнее отсеянных: {route.why_better_than_excluded}",
                     f"Уровень входа: {route.entry_level}",
                     f"Сохраняет: {', '.join(route.preserves)}",
+                    f"Не хватает: {', '.join(route.missing)}" if route.missing else "Не хватает: критичных пробелов не зафиксировано",
                     f"Риски: {', '.join(route.risks)}" if route.risks else "Риски: требуют рыночной проверки",
+                    f"Что опровергнет: {', '.join(route.disconfirming_conditions)}",
                     f"Проверка: {route.market_test}",
                 ]
             )
@@ -2602,7 +2724,9 @@ def _routes_html(title: str, routes: list[CareerRoute], evidence: dict[str, str]
         facts = [evidence[item] for item in route.evidence_ids if item in evidence]
         cards.append(
             f"<article><h3>{escape(route.title)}</h3>"
+            f"<p><strong>Совпавшие функции:</strong></p>{_list_html(route.matching_functions)}"
             f"<p><strong>Почему подходит:</strong> {escape(route.why_it_fits)}</p>"
+            f"<p><strong>Почему сильнее отсеянных:</strong> {escape(route.why_better_than_excluded)}</p>"
             f"<p><strong>Доказательства:</strong></p>{_list_html(facts)}"
             f"<p><strong>Что сохраняет:</strong></p>{_list_html(route.preserves)}"
             + (f"<p><strong>Чего не хватает:</strong></p>{_list_html(route.missing)}" if route.missing else "")
@@ -2639,6 +2763,18 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
     currency = assessment.context.preferred_currency or next((m.currency for m in (assessment.context.income_minimum, assessment.context.income_target) if m and m.currency), None) or "не определена"
     constraints = [f"{item.title}: {item.impact}" for item in assessment.constraints if item.confirmed]
     confidence_labels = {"low": "низкая", "medium": "средняя", "high": "высокая"}
+    candidate_html = "".join(
+        f"<li><strong>{escape(item.title)}</strong>: {escape(', '.join(item.matching_functions))}; "
+        f"отрасль — {escape(item.industry_fit)}; рынок — {escape(item.market_fit)}; "
+        f"уровень входа — {escape(item.entry_level_fit)}</li>"
+        for item in assessment.routes.candidate_routes
+    )
+    excluded_html = "".join(
+        f"<article><h3>{escape(item.title)}</h3><p>{escape(item.reason)}</p>"
+        f"<p><strong>Блокеры:</strong></p>{_list_html(item.blocking_factors)}"
+        f"<p><strong>Пересмотреть, если:</strong></p>{_list_html(item.reconsider_if)}</article>"
+        for item in assessment.routes.excluded_routes
+    )
     route_rows = "".join(
         f"<tr><td data-label=\"Маршрут\">{escape(route.title)}</td>"
         f"<td data-label=\"Соответствие опыту\">{escape('высокое' if len(route.evidence_ids) >= 3 else 'среднее')}</td>"
@@ -2723,12 +2859,12 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
 <style>:root{{--ink:#16231d;--muted:#607069;--paper:#fff;--wash:#f2f6f3;--accent:#176b4d;--line:#dbe5df}}*{{box-sizing:border-box}}body{{font-family:Inter,Arial,sans-serif;max-width:980px;margin:0 auto;padding:32px 24px 64px;color:var(--ink);line-height:1.6;background:var(--wash)}}header{{padding:42px;border-radius:24px;background:linear-gradient(135deg,#123f31,#21775a);color:#fff;box-shadow:0 18px 50px #123f3126;margin-bottom:22px}}header p{{max-width:680px;margin:8px 0 0;color:#dcece5}}h1{{font-size:2.5rem;line-height:1.1;margin:0}}h2{{font-size:1.45rem;margin-top:0}}h3{{line-height:1.3}}section{{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:28px;margin:16px 0;box-shadow:0 7px 24px #243a2f0a}}article{{margin:16px 0;padding:18px;border-left:4px solid #5aa685;background:#f8fbf9;border-radius:0 12px 12px 0}}strong{{color:#204e3d}}li{{margin:5px 0}}.meta{{color:var(--muted)}}table{{display:block;width:100%;max-width:100%;overflow-x:auto;border-collapse:collapse;border-radius:10px}}th{{background:#eaf3ee;text-align:left}}th,td{{padding:10px;border:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}}@media(max-width:600px){{body{{padding:12px 10px 40px}}header{{padding:28px 22px;border-radius:18px}}h1{{font-size:1.85rem}}section{{padding:20px 16px;border-radius:14px}}article{{padding:14px}}table,thead,tbody,tr,td{{display:block;width:100%}}thead{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}tr{{margin:0 0 14px;border:1px solid var(--line);border-radius:10px;overflow:hidden}}td{{display:grid;grid-template-columns:minmax(110px,38%) 1fr;gap:10px;border:0;border-bottom:1px solid var(--line)}}td:last-child{{border-bottom:0}}td::before{{content:attr(data-label);font-weight:700;color:var(--accent)}}}}</style></head><body>
 <header><h1>Карьерное заключение</h1><p>Персональная стратегия на основе подтверждённых фактов, ограничений и проверяемых рыночных сигналов.</p></header>
 <section><h2>1. Короткое человеческое резюме</h2><p>{escape(assessment.identity.core_description)}</p><p>{escape(assessment.conclusions.main_conclusion)}</p></section>
-<section><h2>2. Профессиональная идентичность</h2>{_list_html(assessment.identity.professional_core)}<p><strong>Подтверждённый уровень:</strong> {escape(assessment.identity.seniority_current)}</p><p>{escape(assessment.identity.seniority_notes)}</p><h3>Капитал, который важно сохранить</h3>{_list_html(assessment.identity.professional_capital)}</section>
+<section><h2>2. Профессиональная идентичность</h2>{_list_html(assessment.identity.professional_core)}<p><strong>Подтверждённый уровень:</strong> {escape(assessment.identity.seniority_current)}</p><p>{escape(assessment.identity.seniority_notes)}</p><h3>Переносимые функции</h3>{_list_html(assessment.identity.transferable_functions)}<h3>Отраслевой опыт</h3>{_list_html(assessment.identity.industry_experience)}<h3>Капитал, который важно сохранить</h3>{_list_html(assessment.identity.professional_capital)}</section>
 <section><h2>3. Что мы услышали</h2>{_list_html(heard or known[:5])}</section>
 <section><h2>4. Контекст страны, языка и финансов</h2><p><strong>Страна проживания:</strong> {escape(residence)}</p><p><strong>Целевой рынок:</strong> {escape(', '.join(targets) or residence)}</p><p><strong>Валюта:</strong> {escape(currency)}</p><p><strong>Языки работы:</strong> {escape(language_text)}</p>{authorization_html}{work_format_html}{market_section}</section>
 {_routes_html('5. Рекомендуемый маршрут', [recommended] if recommended else [], evidence)}
 {_routes_html('6. Альтернативные маршруты', [route for route in assessment.routes.all_routes() if route and route.route_id in assessment.routes.alternative_route_ids][:3], evidence)}
-<section><h2>7. Сравнение маршрутов</h2><table><thead><tr><th>Маршрут</th><th>Соответствие опыту</th><th>Сохранение дохода</th><th>Сохранение статуса</th><th>Скорость</th><th>Дообучение</th><th>Доступность на рынке</th><th>Психологическая устойчивость</th><th>Общий риск</th></tr></thead><tbody>{route_rows}</tbody></table></section>
+<section><h2>7. От longlist к выбору</h2><h3>Рассмотренные профессии</h3><ul>{candidate_html}</ul><h3>Отсеянные сейчас</h3>{excluded_html or '<p>Отсев не потребовался для предварительного заключения.</p>'}<h3>Сравнение shortlist</h3><table><thead><tr><th>Маршрут</th><th>Соответствие опыту</th><th>Сохранение дохода</th><th>Сохранение статуса</th><th>Скорость</th><th>Дообучение</th><th>Доступность на рынке</th><th>Психологическая устойчивость</th><th>Общий риск</th></tr></thead><tbody>{route_rows}</tbody></table></section>
 <section><h2>8. Условия, при которых переход будет устойчивым</h2>{_list_html(constraints or ['Проверять переход без увольнения и крупных расходов.', 'Не трактовать неизвестные семейные, медицинские или миграционные обстоятельства как психологические факты.'])}{f'<h3>Психологические и социальные факторы</h3>{psychology_html}' if psychology_html else ''}</section>
 <section><h2>9. Пробелы и неопределённость</h2><h3>Что известно</h3>{_list_html(known)}<h3>Что предполагается</h3>{_list_html(assumptions or ['Предположения отделены от подтверждённых фактов.'])}<h3>Чего пока не знаем</h3>{_list_html(unanswered or ['Критичных неизвестных не зафиксировано.'])}<h3>Что может изменить рекомендацию</h3>{_list_html(assessment.conclusions.what_may_change_conclusion)}</section>
 {salary_section}
