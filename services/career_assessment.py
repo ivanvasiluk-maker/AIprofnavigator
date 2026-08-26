@@ -2664,6 +2664,37 @@ def render_30_day_program(result: dict[str, Any]) -> str:
     ])
 
 
+def render_linkedin_product(result: dict[str, Any]) -> str:
+    primary = result.get("primary_route") or {}
+    title = str(primary.get("title") or "выбранный маршрут")
+    functions = primary.get("matching_functions") or primary.get("preserves") or result.get("professional_core") or []
+    capital = result.get("transferable_capital") or []
+    return "\n".join([
+        f"LinkedIn под маршрут «{title}»",
+        "",
+        f"Headline: {title} | {' · '.join(str(item) for item in functions[:3])}",
+        f"About: Я применяю опыт в {', '.join(str(item) for item in capital[:3]) or 'подтверждённых профессиональных функциях'} для задач маршрута «{title}». Мой фокус — измеримый результат, реалистичный уровень входа и проверяемая ценность для команды.",
+        "Experience: используйте извлечённые из CV кейсы в формате задача → ваше действие → результат → масштаб. Не добавляйте функции, которых нет в сохранённых фактах.",
+        f"Skills: {', '.join(str(item) for item in functions[:6])}.",
+    ])
+
+
+def render_interview_product(result: dict[str, Any]) -> str:
+    primary = result.get("primary_route") or {}
+    title = str(primary.get("title") or "выбранный маршрут")
+    functions = primary.get("matching_functions") or primary.get("preserves") or []
+    missing = primary.get("missing") or []
+    return "\n".join([
+        f"Подготовка к интервью: «{title}»",
+        "",
+        f"Ваш основной тезис: мой опыт переносится в эту роль через функции {', '.join(str(item) for item in functions[:4])}.",
+        "Подготовьте три ответа из уже извлечённых CV-фактов: самый сильный результат; сложное решение; пример взаимодействия с людьми или процессом.",
+        f"Честно обозначьте пробелы: {', '.join(str(item) for item in missing[:3]) or 'критичные пробелы пока не зафиксированы'}.",
+        f"Вопрос работодателю: какие три задачи занимают большую часть недели у {title} и по каким результатам оценивают первые 90 дней?",
+        "Стоп-сигнал: ежедневные задачи или уровень входа противоречат сохранённым ограничениям и условиям маршрута.",
+    ])
+
+
 def start_guide_response(result: dict[str, Any], branch: str | None = None, choice: str | None = None) -> str:
     """Return one focused guide artifact derived only from the saved result."""
     primary = result.get("primary_route") or {}

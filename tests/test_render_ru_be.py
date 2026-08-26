@@ -1864,7 +1864,7 @@ class CareerGpsVoiceFlowTests(unittest.IsolatedAsyncioTestCase):
                 await process_story_input(message, state, "Работала с документами и координацией, нужен стабильный доход.")
 
         self.assertEqual(state.current_state, CareerFlow.confirming_story.state)
-        self.assertEqual(state.data.get("promised_question_count"), 5)
+        self.assertEqual(state.data.get("promised_question_count"), 4)
         self.assertGreaterEqual(message.answer.await_count, 3)
 
     async def test_start_questions_module_moves_to_interview(self) -> None:

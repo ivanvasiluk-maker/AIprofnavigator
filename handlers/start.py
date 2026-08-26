@@ -25,6 +25,7 @@ from keyboards import (
     voice_pace_keyboard,
 )
 from localization import t
+from services.canonical_profile import MAX_DECISION_QUESTIONS
 from states import CareerFlow
 from utils.analytics import ensure_public_user_id, log_behavior_event
 from utils.persistence import create_session, load_recovery_bundle, save_profile_version
@@ -458,7 +459,7 @@ async def recover_without_fsm_state(message: Message, state: FSMContext) -> None
         language=language,
         lang=language,
         user_mode=user_mode,
-        max_questions=5 if user_mode == "fast" else (15 if user_mode == "deep_route" else 10),
+        max_questions=MAX_DECISION_QUESTIONS,
         support_level=profile_payload.get("support_level", "medium"),
         support_need=profile_payload.get("support_need", "medium"),
         pace=profile_payload.get("pace", "normal"),
@@ -466,20 +467,38 @@ async def recover_without_fsm_state(message: Message, state: FSMContext) -> None
         interaction_profile=profile_payload if isinstance(profile_payload, dict) else {},
     )
 
-    if recovered_state == CareerFlow.INTERVIEW and str(profile_row.get("source") or "") == "fsm_checkpoint":
+    if str(profile_row.get("source") or "") == "fsm_checkpoint":
         await state.update_data(
             story_text=profile_payload.get("story_text", ""),
             story_analysis=profile_payload.get("story_analysis", {}),
             qa_answers=profile_payload.get("qa_answers", []),
             qa_index=int(profile_payload.get("qa_index") or 0),
+            question_count=int(profile_payload.get("question_count") or 0),
             answers_text=profile_payload.get("answers_text", ""),
             evidence_profile=profile_payload.get("evidence_profile", {}),
             interview_context=profile_payload.get("interview_context", {}),
+            asked_question_signatures=profile_payload.get("asked_question_signatures", []),
+            active_canonical_question=profile_payload.get("active_canonical_question", {}),
+            question_state=profile_payload.get("question_state", {}),
+            route_context=profile_payload.get("route_context", {}),
+            route_context_index=int(profile_payload.get("route_context_index") or 0),
+            route_context_question_id=profile_payload.get("route_context_question_id", ""),
         )
-        await state.set_state(CareerFlow.INTERVIEW)
-        from handlers.career import process_answers_input
+        await state.set_state(recovered_state)
+        if recovered_state == CareerFlow.INTERVIEW:
+            from handlers.career import process_answers_input
 
-        await process_answers_input(message, state, text)
+            await process_answers_input(message, state, text)
+            return
+        if recovered_state == CareerFlow.ROUTE_CONTEXT:
+            from handlers.career import handle_route_context_input
+
+            await handle_route_context_input(message, state)
+            return
+        await message.answer(
+            "Восстановил ваш прогресс после перезапуска. Можно продолжить с того же места.",
+            reply_markup=input_method_keyboard(),
+        )
         return
 
     if _is_final_like_state(recovered_state_name) and isinstance(report_row.get("report"), dict) and report_row.get("report"):

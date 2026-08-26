@@ -4,6 +4,8 @@ from services.career_assessment import (
     render_30_day_program,
     render_assessment_html,
     render_personalized_ai_prompt,
+    render_interview_product,
+    render_linkedin_product,
     render_short_conclusion,
     start_guide_response,
     validated_assessment_result,
@@ -95,6 +97,8 @@ def test_followup_keyboard_uses_callbacks_not_assessment_generation():
     assert any(item.endswith(":program30") for item in callbacks)
     assert any(item.endswith(":prompt") for item in callbacks)
     assert any(item.endswith(":reconsider") for item in callbacks)
+    assert any(item.endswith(":linkedin") for item in callbacks)
+    assert any(item.endswith(":interview") for item in callbacks)
     assert not any(item.endswith(":guide") for item in callbacks)
     assert all("generate" not in item and "rebuild" not in item for item in callbacks)
 
@@ -104,3 +108,5 @@ def test_post_report_products_reuse_selected_route():
     title = view["primary_route"]["title"]
     assert title in render_30_day_program(view)
     assert title in render_personalized_ai_prompt(view)
+    assert title in render_linkedin_product(view)
+    assert title in render_interview_product(view)

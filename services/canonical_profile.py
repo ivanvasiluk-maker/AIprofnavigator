@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 import re
 from typing import Any, Literal
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -275,8 +276,19 @@ class CanonicalProfile(BaseModel):
 
 def _fact(assessment_id: str, fact_type: FactType, value: Any, message_id: str, quote: str,
           confidence: float = 1.0, created_at: str | None = None) -> CanonicalFact:
+    identity = json.dumps(
+        {
+            "assessment_id": assessment_id,
+            "fact_type": fact_type,
+            "value": value,
+            "message_id": message_id or "assessment_input",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
     return CanonicalFact(
-        fact_id=f"fact_{uuid4().hex}", assessment_id=assessment_id, fact_type=fact_type,
+        fact_id=f"fact_{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]}", assessment_id=assessment_id, fact_type=fact_type,
         normalized_value=value, source_message_id=message_id or "assessment_input",
         source_quote=quote, confidence=confidence,
         updated_at=created_at or datetime.now(timezone.utc).isoformat(),
@@ -485,6 +497,18 @@ def build_canonical_profile(data: dict[str, Any], *, assessment_id: str) -> Cano
                         assessment_id, "interest", {"kind": "target_role", "title": text},
                         f"{analysis_name}:{key}", text, .8,
                     ))
+
+    deduplicated: dict[tuple[str, str], CanonicalFact] = {}
+    for fact in profile.facts:
+        value_key = json.dumps(fact.normalized_value, ensure_ascii=False, sort_keys=True, default=str).casefold()
+        key = (fact.fact_type, value_key)
+        existing = deduplicated.get(key)
+        if existing is None or (fact.confidence, fact.source_message_id == "structured_answer") > (
+            existing.confidence,
+            existing.source_message_id == "structured_answer",
+        ):
+            deduplicated[key] = fact
+    profile.facts = list(deduplicated.values())
 
     # Never resolve conflicting confirmed facts silently. Explicitly linked
     # corrections supersede their predecessor; all other conflicts remain open.
@@ -751,6 +775,7 @@ QUESTION_PRIORITY = [
     ("constraint", "load_constraints", "Есть ли ограничения по здоровью, нагрузке или графику, которые нужно учитывать?", "Изменит допустимые ежедневные задачи и формат работы."),
     ("constraint", "learning_resources", "Сколько времени и денег вы реально готовы вложить в обучение в ближайшие шесть месяцев?", "Изменит реалистичный уровень входа и объём обучения."),
 ]
+MAX_DECISION_QUESTIONS = 4
 
 
 def _gap_is_resolved(profile: CanonicalProfile, fact_type: str, gap_id: str) -> bool:
@@ -774,7 +799,7 @@ def _gap_is_resolved(profile: CanonicalProfile, fact_type: str, gap_id: str) -> 
 
 def select_clarifying_question(profile: CanonicalProfile) -> ClarifyingQuestion | None:
     state = profile.question_state
-    if state.question_count >= 5:
+    if state.question_count >= MAX_DECISION_QUESTIONS:
         return None
     excluded = set(state.answered_gap_ids) | set(state.skipped_gap_ids)
     if profile.contradictions:

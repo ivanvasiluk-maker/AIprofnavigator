@@ -210,6 +210,7 @@ from services.evidence_profile import (
 from services.canonical_profile import (
     CanonicalProfile,
     ClarifyingQuestion,
+    MAX_DECISION_QUESTIONS,
     build_canonical_profile,
     record_question_answer,
     select_clarifying_question,
@@ -224,6 +225,8 @@ from services.career_assessment import (
     career_assessment_from_dict,
     render_30_day_program,
     render_first_step_instruction,
+    render_interview_product,
+    render_linkedin_product,
     render_personalized_ai_prompt,
     render_route_comparison,
     render_telegram_map,
@@ -2624,7 +2627,7 @@ async def _ask_next_interview_question(
     lang: str,
     user_mode: str,
 ) -> bool:
-    question_limit = 1 if user_mode in {"fast", "quick"} else 5
+    question_limit = 1 if user_mode in {"fast", "quick"} else MAX_DECISION_QUESTIONS
     question_count = int(data.get("question_count") or 0)
     if question_count >= question_limit:
         context.current_action = "show_preliminary_map"
@@ -2719,7 +2722,7 @@ async def _ask_next_interview_question(
 
 def _build_evidence_questions(profile: CareerEvidenceProfile, lang: str, user_mode: str) -> list[dict[str, object]]:
     mode_key = str(user_mode or "calm_steps")
-    soft_cap = {"fast": 1, "quick": 1, "calm_steps": 5, "deep_route": 5, "support": 5}.get(mode_key, 5)
+    soft_cap = {"fast": 1, "quick": 1}.get(mode_key, MAX_DECISION_QUESTIONS)
 
     questions: list[dict[str, object]] = []
     asked_gap_keys: set[str] = set()
@@ -7465,7 +7468,7 @@ async def _build_and_send_report(message: Message, state: FSMContext, lang: str)
     canonical = build_canonical_profile(data, assessment_id=assessment_id)
     clarification_count = canonical.question_state.question_count
     question = select_clarifying_question(canonical) if _report_draft_is_empty(report) else None
-    if question is not None and clarification_count < 5:
+    if question is not None and clarification_count < MAX_DECISION_QUESTIONS:
         await state.set_state(CareerFlow.REPORT_NEEDS_CLARIFICATION)
         await _track_event(message, state, "report_draft_empty_blocked", meta={})
         await state.update_data(
@@ -7956,6 +7959,10 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
         )
     elif callback.message and action == "resume":
         await callback.message.answer("Пришлите резюме. Я сам извлеку кейсы и результаты и адаптирую CV под сохранённый маршрут без повторного анализа профиля.")
+    elif callback.message and action == "linkedin":
+        await callback.message.answer(render_linkedin_product(result))
+    elif callback.message and action == "interview":
+        await callback.message.answer(render_interview_product(result))
     await callback.answer()
 
 

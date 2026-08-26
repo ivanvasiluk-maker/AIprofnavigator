@@ -94,10 +94,36 @@ def test_unknown_is_skipped_and_never_repeated():
     assert next_question.question_id != question.question_id
 
 
-def test_five_question_limit_never_blocks_conclusion():
+def test_four_question_limit_never_blocks_conclusion():
     profile = build_canonical_profile({}, assessment_id="a-5")
-    profile.question_state.question_count = 5
+    profile.question_state.question_count = 4
     assert select_clarifying_question(profile) is None
+
+
+def test_rebuilding_same_profile_keeps_stable_fact_ids():
+    data = {
+        "story_text": "Работаю в Вильнюсе, английский B2.",
+        "story_analysis": {"achievements": ["Сократил срок обработки на 20 процентов"]},
+    }
+
+    first = build_canonical_profile(data, assessment_id="stable-facts")
+    second = build_canonical_profile(data, assessment_id="stable-facts")
+
+    assert [fact.fact_id for fact in first.facts] == [fact.fact_id for fact in second.facts]
+
+
+def test_duplicate_fact_from_story_and_resume_is_kept_once():
+    achievement = "Сократил срок обработки на 20 процентов"
+    profile = build_canonical_profile(
+        {
+            "story_analysis": {"achievements": [achievement]},
+            "resume_analysis": {"achievements": [achievement]},
+        },
+        assessment_id="deduplicated-facts",
+    )
+
+    matches = [fact for fact in profile.facts if fact.fact_type == "achievement" and fact.normalized_value == achievement]
+    assert len(matches) == 1
 
 
 def test_work_condition_and_undesirable_task_are_not_market_roles():

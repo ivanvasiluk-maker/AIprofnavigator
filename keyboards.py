@@ -30,6 +30,8 @@ def assessment_actions_keyboard(assessment: CareerAssessment) -> InlineKeyboardM
         [InlineKeyboardButton(text="✨ Персональный AI-prompt", callback_data=f"assessment_action:{assessment.assessment_id}:prompt")],
         [InlineKeyboardButton(text="🔄 Пересмотреть варианты", callback_data=f"assessment_action:{assessment.assessment_id}:reconsider")],
         [InlineKeyboardButton(text="📝 CV под выбранный маршрут", callback_data=f"assessment_action:{assessment.assessment_id}:resume")],
+        [InlineKeyboardButton(text="🔗 LinkedIn под маршрут", callback_data=f"assessment_action:{assessment.assessment_id}:linkedin")],
+        [InlineKeyboardButton(text="🎤 Подготовка к интервью", callback_data=f"assessment_action:{assessment.assessment_id}:interview")],
     ]
     if assessment.psychology_factors:
         rows.insert(2, [InlineKeyboardButton(text="🧠 Психолог", callback_data=f"assessment_action:{assessment.assessment_id}:psychologist")])

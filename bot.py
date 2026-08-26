@@ -90,7 +90,7 @@ class SessionCheckpointMiddleware(BaseMiddleware):
                 user_mode=str(snapshot.get("user_mode") or ""),
                 language=str(snapshot.get("language") or "ru"),
             )
-            if state_name.endswith(":INTERVIEW"):
+            if state_name.endswith((":INTERVIEW", ":ROUTE_CONTEXT", ":REPORT_NEEDS_CLARIFICATION")):
                 save_profile_version(
                     public_user_id,
                     "fsm_checkpoint",
@@ -102,9 +102,16 @@ class SessionCheckpointMiddleware(BaseMiddleware):
                         "story_analysis": snapshot.get("story_analysis", {}),
                         "qa_answers": snapshot.get("qa_answers", []),
                         "qa_index": snapshot.get("qa_index", 0),
+                        "question_count": snapshot.get("question_count", 0),
                         "answers_text": snapshot.get("answers_text", ""),
                         "evidence_profile": snapshot.get("evidence_profile", {}),
                         "interview_context": snapshot.get("interview_context", {}),
+                        "asked_question_signatures": snapshot.get("asked_question_signatures", []),
+                        "active_canonical_question": snapshot.get("active_canonical_question", {}),
+                        "question_state": snapshot.get("question_state", {}),
+                        "route_context": snapshot.get("route_context", {}),
+                        "route_context_index": snapshot.get("route_context_index", 0),
+                        "route_context_question_id": snapshot.get("route_context_question_id", ""),
                         "interaction_profile": snapshot.get("interaction_profile", {}),
                     },
                     session_id=session_id,
