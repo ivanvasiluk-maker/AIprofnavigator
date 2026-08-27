@@ -904,12 +904,15 @@ def ensure_strategy_sections(assessment: CareerAssessment) -> None:
     if not assessment.income_forecasts:
         currency = assessment.context.preferred_currency
         empty = lambda: IncomeCase(None, currency, "month", None)
+        comparison = "Сравнение невозможно без сопоставимых актуальных данных gross/net."
+        if assessment.context.income_target:
+            comparison += f" Целевой доход пользователя сохранён: {assessment.context.income_target.amount:g} {assessment.context.income_target.currency or currency or ''} / {assessment.context.income_target.period or 'month'}."
         assessment.income_forecasts = [IncomeForecast(
             route_id=route.route_id, country=country, engagement_model="Требует проверки",
             conservative=empty(), base=empty(), optimistic=empty(), as_of_date=date,
             sources=sources, confidence="low", minimum_income_comparison=(
-                "Сравнение невозможно без сопоставимых актуальных данных gross/net."
-                if assessment.context.income_minimum else "Финансовый минимум не указан."
+                comparison
+                if assessment.context.income_minimum or assessment.context.income_target else "Финансовый минимум и целевой доход не указаны."
             ), self_employment_economics=None,
             verification_plan=[
                 "Собрать минимум 10 сопоставимых предложений с одной валютой, периодом и gross/net.",
@@ -924,14 +927,14 @@ def ensure_strategy_sections(assessment: CareerAssessment) -> None:
     ambitious_route = next((route for route in adjacent_routes if route.route_id != main_route.route_id), None) or main_route
     if not assessment.scenarios:
         assessment.scenarios = [
-            CareerScenario("safe", safe_route.route_id, "1–3 месяца", f"Сохранить текущую работу и искать «{safe_route.title}» с меньшим числом выездов.",
-                "Текущая работа как финансовый мост", safe_route.preserves, ["Снижается доля выездов и физической работы"],
+            CareerScenario("safe", safe_route.route_id, "1–3 месяца", f"Сохранить текущую работу и проверять «{safe_route.title}» без необратимого перехода.",
+                "Текущая работа как финансовый мост", safe_route.preserves, ["Появляется отдельная проверка задач, формата и дохода"],
                 "Проверять предложения не ниже финансового минимума.", "4–6 часов", "Минимальные",
                 [safe_route.market_test], ["10 проверенных вакансий", "доход не ниже минимума"],
                 "Получен подтверждённый сигнал спроса и приемлемых условий.", "Задачи повторяют ключевые нежелательные условия.",
                 "Сохранить текущую работу как источник дохода."),
             CareerScenario("main", main_route.route_id, "3–6 месяцев", f"Подготовить технические кейсы для входа в «{main_route.title}».",
-                "Переход только после предложения", main_route.preserves, ["Меньше физической работы, больше координации или удалённой поддержки"],
+                "Переход только после предложения", main_route.preserves, ["Больше проверяемой работы по выбранной функции и меньше случайного перебора вакансий"],
                 "Переход только после проверки финансового минимума.", "7–10 часов", "Точечное обучение после анализа требований",
                 ["Собрать один подтверждающий кейс", "Адаптировать CV под повторяющиеся требования", "Провести серию из 10 откликов"],
                 ["Кейс готов", "Есть интервью или предложение"], "Есть предложение с приемлемыми задачами и доходом.",
@@ -952,13 +955,13 @@ def ensure_strategy_sections(assessment: CareerAssessment) -> None:
         linked_ids = lambda start: list(dict.fromkeys((evidence_ids[start:start + 2] + evidence_ids[:2])))[:2]
         generated = [
             PersonalInsight(
-                f"Связка «{facts[0]}» и «{facts[1]}» показывает, что маршрут нужно выбирать по оплачиваемой функции, а не только по названию прошлой должности.",
+                f"Главный выбор сейчас не в названии должности, а в том, какая из подтверждённых функций сможет стать оплачиваемой ежедневной работой: «{facts[0]}» или «{facts[1]}».",
                 f"В каждой вакансии «{recommended.title}» отдельно отмечать ежедневные задачи и долю нежелательной нагрузки.", linked_ids(0)),
             PersonalInsight(
-                f"Одновременный учёт «{facts[1]}» и «{facts[2]}» означает, что формальное совпадение опыта ещё не гарантирует безопасный переход.",
+                f"Факты «{facts[1]}» и «{facts[2]}» дают переносимый капитал, но не снимают проверку входного уровня, формата и требований рынка.",
                 "До отклика проверить язык, право на работу, формат договора и финансовый минимум.", linked_ids(1)),
             PersonalInsight(
-                f"Связка «{facts[2]}» и «{facts[3]}» делает параллельный пилот информативнее резкого увольнения.",
+                f"Параллельный пилот информативнее резкого увольнения, потому что позволяет проверить спрос на «{facts[2]}» без потери опоры из факта «{facts[3]}».",
                 "Заранее задать измеримый критерий успеха и остановки для серии проверок.", linked_ids(2)),
         ]
         assessment.personal_insights = (assessment.personal_insights + generated)[:3]
@@ -1164,13 +1167,31 @@ def build_deterministic_assessment(
             if len(token) > 2
         }
 
-    def money_value(key: str) -> Money | None:
+    def extract_target_roles_from_answers() -> list[str]:
+        text = str(profile_snapshot.get("answers_text") or "")
+        match = re.search(r"(?:интересующие направления|варианты|направления)\??\s*[—:-]\s*([^\n.]+)", text, re.I)
+        if not match:
+            return []
+        raw = re.sub(r"\s+и\s+", ",", match.group(1), flags=re.I)
+        return [
+            item.strip(" .;:-")
+            for item in re.split(r"[,;/]", raw)
+            if is_valid_occupation_title(item.strip(" .;:-"))
+        ][:8]
+
+    def money_numbers(key: str) -> list[float]:
         raw = profile_snapshot.get(key)
         if isinstance(raw, (int, float)):
-            amount = float(raw)
-        else:
-            match = re.search(r"\d+(?:[.,]\d+)?", str(raw or "").replace(" ", ""))
-            amount = float(match.group().replace(",", ".")) if match else None
+            return [float(raw)]
+        text = re.split(r"\b(?:через|within|after|за)\b", str(raw or ""), maxsplit=1, flags=re.I)[0]
+        return [
+            float(match.replace(",", "."))
+            for match in re.findall(r"\d+(?:[.,]\d+)?", text.replace(" ", ""))
+        ]
+
+    def money_value(key: str) -> Money | None:
+        numbers = money_numbers(key)
+        amount = numbers[0] if numbers else None
         if amount is None:
             return None
         return Money(
@@ -1178,6 +1199,21 @@ def build_deterministic_assessment(
             currency=_optional_text(profile_snapshot.get("currency")),
             period="month",
         )
+
+    def income_meta() -> dict[str, Any]:
+        target_numbers = money_numbers("target_income")
+        current_numbers = money_numbers("current_income")
+        raw_target = str(profile_snapshot.get("target_income") or "")
+        timeline = re.search(r"(\d+\s*[-–—]\s*\d+\s*(?:месяц|мес|month|год|лет|year))", raw_target, re.I)
+        return {
+            "current_income": current_numbers[0] if current_numbers else None,
+            "target_income_low": target_numbers[0] if target_numbers else None,
+            "target_income_high": target_numbers[-1] if len(target_numbers) > 1 else (target_numbers[0] if target_numbers else None),
+            "target_income_period": "month",
+            "target_income_type": "net" if "net" in raw_target.casefold() or "чист" in raw_target.casefold() else None,
+            "target_timeline": timeline.group(1) if timeline else None,
+            "target_income_raw": raw_target or None,
+        }
 
     canonical = profile_snapshot.get("canonical_profile") if isinstance(profile_snapshot.get("canonical_profile"), dict) else {}
     canonical_facts = canonical.get("facts") if isinstance(canonical.get("facts"), list) else []
@@ -1236,6 +1272,7 @@ def build_deterministic_assessment(
         values(profile_snapshot, "target_roles")
         + values(story_analysis, "career_hypotheses", "target_roles", "role_hypotheses")
         + values(resume_analysis, "target_roles")
+        + extract_target_roles_from_answers()
     )
     snapshot_hypotheses = values(profile_snapshot, "route_hypotheses") if not explicit_target_roles else []
     target_roles = [role for role in concise(
@@ -1298,6 +1335,12 @@ def build_deterministic_assessment(
             "Process Improvement Specialist",
             "Team Operations Lead",
         ])
+    if cluster_generation_requested and any(marker in cluster_blob for marker in ("business analysis", "бизнес анализ", "requirements", "bpmn", "process", "процесс")):
+        cluster_routes.extend(["Business Analysis", "Business Process Analysis"])
+    if cluster_generation_requested and any(marker in cluster_blob for marker in ("обуч", "l&d", "learning", "enablement", "webinar", "вебинар", "курс")):
+        cluster_routes.extend(["L&D / Enablement", "Knowledge Management"])
+    if cluster_generation_requested and any(marker in " ".join(interests + target_roles).casefold() for marker in ("ai", "automation", "автомат")):
+        cluster_routes.append("AI Operations")
     if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("контрол", "quality", "дефект", "root cause", "rca")):
         cluster_routes.extend(["Quality Engineer / Supplier Quality", "Quality Assurance Specialist"])
     if industrial_context and cluster_generation_requested and any(marker in cluster_blob for marker in ("производ", "process", "процесс", "смен", "координ")):
@@ -1459,6 +1502,10 @@ def build_deterministic_assessment(
             selected_markers = ("консультац", "программ", "практик")
         elif "product marketing" in low:
             selected_markers = ("позиционир", "рынк", "b2b", "продукт")
+        elif "product discovery" in low:
+            selected_markers = ("исслед", "интерв", "клиент", "customer development", "product discovery", "продукт")
+        elif "edtech" in low:
+            selected_markers = ("обуч", "курс", "вебинар", "контент", "продукт")
         elif any(token in low for token in ("customer insights", "исследован")):
             selected_markers = ("исслед", "b2b", "клиент", "рынк")
         elif any(token in low for token in ("program manager", "менеджер программ")):
@@ -1472,7 +1519,13 @@ def build_deterministic_assessment(
         elif "product operations" in low:
             selected_markers = ("процесс", "координ", "межфунк", "баг", "данн", "продукт")
         elif "process improvement" in low:
-            selected_markers = ("процесс", "контрол", "обязанност")
+            selected_markers = ("процесс", "контрол", "обязанност", "улучш", "анализ")
+        elif any(token in low for token in ("business analysis", "business process")):
+            selected_markers = ("анализ", "процесс", "требован", "bpmn", "клиент", "исслед", "данн")
+        elif any(token in low for token in ("l&d", "enablement", "knowledge management")):
+            selected_markers = ("обуч", "курс", "вебинар", "материал", "knowledge", "знан", "контент")
+        elif "ai operations" in low:
+            selected_markers = ("ai", "automation", "автомат", "процесс", "данн", "инструмент")
         elif "team operations" in low:
             selected_markers = ("организ", "распредел", "контрол", "команд")
         elif any(token in low for token in ("operations manager", "business operations")):
@@ -1597,7 +1650,7 @@ def build_deterministic_assessment(
         function_overlap = len(route_tokens & confirmed_tokens)
         unwanted_overlap = len(route_tokens & unwanted_tokens)
         preference_blob = " ".join([desired_change or "", *unwanted, *interests]).casefold()
-        analytical_route = any(token in candidate["title"].casefold() for token in ("data", "analyst", "improvement", "planning", "quality engineer"))
+        analytical_route = any(token in candidate["title"].casefold() for token in ("data", "analyst", "analysis", "improvement", "planning", "quality engineer"))
         coordination_route = any(token in candidate["title"].casefold() for token in ("coordinator", "координ", "planner", "planning"))
         avoids_shop_floor = any(token in preference_blob for token in ("не хочу", "уйти", "меньше", "цех", "ручн", "физическ"))
         wants_analysis = any(token in preference_blob for token in ("аналит", "данн", "цифров", "компьют"))
@@ -1816,8 +1869,10 @@ def build_deterministic_assessment(
             return ("аудит поставщиков, разбор входящих дефектов и корректирующие действия", "оклад специалиста по качеству поставщиков", "аудиты поставщиков и аналитика несоответствий")
         if "quality engineer" in low:
             return ("RCA, работа с поставщиками и предупреждение повторных дефектов", "оклад инженера по качеству", "периодические аудиты при преимущественно аналитической работе")
-        if "production planning" in low or "production planner" in low or "process improvement" in low:
-            return ("планирование производства, поиск потерь и улучшение потока", "оклад производственного планировщика", "низкая физическая и высокая системная нагрузка")
+        if "production planning" in low or "production planner" in low:
+            return ("планирование производства, поиск потерь и улучшение потока", "оклад производственного планировщика", "системная нагрузка с проверкой реальных условий")
+        if "process improvement" in low:
+            return ("поиск слабых мест в процессе, описание причин и запуск улучшений", "оплата за улучшение процессов", "аналитическая и коммуникационная нагрузка")
         if "data analyst" in low or "manufacturing analyst" in low:
             return ("подготовка производственных данных, дашборды и поиск закономерностей", "оклад аналитика производственных данных", "компьютерная аналитическая работа без постоянного присутствия в цехе")
         if "project coordinator" in low:
@@ -1825,34 +1880,34 @@ def build_deterministic_assessment(
         if "quality assurance" in low:
             return ("ведение процедур качества, аудит документации и корректирующие действия", "оклад специалиста по обеспечению качества", "документальная нагрузка и точечные проверки процесса")
         if "insight" in low or "исслед" in low:
-            return ("исследование поведения и передача выводов команде продукта", "оклад за исследовательскую экспертизу", "низкая физическая, высокая аналитическая нагрузка")
+            return ("исследование поведения и передача выводов команде продукта", "оклад за исследовательскую экспертизу", "высокая аналитическая нагрузка")
         if "product marketing" in low or "продуктов" in low and "маркет" in low:
             return ("позиционирование, запуск и согласование продукта с продажами", "оклад за продуктовый маркетинг", "средняя коммуникационная и проектная нагрузка")
         if "program manager" in low or "программ" in low and "корпоратив" not in low:
-            return ("проектирование программы, координация участников и оценка результата", "оклад или проектная оплата за программу", "высокая координационная, низкая физическая нагрузка")
+            return ("проектирование программы, координация участников и оценка результата", "оклад или проектная оплата за программу", "высокая координационная нагрузка")
         if "супервиз" in low:
             return ("разбор практики коллег и профессиональная обратная связь", "оплата за супервизионные сессии", "высокая эмоциональная и экспертная нагрузка")
         if "корпоратив" in low:
             return ("консультации сотрудников в рамках корпоративной программы", "оклад или оплата сессий по договору с организацией", "эмоциональная нагрузка при стабильном потоке клиентов")
         if "support" in low or "поддерж" in low:
-            return ("удалённая диагностика и решение обращений", "оклад за экспертную поддержку", "меньше выездов, больше коммуникации")
+            return ("удалённая диагностика и решение обращений", "оклад за экспертную поддержку", "больше коммуникации и точности в решении обращений")
         if "coordinator" in low or "координ" in low:
-            return ("планирование работ и связь между клиентом и техниками", "оклад за координацию сервиса", "низкая физическая, более высокая организационная нагрузка")
+            return ("планирование работ и связь между клиентом и техниками", "оклад за координацию сервиса", "более высокая организационная нагрузка")
         if "trainer" in low or "тренер" in low or "обуч" in low:
-            return ("подготовка материалов и обучение специалистов", "оклад или проектная оплата за обучение", "низкая физическая, заметная публичная нагрузка")
+            return ("подготовка материалов и обучение специалистов", "оклад или проектная оплата за обучение", "заметная публичная нагрузка")
         if "warranty" in low or "гарант" in low:
-            return ("разбор гарантийных случаев и решений по обращениям", "оклад за гарантийную экспертизу", "низкая физическая, высокая точность документации")
+            return ("разбор гарантийных случаев и решений по обращениям", "оклад за гарантийную экспертизу", "высокая точность документации")
         if "sales" in low or "продаж" in low:
-            return ("подбор технического решения и коммерческие переговоры", "оклад и переменная часть", "низкая физическая, высокая коммерческая нагрузка")
+            return ("подбор технического решения и коммерческие переговоры", "оклад и переменная часть", "высокая коммерческая нагрузка")
         if "самостоятель" in low or "консалт" in low:
             return ("поиск клиентов и выполнение экспертных заказов", "выручка за заказы или B2B-контракты", "нагрузка и доход зависят от операционной модели")
         if "психолог" in low:
-            return ("консультации, ведение случаев и профессиональная документация", "оплата сессий или оклад в организации", "высокая эмоциональная нагрузка при низкой физической")
+            return ("консультации, ведение случаев и профессиональная документация", "оплата сессий или оклад в организации", "высокая эмоциональная нагрузка")
         if "маркет" in low:
             return ("маркетинговая стратегия, координация команды и оценка результата", "оклад руководителя маркетинга", "высокая управленческая и коммуникационная нагрузка")
         focus = ", ".join(route_functions[:2]) or "подтверждённые функции пользователя"
         return (
-            f"ежедневная работа опирается на то, что вы уже умеете: {focus}",
+            f"работа опирается на подтверждённые функции: {focus}",
             "оплата по трудовому договору или согласованному контракту",
             f"нагрузка зависит от ежедневной доли функций: {focus}",
         )
@@ -1935,7 +1990,7 @@ def build_deterministic_assessment(
         if source_facts:
             anchor_fact = source_facts[(index - 1) % len(source_facts)]
             why_patterns = (
-                f"Маршрут «{label}» опирается на подтверждённый факт: {anchor_fact}. Ежедневная проверяемая работа здесь — {daily_focus}.",
+                f"Маршрут «{label}» опирается на подтверждённый факт: {anchor_fact}. Проверяемая работа здесь — {daily_focus}.",
                 f"Для «{label}» главный переносимый актив — {anchor_fact}; перед входом нужно отдельно сверить требования, формат и доход.",
                 f"Гипотеза «{label}» выбрана как применение опыта «{anchor_fact}» в другой рабочей модели: {daily_focus}.",
                 f"Проверка «{label}» начинается с факта «{anchor_fact}» и должна подтвердить, что рынок оплачивает именно такую функцию.",
@@ -1961,6 +2016,7 @@ def build_deterministic_assessment(
             disconfirming_conditions=disconfirming,
             market_test=market_test,
             transferable_functions=route_functions,
+            matching_functions=route_functions,
             new_functions=[daily_focus],
             typical_tasks=[daily_focus],
             entry_path=entry_path,
@@ -1980,11 +2036,77 @@ def build_deterministic_assessment(
             ranking=dict(evaluation["ranking"]),
         ))
 
+    selected_titles = {item[0]["title"].casefold() for item in selected}
+    candidate_routes = [
+        CandidateRoute(
+            title=str(candidate["title"]),
+            matching_functions=list(candidate["functions"]),
+            industry_fit="опирается на текущий профессиональный контекст" if candidate["kind"] == "continuation" else "смежная проверяемая функция",
+            country_fit=evaluation["criteria"]["target_country_access"],
+            language_fit=evaluation["criteria"]["language_fit"],
+            legal_access_fit=evaluation["criteria"]["target_country_access"],
+            market_fit=evaluation["criteria"]["income_minimum_fit"],
+            entry_level_fit=evaluation["criteria"]["entry_level_realistic"],
+            evidence_ids=evidence_ids_for(list(candidate["source_facts"])),
+        )
+        for candidate, evaluation, _ in evaluated
+        if candidate["functions"]
+    ]
+    candidate_title_keys = {item.title.casefold() for item in candidate_routes}
+    for rejected in rejected_candidates:
+        title = str(rejected.get("title") or "").strip()
+        functions_rejected = [str(item) for item in rejected.get("functions") or [] if str(item).strip()]
+        if title and functions_rejected and title.casefold() not in candidate_title_keys:
+            candidate_routes.append(CandidateRoute(
+                title=title,
+                matching_functions=functions_rejected,
+                industry_fit="смежная проверяемая функция",
+                country_fit="market_check_required" if country_known else "unknown_country",
+                language_fit="level_check_required" if language_known else "unknown_language",
+                legal_access_fit="source_check_available" if authorization else "unknown_country",
+                market_fit="salary_data_required" if income_minimum else "unknown_income",
+                entry_level_fit="market_check_required",
+                evidence_ids=evidence_ids_for(functions_rejected),
+            ))
+            candidate_title_keys.add(title.casefold())
+    excluded_routes = [
+        ExcludedRoute(
+            title=str(candidate["title"]),
+            reason=(
+                "Отложено: по текущим фактам маршрут слабее shortlist или дублирует тот же переносимый набор функций."
+                if candidate["title"].casefold() not in selected_titles
+                else "Не исключался"
+            ),
+            blocking_factors=[
+                "меньше совпадений с подтверждёнными функциями",
+                "нужна отдельная проверка спроса, уровня входа и дохода",
+            ],
+            reconsider_if=[
+                "появится сильный кейс по этой функции",
+                "рынок подтвердит доход и задачи лучше, чем у shortlist",
+            ],
+        )
+        for candidate, evaluation, _ in evaluated
+        if candidate["functions"] and candidate["title"].casefold() not in selected_titles
+    ][:8]
+    for rejected in rejected_candidates:
+        if rejected.get("functions") and str(rejected.get("title", "")).casefold() not in {item.title.casefold() for item in excluded_routes}:
+            excluded_routes.append(ExcludedRoute(
+                title=str(rejected["title"]),
+                reason="Отложено как дублирующая гипотеза с тем же набором переносимых функций.",
+                blocking_factors=["не добавляет самостоятельного проверочного угла к shortlist"],
+                reconsider_if=["появятся отдельные требования рынка или более точное название роли"],
+            ))
+
     answered_questions = values(
         story_analysis, "answered_critical_questions", "answered_questions"
     ) + values(profile_snapshot, "answered_critical_questions")
     answered_blob = " ".join(answered_questions).casefold()
+    close_scores = len(selected) >= 2 and int(selected[0][1]["score"]) - int(selected[min(len(selected) - 1, 2)][1]["score"]) <= 12
     question_candidates: list[tuple[bool, tuple[str, ...], str]] = [
+        (close_scores, ("интереснее", "анализировать", "обучать", "руководить"), "Что вам сейчас интереснее проверять первым: анализировать процессы, обучать людей или руководить командой?"),
+        (close_scores and any("команд" in text.casefold() or "руковод" in text.casefold() for text in functions + current_roles), ("управлять людьми", "руководить людьми"), "Хотите ли вы дальше управлять людьми или лучше перейти в экспертную роль без прямого менеджмента?"),
+        (close_scores and any("analysis" in item[0]["title"].casefold() or "анал" in item[0]["title"].casefold() for item in selected), ("sql", "bpmn", "power bi"), "Готовы ли вы осваивать SQL, BPMN или Power BI, если выбранный маршрут потребует аналитического инструментария?"),
         (len(confirmed_functions) < 2, ("функц", "задач"), "Какие три конкретные рабочие функции вы выполняли чаще всего и хотите сохранить?"),
         (not country_known, ("стран", "рынок"), "В какой стране вы планируете искать работу?"),
         (not language_known, ("язык",), "На каких языках и на каком уровне вы можете работать?"),
@@ -2001,6 +2123,22 @@ def build_deterministic_assessment(
     alternatives = routes[1:4]
     recommended_id = primary[0].route_id
     fallback_confidence = "low" if insufficient_data or (not alternatives and len(confirmed_functions) >= 2) else "medium"
+
+    def professional_core_synthesis() -> list[str]:
+        if service_context and current_roles and bool(snapshot_current_roles):
+            return current_roles[:1]
+        blob = " ".join(functions + [current_role, desired_change or ""]).casefold()
+        if any(marker in blob for marker in ("процесс", "operations", "операц", "хаотич", "систем")) and any(marker in blob for marker in ("обуч", "l&d", "enablement", "люд")):
+            return ["Ваш капитал — превращать хаос в систему и помогать людям ей пользоваться"]
+        if any(marker in blob for marker in ("исслед", "клиент", "позиционир", "product", "продукт")):
+            return ["Ваш капитал — превращать исследования в продуктовые решения"]
+        if functions:
+            focus = ", ".join(functions[:2])
+            return [f"Ваш капитал — применять подтверждённые функции: {focus}"]
+        if current_roles:
+            return current_roles[:1]
+        return ["Подтверждённые функции отсутствуют"]
+
     assessment = CareerAssessment(
         assessment_id=assessment_id,
         session_id=session_id,
@@ -2027,11 +2165,7 @@ def build_deterministic_assessment(
             market_data_confidence=str(profile_snapshot.get("market_data_confidence") or "low"),
         ),
         identity=ProfessionalIdentity(
-            professional_core=(
-                current_roles[:1]
-                if service_context and current_roles and bool(snapshot_current_roles)
-                else confirmed_functions or current_roles[:1] or ["Подтверждённые функции отсутствуют"]
-            ),
+            professional_core=professional_core_synthesis(),
             core_description="Ядро определено через подтверждённые функции; название роли используется только как дополнительный контекст.",
             secondary_functions=functions[3:7],
             seniority_current=(
@@ -2055,6 +2189,8 @@ def build_deterministic_assessment(
         constraints=constraints,
         routes=CareerRoutes(
             primary_routes=primary,
+            candidate_routes=candidate_routes,
+            excluded_routes=excluded_routes,
             transition_routes=alternatives,
             recommended_route_id=recommended_id,
             alternative_route_ids=[route.route_id for route in alternatives],
@@ -2119,6 +2255,7 @@ def build_deterministic_assessment(
             },
             "candidate_count_before_selection": len(candidates),
             "measurable_results_count": len(achievements),
+            "income": income_meta(),
         },
     )
     validate_career_assessment(
@@ -2159,11 +2296,13 @@ def validate_career_assessment(
     forbidden_core_fragments = ("пользователь", "имеет опыт", "заинтересован", "смежные роли на основе")
     for index, title in enumerate(assessment.identity.professional_core):
         normalized = title.strip().casefold()
+        separators = len(re.findall(r"[,;•]|\s[-–—]\s", title))
         if (
             normalized.startswith("пользователь")
             or any(fragment in normalized for fragment in forbidden_core_fragments[1:])
             or title.strip().endswith(".")
-            or len(title.split()) > 8
+            or len(title.split()) > 18
+            or separators > 2
         ):
             add_error(
                 "RAW_USER_SUMMARY_AS_TITLE",
@@ -2461,6 +2600,35 @@ def validate_career_assessment(
     for diagnosis in ("у вас синдром самозванца", "вам не хватает уверенности", "вы боитесь перемен"):
         if diagnosis in report_text:
             add_error("PSYCHOLOGICAL_DIAGNOSIS", "$", "unsupported psychological assertion is forbidden", diagnosis)
+    unsupported_claim_markers = (
+        (("physical work", "физическ"), ("physical work", "физическ")),
+        (("travel", "выезд", "командиров"), ("travel", "выезд", "командиров")),
+        (("production planner", "производственн"), ("production planner", "производственн")),
+    )
+    for output_markers, evidence_markers in unsupported_claim_markers:
+        if any(marker in report_text for marker in output_markers) and not any(marker in evidence_text for marker in evidence_markers):
+            add_error(
+                "UNSUPPORTED_PERSONAL_CLAIM",
+                "$",
+                "personalized claim is not grounded in current profile evidence",
+                output_markers,
+                "critical",
+            )
+    if assessment.context.income_target:
+        target_absent_phrases = (
+            "целевой доход не указан",
+            "финансовая цель не указана",
+            "financial target not specified",
+            "target income not specified",
+        )
+        if any(phrase in report_text for phrase in target_absent_phrases):
+            add_error(
+                "TARGET_INCOME_DROPPED",
+                "$",
+                "target income exists in profile and must not be rendered as unspecified",
+                asdict(assessment.context.income_target),
+                "critical",
+            )
 
     desired_change = (assessment.user_choice.desired_change or "").casefold()
     preferred_directions = " ".join(assessment.user_choice.preferred_directions).casefold()
@@ -2542,7 +2710,44 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
         return False
 
     selected_routes = [route for route in [primary, *alternatives] if route is not None]
-    user_proposed_routes = [asdict(route) for route in selected_routes if proposed_by_user(route)]
+    selected_user_routes = [asdict(route) for route in selected_routes if proposed_by_user(route)]
+    debug_candidates = (
+        ((assessment.metadata.get("route_generation_debug") or {}).get("generated_route_candidates") or [])
+        if isinstance(assessment.metadata, dict) else []
+    )
+    user_proposed_routes = list(selected_user_routes)
+    known_user_titles = {str(item.get("title", "")).casefold() for item in user_proposed_routes}
+    for direction in preferred_directions:
+        matching_candidate = next((
+            item for item in debug_candidates
+            if isinstance(item, dict)
+            and (
+                direction.casefold() in str(item.get("title", "")).casefold()
+                or str(item.get("title", "")).casefold() in direction.casefold()
+            )
+        ), None)
+        if matching_candidate:
+            title = str(matching_candidate.get("title") or direction)
+            if title.casefold() not in known_user_titles:
+                user_proposed_routes.append({
+                    "title": title,
+                    "origin": "user_proposed",
+                    "score": matching_candidate.get("score"),
+                    "ranking": matching_candidate.get("ranking") or {},
+                    "status": "shortlist" if any(route.title.casefold() == title.casefold() for route in selected_routes) else "evaluated_not_shortlisted",
+                    "functions": matching_candidate.get("functions") or [],
+                })
+                known_user_titles.add(title.casefold())
+        elif direction.casefold() not in known_user_titles:
+            user_proposed_routes.append({
+                "title": direction,
+                "origin": "user_proposed",
+                "score": None,
+                "ranking": {},
+                "status": "needs_evidence",
+                "functions": [],
+            })
+            known_user_titles.add(direction.casefold())
     ai_discovered_routes = [asdict(route) for route in selected_routes if not proposed_by_user(route)][:3]
     known = list(dict.fromkeys([
         *assessment.identity.professional_core,
@@ -2572,6 +2777,7 @@ def validated_assessment_result(assessment: CareerAssessment) -> dict[str, Any]:
             "minimum": asdict(assessment.context.income_minimum) if assessment.context.income_minimum else None,
             "target": asdict(assessment.context.income_target) if assessment.context.income_target else None,
             "urgency": assessment.context.income_urgency,
+            "income": assessment.metadata.get("income") if isinstance(assessment.metadata, dict) else None,
         },
         "primary_route": asdict(primary) if primary else {},
         "alternative_routes": [asdict(route) for route in alternatives],
@@ -2603,6 +2809,17 @@ def render_short_conclusion(result: dict[str, Any]) -> str:
     matching_functions = primary.get("matching_functions") or primary.get("transferable_functions") or primary.get("preserves") or []
     user_titles = [str(item.get("title")) for item in user_routes[:3] if item.get("title")]
     ai_titles = [str(item.get("title")) for item in ai_routes[:3] if item.get("title")]
+    user_route_notes = []
+    for item in user_routes[:6]:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        status = str(item.get("status") or "shortlist")
+        score = item.get("score")
+        suffix = "в shortlist" if status == "shortlist" else "оценён, но не выбран в shortlist" if status == "evaluated_not_shortlisted" else "нужны факты для оценки"
+        if score is not None:
+            suffix += f", score {score}"
+        user_route_notes.append(f"{title} — {suffix}")
     known = [str(item) for item in (layers.get("known") or [])[:3] if str(item).strip()]
     market_confirmed = [str(item) for item in (layers.get("market_confirmed") or [])[:2] if str(item).strip()]
     needs_verification = [str(item) for item in (layers.get("needs_verification") or [])[:2] if str(item).strip()]
@@ -2617,7 +2834,9 @@ def render_short_conclusion(result: dict[str, Any]) -> str:
     ]
     if primary.get("why_better_than_excluded"):
         lines.append(f"Почему сильнее отсеянных: {primary['why_better_than_excluded']}")
-    lines.extend(["", f"Ваши варианты: {', '.join(user_titles) if user_titles else 'конкретные роли не были названы.'}"])
+    lines.extend(["", f"Варианты, которые назвали вы: {', '.join(user_titles) if user_titles else 'конкретные роли не были названы.'}"])
+    if user_route_notes:
+        lines.append("Оценка ваших вариантов: " + "; ".join(user_route_notes))
     lines.append(f"Новые гипотезы ИИ: {', '.join(ai_titles) if ai_titles else 'дополнительных маршрутов сверх ваших вариантов нет.'}")
     if result.get("main_insight"):
         lines.extend(["", f"Главный синтез: {result['main_insight']}"])
@@ -2634,16 +2853,44 @@ def render_short_conclusion(result: dict[str, Any]) -> str:
 def render_personalized_ai_prompt(result: dict[str, Any]) -> str:
     primary = result.get("primary_route") or {}
     alternatives = result.get("alternative_routes") or []
+    financial = result.get("financial_context") or {}
+    income_meta = financial.get("income") or {}
+    target = financial.get("target") or {}
+    target_text = ""
+    if income_meta.get("target_income_low"):
+        low = income_meta.get("target_income_low")
+        high = income_meta.get("target_income_high") or low
+        currency = (target or {}).get("currency") or "EUR"
+        period = income_meta.get("target_income_period") or (target or {}).get("period") or "month"
+        target_text = f"{low:g}–{high:g} {currency} / {period}"
+    elif target.get("amount"):
+        target_text = f"{target['amount']:g} {target.get('currency') or ''} / {target.get('period') or 'month'}".strip()
+    rejected = [
+        str(item.get("title"))
+        for item in (result.get("ai_discovered_routes") or [])
+        if isinstance(item, dict) and item.get("title")
+    ]
+    user_routes = [
+        str(item.get("title"))
+        for item in (result.get("user_proposed_routes") or [])
+        if isinstance(item, dict) and item.get("title")
+    ]
     return "\n".join([
-        "Персональный prompt для продолжения работы с ИИ:",
+        "Персональный prompt для 2–4 недель проверки карьерного маршрута:",
         "",
-        "Помоги мне проверить карьерное решение, не придумывая факты и не обнуляя мой опыт.",
-        f"Моё профессиональное ядро: {', '.join(result.get('professional_core') or [])}.",
+        "Помоги мне проверить карьерное решение. Не придумывай факты, не обнуляй мой seniority и всегда отделяй факты из профиля от гипотез рынка.",
+        f"Текущая ситуация: {', '.join(result.get('desired_changes') or []) or 'карьерный переход требует уточнения'}; ограничения: {', '.join(result.get('constraints') or []) or 'не зафиксированы'}.",
+        f"Профессиональный синтез: {result.get('main_insight') or ', '.join(result.get('professional_core') or [])}.",
+        f"Финансовая цель: {target_text or 'цель не указана в сохранённом профиле'}; финансовый минимум: {(financial.get('minimum') or {}).get('amount') or 'не указан'}.",
+        f"Чего я не хочу: {', '.join(result.get('rejected_functions') or []) or 'нежелательные задачи не зафиксированы'}.",
+        f"Мои исходные варианты: {', '.join(user_routes) or 'не названы'}.",
         f"Основной маршрут: {primary.get('title', '')}.",
         f"Альтернативы: {', '.join(str(item.get('title')) for item in alternatives[:3] if item.get('title')) or 'не выбраны'}.",
+        f"Отложенные или дополнительные маршруты для сравнения: {', '.join(rejected) or 'нет'}.",
         f"Функции, которые важно сохранить: {', '.join(primary.get('matching_functions') or primary.get('preserves') or [])}.",
-        f"Ограничения: {', '.join(result.get('constraints') or []) or 'не зафиксированы'}.",
-        "Сначала отдели известные факты от выводов и рыночных допущений. Затем предложи один способ проверить маршрут, один критерий отказа от него и адаптацию CV только под подтверждённые функции.",
+        f"CV evidence: {', '.join(result.get('confidence_layers', {}).get('known') or [])}.",
+        "Формат ответа: 1) что уже известно; 2) ranking маршрутов; 3) что может опровергнуть первый маршрут; 4) какие факты нужно собрать на этой неделе; 5) как обновить CV/LinkedIn только после выбора маршрута.",
+        "Weekly workflow: каждую неделю сравни 5–10 вакансий или 2 разговора со специалистами, обновляй ranking и явно показывай, какие гипотезы стали сильнее или слабее.",
     ])
 
 
@@ -2879,6 +3126,7 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
     confidence_labels = {"low": "низкая", "medium": "средняя", "high": "высокая"}
     candidate_html = "".join(
         f"<li><strong>{escape(item.title)}</strong>: {escape(', '.join(item.matching_functions))}; "
+        f"источник — {escape('ваш вариант' if any(direction.casefold() in item.title.casefold() or item.title.casefold() in direction.casefold() for direction in assessment.user_choice.preferred_directions) else 'гипотеза ИИ')}; "
         f"отрасль — {escape(item.industry_fit)}; рынок — {escape(item.market_fit)}; "
         f"уровень входа — {escape(item.entry_level_fit)}</li>"
         for item in assessment.routes.candidate_routes
@@ -2902,6 +3150,14 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         for route in assessment.routes.all_routes()[:4]
     )
     language_text = ", ".join(f"{item.language} {item.level or ''}".strip() for item in assessment.context.current_languages) or "не указаны"
+    def money_text(money: Money | None) -> str:
+        if money is None or money.amount is None:
+            return "не указан"
+        return f"{money.amount:g} {money.currency or currency} / {money.period or 'month'}"
+    income_context_html = (
+        f"<p><strong>Минимальный доход:</strong> {escape(money_text(assessment.context.income_minimum))}</p>"
+        f"<p><strong>Целевой доход:</strong> {escape(money_text(assessment.context.income_target))}</p>"
+    )
     steps = "".join(
         f"<article><h3>{escape(step.title)} · {step.duration_minutes} минут</h3>"
         f"<p><strong>Цель:</strong> {escape(step.purpose)}</p>"
@@ -2928,7 +3184,9 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         if assessment.context.income_minimum is None and assessment.context.income_target is None:
             return "не заявлен без сопоставимого источника"
         if case.amount is None:
-            return "не заявлен без сопоставимого источника"
+            if assessment.context.income_target:
+                return f"цель пользователя сохранена: {money_text(assessment.context.income_target)}; рыночный диапазон требует источника"
+            return "минимум указан; рыночный диапазон требует источника"
         return f"{case.amount:g} {case.currency} {case.tax_basis} / {case.period}"
     salary_html = "".join(
         f"<article><h3>{escape((assessment.routes.by_id(item.route_id) or recommended).title if (assessment.routes.by_id(item.route_id) or recommended) else item.route_id)}</h3>"
@@ -2958,7 +3216,12 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
         f"<p><strong>Изменение среды:</strong> {escape(item.environment_change)}</p><p><strong>Инструмент:</strong> {escape(item.tool)}</p></article>"
         for item in assessment.psychology_factors
     )
-    show_market_income = bool(assessment.context.target_countries or assessment.context.market_data_sources)
+    show_market_income = bool(
+        assessment.context.target_countries
+        or assessment.context.market_data_sources
+        or assessment.context.income_minimum
+        or assessment.context.income_target
+    )
     market_section = f"<h3>Анализ по маршрутам</h3>{market_html}" if show_market_income else ""
     salary_section = f'<section><h2>10. Прогноз зарплаты или дохода</h2>{salary_html}</section>' if show_market_income else ""
     scenario_number = 11 if show_market_income else 10
@@ -2975,7 +3238,7 @@ def render_assessment_html(assessment: CareerAssessment) -> str:
 <section><h2>1. Короткое человеческое резюме</h2><p>{escape(assessment.identity.core_description)}</p><p>{escape(assessment.conclusions.main_conclusion)}</p></section>
 <section><h2>2. Профессиональная идентичность</h2>{_list_html(assessment.identity.professional_core)}<p><strong>Подтверждённый уровень:</strong> {escape(assessment.identity.seniority_current)}</p><p>{escape(assessment.identity.seniority_notes)}</p><h3>Переносимые функции</h3>{_list_html(assessment.identity.transferable_functions)}<h3>Отраслевой опыт</h3>{_list_html(assessment.identity.industry_experience)}<h3>Капитал, который важно сохранить</h3>{_list_html(assessment.identity.professional_capital)}</section>
 <section><h2>3. Что мы услышали</h2>{_list_html(heard or known[:5])}</section>
-<section><h2>4. Контекст страны, языка и финансов</h2><p><strong>Страна проживания:</strong> {escape(residence)}</p><p><strong>Целевой рынок:</strong> {escape(', '.join(targets) or residence)}</p><p><strong>Валюта:</strong> {escape(currency)}</p><p><strong>Языки работы:</strong> {escape(language_text)}</p>{authorization_html}{work_format_html}{market_section}</section>
+<section><h2>4. Контекст страны, языка и финансов</h2><p><strong>Страна проживания:</strong> {escape(residence)}</p><p><strong>Целевой рынок:</strong> {escape(', '.join(targets) or residence)}</p><p><strong>Валюта:</strong> {escape(currency)}</p><p><strong>Языки работы:</strong> {escape(language_text)}</p>{income_context_html}{authorization_html}{work_format_html}{market_section}</section>
 {_routes_html('5. Рекомендуемый маршрут', [recommended] if recommended else [], evidence)}
 {_routes_html('6. Альтернативные маршруты', [route for route in assessment.routes.all_routes() if route and route.route_id in assessment.routes.alternative_route_ids][:3], evidence)}
 <section><h2>7. От longlist к выбору</h2><h3>Рассмотренные профессии</h3><ul>{candidate_html}</ul><h3>Отсеянные сейчас</h3>{excluded_html or '<p>Отсев не потребовался для предварительного заключения.</p>'}<h3>Сравнение shortlist</h3><table><thead><tr><th>Маршрут</th><th>Соответствие опыту</th><th>Сохранение дохода</th><th>Сохранение статуса</th><th>Скорость</th><th>Дообучение</th><th>Доступность на рынке</th><th>Психологическая устойчивость</th><th>Общий риск</th></tr></thead><tbody>{route_rows}</tbody></table></section>

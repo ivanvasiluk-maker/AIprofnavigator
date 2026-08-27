@@ -39,7 +39,7 @@ def test_short_conclusion_separates_user_routes_from_new_ai_hypotheses():
 
     assert primary.title in [item["title"] for item in view["user_proposed_routes"]]
     assert alternative.title in [item["title"] for item in view["ai_discovered_routes"]]
-    assert f"Ваши варианты: {primary.title}" in short
+    assert f"Варианты, которые назвали вы: {primary.title}" in short
     assert "Новые гипотезы ИИ:" in short and alternative.title in short
     assert "Известно:" in short
     assert "Выведено из фактов:" in short

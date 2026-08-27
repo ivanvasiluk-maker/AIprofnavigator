@@ -7540,9 +7540,8 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
                 assessment_id=stored_assessment.assessment_id,
                 report_generation_id=stored_assessment.assessment_id,
                 report_generation_status="ASSESSMENT_REUSED",
+                html_report_path=html_report_path,
             )
-            if Path(html_report_path).is_file():
-                await message.answer_document(FSInputFile(html_report_path), caption=t(lang, "web_report_ready"))
             await _track_event(
                 message,
                 state,
@@ -7858,12 +7857,6 @@ async def _build_and_send_career_assessment(message: Message, state: FSMContext,
     try:
         html_path = generate_assessment_html_file(assessment, settings.report_output_dir)
         html_report_path = _normalize_report_path(str(html_path))
-        html_url = _report_public_url(Path(html_report_path))
-        await message.answer_document(
-            FSInputFile(html_report_path),
-            caption=t(lang, "web_report_ready"),
-            reply_markup=telegram_link_keyboard("📄 Открыть в браузере", html_url) if html_url else None,
-        )
         await _track_event(
             message,
             state,
@@ -7927,11 +7920,22 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
     elif callback.message and action == "income":
         await callback.message.answer("Когда должен появиться дополнительный или новый доход?", reply_markup=income_urgency_keyboard(assessment.assessment_id))
     elif callback.message and action == "career":
+        await state.update_data(
+            awaiting_specialist_routing_choice=True,
+            specialist_guidance_mode="career",
+        )
         await callback.message.answer(
-            "Карьерный специалист поможет проверить основной маршрут, сравнить его с альтернативами и принять решение без обнуления опыта.",
+            "Разведём два запроса.\n\n"
+            "Карьерный вопрос — какой маршрут выбрать, как проверить рынок, как не обнулить опыт — лучше нести к профориентологу или карьерному специалисту.\n\n"
+            "Тревога, выгорание, страх начать, ощущение ступора — это отдельный психологический трек. Его не нужно маскировать под выбор профессии.\n\n"
+            "Выберите, какой трек сейчас главный.",
             reply_markup=specialist_routing_keyboard(),
         )
     elif callback.message and action == "psychologist":
+        await state.update_data(
+            awaiting_specialist_routing_choice=True,
+            specialist_guidance_mode="psych",
+        )
         if assessment.psychology_factors:
             factors = ", ".join(item.factor for item in assessment.psychology_factors[:3])
             await callback.message.answer(
@@ -7939,7 +7943,11 @@ async def assessment_followup_action(callback: CallbackQuery, state: FSMContext)
                 reply_markup=specialist_routing_keyboard(),
             )
         else:
-            await callback.message.answer("В заключении нет подтверждённых психологических факторов, поэтому направлять к психологу сейчас не буду.")
+            await callback.message.answer(
+                "В заключении нет подтверждённых психологических факторов, но если главная трудность сейчас тревога, выгорание или страх начать, это лучше обсуждать с психологом, а не решать сменой профессии.\n\n"
+                "Если вопрос именно про маршрут, рынок и CV — выбирайте карьерный трек.",
+                reply_markup=specialist_routing_keyboard(),
+            )
     elif callback.message and action == "group":
         if settings.support_group_telegram_url:
             await callback.message.answer(

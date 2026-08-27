@@ -576,7 +576,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         build.assert_not_awaited()
         self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REUSED")
         self.assertTrue(state.data["final_report_generated"])
-        message.answer_document.assert_awaited_once()
+        self.assertEqual(state.data["html_report_path"], str(html_path))
+        message.answer_document.assert_not_awaited()
 
     async def test_successful_repair_renders_html_and_sets_report_ready(self) -> None:
         class State:
@@ -617,7 +618,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.current_state, CareerFlow.REPORT_READY)
         self.assertEqual(state.data["report_generation_status"], "ASSESSMENT_REPAIRED")
         self.assertTrue(state.data["final_report_generated"])
-        message.answer_document.assert_awaited_once()
+        self.assertEqual(state.data["html_report_path"], str(html_path))
+        message.answer_document.assert_not_awaited()
         generated_meta = next(call.kwargs["meta"] for call in track_event.await_args_list if call.args[2] == "report_generated")
         self.assertEqual(generated_meta["commit_sha"], "5775a3abcd9f23ee2f2617fa0dd4390ce9c694c6")
         self.assertEqual(generated_meta["pipeline_version"], CAREER_PIPELINE_VERSION)
@@ -673,7 +675,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.data["report_generation_error"], "TimeoutError")
         self.assertTrue(state.data["final_report_generated"])
         self.assertTrue(any("Основной маршрут:" in call.args[0] for call in message.answer.await_args_list))
-        message.answer_document.assert_awaited_once()
+        self.assertEqual(state.data["html_report_path"], str(html_path))
+        message.answer_document.assert_not_awaited()
 
     async def test_incomplete_snapshot_warns_but_still_generates_assessment(self) -> None:
         class State:
@@ -726,7 +729,8 @@ class CareerAssessmentBuildTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(state.data["awaiting_route_context"])
         self.assertFalse(any("не буду блокировать результат" in call.args[0] for call in message.answer.await_args_list))
         self.assertTrue(any("Основной маршрут:" in call.args[0] for call in message.answer.await_args_list))
-        message.answer_document.assert_awaited_once()
+        self.assertEqual(state.data["html_report_path"], str(html_path))
+        message.answer_document.assert_not_awaited()
 
     async def test_html_failure_keeps_assessment_and_offers_document_retry(self) -> None:
         class State:

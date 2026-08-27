@@ -1,7 +1,15 @@
 import copy
 import re
 
-from services.career_assessment import build_deterministic_assessment, render_assessment_html, validate_career_assessment
+from services.career_assessment import (
+    CareerScenario,
+    build_deterministic_assessment,
+    render_assessment_html,
+    render_personalized_ai_prompt,
+    render_short_conclusion,
+    validate_career_assessment,
+    validated_assessment_result,
+)
 from services.report_snapshot import build_report_snapshot
 
 
@@ -96,3 +104,125 @@ def test_route_diversity_failure_is_not_hidden_by_medium_confidence():
     broken.routes.alternative_route_ids = []
     result = validate_career_assessment(broken)
     assert any(issue.code == "ROUTE_DIVERSITY_FAILURE" for issue in result.errors)
+
+
+def test_sergey_routes_income_and_contamination_regression():
+    assessment = build_deterministic_assessment(
+        {
+            "current_role": "Operations / Project Manager",
+            "career_goal": (
+                "Хочу выбрать между project management, business analysis, L&D, HR, "
+                "AI/automation и собственным консалтингом. Цель 3500-4000 EUR net через 12-24 months."
+            ),
+            "country_name": "Литва",
+            "city": "Вильнюс",
+            "currency": "EUR",
+            "current_income": "2300 EUR net",
+            "minimum_income": "3000 EUR net",
+            "target_income": "3500-4000 EUR net через 12-24 months",
+            "languages": ["Russian C2", "English B2"],
+            "target_roles": [
+                "Project Management",
+                "Business Analysis",
+                "L&D",
+                "HR",
+                "AI/automation",
+                "собственный консалтинг",
+            ],
+            "selected_career_priorities": ["Не обнулять опыт", "Рост дохода"],
+        },
+        {
+            "current_role": "Operations / Project Manager",
+            "confirmed_functions": [
+                "анализ рабочих процессов",
+                "структурирование хаотичной работы",
+                "координация команды",
+                "обучение пользователей",
+                "автоматизация рутинных операций",
+            ],
+            "skills": ["business analysis", "project management", "L&D", "AI automation"],
+            "tasks_to_avoid": ["много созвонов без результата"],
+            "interests": [
+                "Project Management",
+                "Business Analysis",
+                "L&D",
+                "HR",
+                "AI/automation",
+                "собственный консалтинг",
+            ],
+        },
+        {},
+        assessment_id="sergey-routes",
+        session_id="sergey-session",
+        profile_version="1",
+    )
+
+    assert assessment.metadata["income"]["current_income"] == 2300
+    assert assessment.metadata["income"]["target_income_low"] == 3500
+    assert assessment.metadata["income"]["target_income_high"] == 4000
+    assert assessment.metadata["income"]["target_income_type"] == "net"
+    assert len(assessment.routes.candidate_routes) >= 8
+    assert assessment.routes.excluded_routes
+    assert assessment.questions.unanswered_critical_questions
+
+    result = validated_assessment_result(assessment)
+    user_titles = {item["title"] for item in result["user_proposed_routes"]}
+    ai_titles = {item["title"] for item in result["ai_discovered_routes"]}
+    assert {"Project Management", "Business Analysis", "L&D", "HR", "AI/automation"} <= user_titles
+    assert not {"Project Management", "Business Analysis", "L&D"} & ai_titles
+
+    short = render_short_conclusion(result)
+    assert "Варианты, которые назвали вы" in short
+    assert "Оценка ваших вариантов" in short
+    assert "Новых гипотез ИИ нет" not in short
+
+    prompt = render_personalized_ai_prompt(result)
+    assert "3500–4000 EUR / month" in prompt
+    assert "Weekly workflow" in prompt
+
+    html = render_assessment_html(assessment).casefold()
+    assert "целевой доход" in html
+    assert "3500 eur / month" in html
+    assert "источник — ваш вариант" in html
+    assert "источник — гипотеза ии" in html
+    assert "<p><strong>совпавшие функции:</strong></p><ul></ul>" not in html
+    assert "ежедневная проверяемая работа здесь — ежедневная работа" not in html
+    assert "не заявлен без сопоставимого источника" not in html
+    for forbidden in ("physical work", "travel", "production planner", "физическ", "выезд", "производственн"):
+        assert forbidden not in html
+
+
+def test_unsupported_personal_claim_guardrail_rejects_contamination():
+    assessment = build_deterministic_assessment(
+        {"current_role": "Operations Manager", "target_income": "3500 EUR", "currency": "EUR"},
+        {
+            "current_role": "Operations Manager",
+            "confirmed_functions": ["анализ процессов", "координация команды", "обучение пользователей"],
+        },
+        {},
+        assessment_id="unsupported-claim",
+        session_id="s",
+        profile_version="1",
+    )
+    assessment.scenarios = [
+        CareerScenario(
+            "safe",
+            assessment.routes.recommended_route_id,
+            "1 месяц",
+            "Проверить маршрут",
+            "Найм",
+            ["анализ процессов"],
+            ["Меньше physical work and travel"],
+            "Доход проверить",
+            "4 часа",
+            "Минимальные",
+            ["проверить вакансии"],
+            ["10 вакансий"],
+            "есть спрос",
+            "нет спроса",
+            "вернуться к текущей роли",
+        )
+    ]
+
+    validation = validate_career_assessment(assessment)
+    assert any(issue.code == "UNSUPPORTED_PERSONAL_CLAIM" for issue in validation.errors)

@@ -29,7 +29,9 @@ class UniversalAssessmentFallbackTest(unittest.TestCase):
             role, functions, _ = self.PROFILES[index]
             validation = validate_career_assessment(assessment, snapshot_country_code="EE", snapshot_currency="EUR")
             self.assertTrue(validation.valid, validation.errors)
-            self.assertEqual(assessment.identity.professional_core, functions)
+            self.assertEqual(assessment.identity.transferable_functions, functions)
+            self.assertLessEqual(len(assessment.identity.professional_core), 2)
+            self.assertNotEqual(assessment.identity.professional_core, functions)
             self.assertEqual(assessment.routes.primary_routes[0].title, role)
             self.assertGreaterEqual(len(assessment.first_steps), 3)
             # The deterministic fallback must not manufacture a second profession

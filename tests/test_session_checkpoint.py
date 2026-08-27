@@ -1,6 +1,5 @@
+import asyncio
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from bot import SessionCheckpointMiddleware
 
@@ -24,8 +23,11 @@ class FakeState:
         }
 
 
-@pytest.mark.asyncio
-async def test_checkpoint_persists_active_question_identity_and_progress():
+def test_checkpoint_persists_active_question_identity_and_progress():
+    asyncio.run(_checkpoint_persists_active_question_identity_and_progress())
+
+
+async def _checkpoint_persists_active_question_identity_and_progress():
     handler = AsyncMock(return_value="handled")
     middleware = SessionCheckpointMiddleware()
 

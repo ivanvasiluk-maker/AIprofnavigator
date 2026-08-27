@@ -60,7 +60,7 @@ def test_explicit_rejection_blocks_route():
 
 def test_management_evidence_is_preserved():
     assessment = build_maria()
-    assert any("20" in value for value in assessment.identity.professional_core)
+    assert any("20" in value for value in assessment.identity.professional_capital + [item.fact for item in assessment.evidence])
     assert "15 лет" in assessment.identity.seniority_current
     assert "20" in assessment.identity.seniority_current
 
